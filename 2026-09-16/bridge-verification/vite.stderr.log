@@ -1,0 +1,23 @@
+node:internal/fs/watchers:323
+    const error = new UVException({
+                  ^
+
+Error: EBUSY: resource busy or locked, watch 'C:\Users\Deathx\Documents\Codex\2026-09-16\referenced-chatgpt-conversation-this-is-an\work\winwifi-security-auditor\WinWiFi.Desktop\obj\Release\net8.0-windows\WinWiFi.dll'
+    at FSWatcher.<computed> (node:internal/fs/watchers:323:19)
+    at Object.watch (node:fs:2609:36)
+    at createFsWatchInstance (file:///C:/Users/Deathx/Documents/Codex/2026-09-16/referenced-chatgpt-conversation-this-is-an/work/winwifi-security-auditor/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:22195:17)
+    at setFsWatchListener (file:///C:/Users/Deathx/Documents/Codex/2026-09-16/referenced-chatgpt-conversation-this-is-an/work/winwifi-security-auditor/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:22242:15)
+    at NodeFsHandler._watchWithNodeFs (file:///C:/Users/Deathx/Documents/Codex/2026-09-16/referenced-chatgpt-conversation-this-is-an/work/winwifi-security-auditor/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:22397:14)
+    at NodeFsHandler._handleFile (file:///C:/Users/Deathx/Documents/Codex/2026-09-16/referenced-chatgpt-conversation-this-is-an/work/winwifi-security-auditor/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:22461:23)
+    at NodeFsHandler._addToNodeFs (file:///C:/Users/Deathx/Documents/Codex/2026-09-16/referenced-chatgpt-conversation-this-is-an/work/winwifi-security-auditor/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:22703:21)
+Emitted 'error' event on FSWatcher instance at:
+    at FSWatcher._handleError (file:///C:/Users/Deathx/Documents/Codex/2026-09-16/referenced-chatgpt-conversation-this-is-an/work/winwifi-security-auditor/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:23896:10)
+    at NodeFsHandler._addToNodeFs (file:///C:/Users/Deathx/Documents/Codex/2026-09-16/referenced-chatgpt-conversation-this-is-an/work/winwifi-security-auditor/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:22711:18) {
+  errno: -4082,
+  syscall: 'watch',
+  code: 'EBUSY',
+  path: 'C:\\Users\\Deathx\\Documents\\Codex\\2026-09-16\\referenced-chatgpt-conversation-this-is-an\\work\\winwifi-security-auditor\\WinWiFi.Desktop\\obj\\Release\\net8.0-windows\\WinWiFi.dll',
+  filename: 'C:\\Users\\Deathx\\Documents\\Codex\\2026-09-16\\referenced-chatgpt-conversation-this-is-an\\work\\winwifi-security-auditor\\WinWiFi.Desktop\\obj\\Release\\net8.0-windows\\WinWiFi.dll'
+}
+
+Node.js v24.19.0

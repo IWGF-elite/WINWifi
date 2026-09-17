@@ -1,0 +1,948 @@
+<Window x:Class="WinWiFi.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:WinWiFi.ViewModels"
+        mc:Ignorable="d"
+        Title="WinWiFi Security Platform - .NET 8 Native Enterprise Auditor"
+        Height="920" Width="1450"
+        Background="{StaticResource BrushBgDark}"
+        WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <!-- 1. Top Ribbon Toolbar -->
+            <RowDefinition Height="*"/>    <!-- 2. Main Workspaces TabControl -->
+            <RowDefinition Height="180"/>  <!-- 3. Diagnostic Event & Audit Log Stream -->
+        </Grid.RowDefinitions>
+
+        <!-- 1. Top Ribbon Toolbar -->
+        <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="0,0,0,1" Padding="14,10">
+            <DockPanel LastChildFill="True">
+                <!-- Brand & Status -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                    <TextBlock Text="WINWIFI" FontWeight="Bold" FontSize="17" Foreground="#60A5FA" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <Border Background="#1E293B" CornerRadius="4" Padding="6,3" Margin="0,0,12,0">
+                        <TextBlock Text="NATIVE .NET 8 / WLANAPI" FontSize="10" FontWeight="SemiBold" Foreground="#94A3B8"/>
+                    </Border>
+                    
+                    <TextBlock Text="Adapter:" Foreground="{StaticResource BrushTextMuted}" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12"/>
+                    <ComboBox ItemsSource="{Binding Adapters}" SelectedItem="{Binding SelectedAdapter}" DisplayMemberPath="Name" Width="240" Height="28" Margin="0,0,14,0"/>
+
+                    <Border Background="#1E293B" CornerRadius="4" Padding="8,4" Margin="0,0,12,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Hop Ch: " Foreground="#94A3B8" FontSize="11"/>
+                            <TextBlock Text="{Binding CurrentChannel}" Foreground="#38BDF8" FontWeight="Bold" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="#1E293B" CornerRadius="4" Padding="8,4" Margin="0,0,14,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Source: " Foreground="#94A3B8" FontSize="11"/>
+                            <TextBlock Text="{Binding DataSourceProfile}" Foreground="#A7F3D0" FontWeight="SemiBold" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Visibility="{Binding IsInitializing, Converter={StaticResource BoolToVisConverter}}" Background="#0369A1" CornerRadius="4" Padding="8,4" Margin="0,0,14,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Startup: " Foreground="#BAE6FD" FontSize="11"/>
+                            <TextBlock Text="{Binding InitializationStatus}" Foreground="#FFFFFF" FontWeight="Bold" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Quick Action Buttons & Mode Switch -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <!-- Mode Switch: Beginner vs Expert -->
+                    <Button Command="{Binding ToggleExpertModeCommand}" Margin="0,0,10,0" Padding="10,4" Background="#1E293B" BorderBrush="#475569">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Mode: " Foreground="#94A3B8" FontSize="11"/>
+                            <TextBlock Text="Expert" FontWeight="Bold" Foreground="#38BDF8" FontSize="11"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button Command="{Binding ToggleScanCommand}" Margin="0,0,8,0" Padding="12,4" Background="#0F766E" BorderBrush="#14B8A6">
+                        <TextBlock Text="Scan / Pause" FontWeight="SemiBold" Foreground="#FFFFFF"/>
+                    </Button>
+                    <Button Content="Import PCAP" Click="OnImportPcapClick" Margin="0,0,8,0" Padding="12,4" Background="#334155" BorderBrush="#475569" Foreground="#F8FAFC"/>
+                    <Button Content="Self-Tests" Command="{Binding RunSelfTestsCommand}" Margin="0,0,8,0" Padding="12,4" Background="#334155" BorderBrush="#475569" Foreground="#F8FAFC"/>
+                    <Button Content="Export HTML Report" Command="{Binding ExportReportCommand}" Background="#2563EB" BorderBrush="#3B82F6" Padding="12,4" FontWeight="SemiBold" Foreground="#FFFFFF"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- 2. Main Workspaces Navigation TabControl -->
+        <TabControl Grid.Row="1" Background="{StaticResource BrushBgDark}" BorderThickness="0" Margin="10,6,10,6">
+            <TabControl.Resources>
+                <Style TargetType="TabItem">
+                    <Setter Property="Background" Value="#1E2430"/>
+                    <Setter Property="Foreground" Value="#94A3B8"/>
+                    <Setter Property="Padding" Value="14,8"/>
+                    <Setter Property="FontWeight" Value="SemiBold"/>
+                    <Setter Property="FontSize" Value="12"/>
+                    <Setter Property="Margin" Value="0,0,4,0"/>
+                </Style>
+            </TabControl.Resources>
+
+            <!-- TAB 1: COMMAND CENTER (EXECUTIVE / OPERATOR DASHBOARD) -->
+            <TabItem Header="Command Center">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/> <!-- Metrics KPI Cards -->
+                            <RowDefinition Height="*"/>    <!-- RF Health & Active Threats -->
+                        </Grid.RowDefinitions>
+
+                        <!-- KPI Cards Row -->
+                        <UniformGrid Grid.Row="0" Columns="6" Margin="0,0,0,16">
+                            <!-- Card 1: Discovered APs -->
+                            <Border Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="6" Padding="14" Margin="4">
+                                <StackPanel>
+                                    <TextBlock Text="DISCOVERED NETWORKS" FontSize="10" FontWeight="Bold" Foreground="#94A3B8"/>
+                                    <TextBlock Text="{Binding TotalApsCount}" FontSize="26" FontWeight="Bold" Foreground="#38BDF8" Margin="0,4,0,0"/>
+                                    <TextBlock Text="Persistent Observation" FontSize="10" Foreground="#64748B" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card 2: Threat Findings -->
+                            <Border Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="6" Padding="14" Margin="4">
+                                <StackPanel>
+                                    <TextBlock Text="ACTIVE THREATS" FontSize="10" FontWeight="Bold" Foreground="#F87171"/>
+                                    <TextBlock Text="{Binding ThreatsCount}" FontSize="26" FontWeight="Bold" Foreground="#EF4444" Margin="0,4,0,0"/>
+                                    <TextBlock Text="Multi-factor Heuristics" FontSize="10" Foreground="#64748B" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card 3: Rogue Candidates -->
+                            <Border Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="6" Padding="14" Margin="4">
+                                <StackPanel>
+                                    <TextBlock Text="ROGUE AP / CLONES" FontSize="10" FontWeight="Bold" Foreground="#FBBF24"/>
+                                    <TextBlock Text="{Binding RogueApsCount}" FontSize="26" FontWeight="Bold" Foreground="#F59E0B" Margin="0,4,0,0"/>
+                                    <TextBlock Text="Evil Twin Detection" FontSize="10" Foreground="#64748B" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card 4: Stations / Clients -->
+                            <Border Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="6" Padding="14" Margin="4">
+                                <StackPanel>
+                                    <TextBlock Text="STATION CLIENTS" FontSize="10" FontWeight="Bold" Foreground="#A7F3D0"/>
+                                    <TextBlock Text="{Binding StationsCount}" FontSize="26" FontWeight="Bold" Foreground="#10B981" Margin="0,4,0,0"/>
+                                    <TextBlock Text="Probe &amp; Association" FontSize="10" Foreground="#64748B" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card 5: Captured Handshakes -->
+                            <Border Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="6" Padding="14" Margin="4">
+                                <StackPanel>
+                                    <TextBlock Text="HANDSHAKES / PMKID" FontSize="10" FontWeight="Bold" Foreground="#C084FC"/>
+                                    <TextBlock Text="{Binding HandshakesCount}" FontSize="26" FontWeight="Bold" Foreground="#8B5CF6" Margin="0,4,0,0"/>
+                                    <TextBlock Text="Cryptographic Captures" FontSize="10" Foreground="#64748B" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card 6: Risk Meter -->
+                            <Border Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="6" Padding="14" Margin="4">
+                                <StackPanel>
+                                    <TextBlock Text="OVERALL RISK SCORE" FontSize="10" FontWeight="Bold" Foreground="#FDA4AF"/>
+                                    <TextBlock Text="{Binding OverallRiskScore, StringFormat='{}{0} / 100'}" FontSize="26" FontWeight="Bold" Foreground="#E11D48" Margin="0,4,0,0"/>
+                                    <TextBlock Text="Airspace Posture Index" FontSize="10" Foreground="#64748B" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
+
+                        <!-- Dashboard Split View -->
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3*"/>
+                                <ColumnDefinition Width="2*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left: High Priority Security Alerts -->
+                            <GroupBox Grid.Column="0" Header="High-Priority Security Alerts (NIST SP 800-153 &amp; PCI-DSS 4.0)" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,8,0">
+                                <DataGrid ItemsSource="{Binding ThreatFindings}" SelectedItem="{Binding SelectedThreatFinding}" AutoGenerateColumns="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="80"/>
+                                        <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="120"/>
+                                        <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="200"/>
+                                        <DataGridTextColumn Header="Target BSSID" Binding="{Binding RelatedBssid}" Width="130"/>
+                                        <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence, StringFormat='{}{0}%'}" Width="80"/>
+                                        <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </GroupBox>
+
+                            <!-- Right: RF Environment Health & Quick Triage -->
+                            <GroupBox Grid.Column="1" Header="RF Medium Health &amp; Enterprise Posture" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                                <StackPanel Margin="14">
+                                    <TextBlock Text="Band Allocation Breakdown:" FontWeight="Bold" Foreground="#E2E8F0" Margin="0,0,0,8"/>
+                                    
+                                    <Border Background="#1E2430" CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                        <DockPanel>
+                                            <TextBlock Text="2.4 GHz Legacy Spectrum:" Foreground="#94A3B8" DockPanel.Dock="Left"/>
+                                            <TextBlock Text="{Binding Band24Count, StringFormat='{}{0} Access Points'}" FontWeight="Bold" Foreground="#38BDF8" DockPanel.Dock="Right"/>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <Border Background="#1E2430" CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                        <DockPanel>
+                                            <TextBlock Text="5 GHz High-Throughput:" Foreground="#94A3B8" DockPanel.Dock="Left"/>
+                                            <TextBlock Text="{Binding Band5Count, StringFormat='{}{0} Access Points'}" FontWeight="Bold" Foreground="#34D399" DockPanel.Dock="Right"/>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <Border Background="#1E2430" CornerRadius="4" Padding="10" Margin="0,0,0,16">
+                                        <DockPanel>
+                                            <TextBlock Text="6 GHz Wi-Fi 6E/7 Band:" Foreground="#94A3B8" DockPanel.Dock="Left"/>
+                                            <TextBlock Text="{Binding Band6Count, StringFormat='{}{0} Access Points'}" FontWeight="Bold" Foreground="#A78BFA" DockPanel.Dock="Right"/>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <TextBlock Text="Channel Congestion Status:" FontWeight="Bold" Foreground="#E2E8F0" Margin="0,0,0,4"/>
+                                    <TextBlock Text="{Binding RfCongestionSummary}" FontSize="16" FontWeight="Bold" Foreground="#F59E0B" Margin="0,0,0,16"/>
+
+                                    <TextBlock Text="Operator Actions:" FontWeight="Bold" Foreground="#E2E8F0" Margin="0,0,0,8"/>
+                                    <Button Content="Promote Selected Threat to Incident" Command="{Binding PromoteThreatToIncidentCommand}" Padding="10,6" Background="#B91C1C" BorderBrush="#DC2626" Foreground="#FFFFFF" Margin="0,0,0,8"/>
+                                    <Button Content="Set Current Networks as Baseline" Command="{Binding SetBaselineFromCurrentCommand}" Padding="10,6" Background="#1E3A8A" BorderBrush="#2563EB" Foreground="#FFFFFF"/>
+                                </StackPanel>
+                            </GroupBox>
+                        </Grid>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- TAB 2: LIVE DISCOVERY -->
+            <TabItem Header="Live Discovery">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2.2*"/>
+                        <ColumnDefinition Width="1*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Persistent Observation DataGrid -->
+                    <GroupBox Grid.Column="0" Header="Persistent Access Point Registry (NDIS / WlanApi Observed)" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,8,0">
+                        <DataGrid ItemsSource="{Binding AccessPoints}" SelectedItem="{Binding SelectedAccessPoint}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="SSID" Binding="{Binding Ssid}" Width="150"/>
+                                <DataGridTextColumn Header="BSSID" Binding="{Binding Bssid}" Width="135"/>
+                                <DataGridTextColumn Header="Ch" Binding="{Binding Channel}" Width="40"/>
+                                <DataGridTextColumn Header="Band" Binding="{Binding Band}" Width="65"/>
+                                <DataGridTextColumn Header="RSSI" Binding="{Binding Rssi, StringFormat='{}{0} dBm'}" Width="65"/>
+                                <DataGridTextColumn Header="Security" Binding="{Binding Security}" Width="140"/>
+                                <DataGridTextColumn Header="Cipher" Binding="{Binding Cipher}" Width="75"/>
+                                <DataGridTextColumn Header="Score" Binding="{Binding SecurityScore}" Width="50"/>
+                                <DataGridCheckBoxColumn Header="PMF" Binding="{Binding PmfRequired}" Width="40"/>
+                                <DataGridCheckBoxColumn Header="WPS" Binding="{Binding IsWpsEnabled}" Width="40"/>
+                                <DataGridTextColumn Header="Vendor" Binding="{Binding Vendor}" Width="120"/>
+                                <DataGridTextColumn Header="Seen" Binding="{Binding HistoricalObservationsCount, StringFormat='{}#{0}'}" Width="50"/>
+                                <DataGridTextColumn Header="Last Seen" Binding="{Binding LastSeen}" Width="85"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <!-- Deep IE & Security Inspector -->
+                    <GroupBox Grid.Column="1" Header="Deep 802.11 IE &amp; Compliance Inspector" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="12" DataContext="{Binding SelectedAccessPoint}">
+                                <TextBlock Text="{Binding Ssid}" FontSize="18" FontWeight="Bold" Foreground="#F8FAFC" Margin="0,0,0,2"/>
+                                <TextBlock Text="{Binding Bssid}" FontFamily="Consolas" FontSize="12" Foreground="#94A3B8" Margin="0,0,0,10"/>
+
+                                <Border Background="#1E2430" CornerRadius="6" Padding="10" Margin="0,0,0,10">
+                                    <DockPanel>
+                                        <TextBlock Text="NIST SP 800-153 Score:" FontSize="11" Foreground="#94A3B8" DockPanel.Dock="Left" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding SecurityScore, StringFormat='{}{0} / 100'}" FontSize="20" FontWeight="Bold" Foreground="#38BDF8" DockPanel.Dock="Right"/>
+                                    </DockPanel>
+                                </Border>
+
+                                <TextBlock Text="Physical &amp; Protocol Attributes:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,4"/>
+                                <TextBlock Text="{Binding Channel, StringFormat='Operating Channel: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding ChannelWidth, StringFormat='Channel Width: {0} MHz'}" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding PhyType, StringFormat='PHY Protocol: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding Vendor, StringFormat='Hardware Vendor: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding FirstSeen, StringFormat='First Seen: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding LastSeen, StringFormat='Last Seen: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+
+                                <TextBlock Text="RSN &amp; Security Capabilities:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,10,0,4"/>
+                                <TextBlock Text="{Binding PmfRequired, StringFormat='PMF (802.11w) Mandatory: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding PmfCapable, StringFormat='PMF Capable: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding IsWpsEnabled, StringFormat='WPS Active: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding IsWpsLocked, StringFormat='WPS PIN Lockout: {0}'}" FontSize="11" Foreground="#94A3B8"/>
+
+                                <TextBlock Text="Compliance &amp; Vulnerability Findings:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,12,0,6"/>
+                                <ItemsControl ItemsSource="{Binding SecurityIssues}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#1A1F2B" BorderBrush="#333D4F" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,6">
+                                                <StackPanel>
+                                                    <DockPanel>
+                                                        <TextBlock Text="{Binding Title}" FontWeight="Bold" Foreground="#F87171" DockPanel.Dock="Left"/>
+                                                        <TextBlock Text="{Binding Severity}" Foreground="#FCA5A5" FontWeight="Bold" FontSize="10" DockPanel.Dock="Right"/>
+                                                    </DockPanel>
+                                                    <TextBlock Text="{Binding Description}" FontSize="11" Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,3,0,3"/>
+                                                    <TextBlock Text="{Binding Remediation, StringFormat='Remediation: {0}'}" FontSize="10" Foreground="#6EE7B7" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Button Content="Enroll in Enterprise Asset Inventory" Command="{Binding AddEnterpriseAssetCommand}" Background="#1E3A8A" BorderBrush="#2563EB" Foreground="#FFFFFF" Padding="8,5" Margin="0,10,0,0"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 3: STATIONS & CLIENTS WORKSPACE -->
+            <TabItem Header="Stations &amp; Clients">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="1*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Client Station DataGrid -->
+                    <GroupBox Grid.Column="0" Header="Observed 802.11 Client Stations (Real PCAP &amp; Frame Ingestion)" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,8,0">
+                        <DataGrid ItemsSource="{Binding StationClients}" SelectedItem="{Binding SelectedStationClient}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Client MAC" Binding="{Binding MacAddress}" Width="140"/>
+                                <DataGridTextColumn Header="Vendor / OUI" Binding="{Binding Vendor}" Width="140"/>
+                                <DataGridTextColumn Header="RSSI" Binding="{Binding Rssi, StringFormat='{}{0} dBm'}" Width="70"/>
+                                <DataGridTextColumn Header="Associated AP" Binding="{Binding AssociatedApBssid}" Width="160"/>
+                                <DataGridTextColumn Header="Probed Networks" Binding="{Binding DisplayProbeRequests}" Width="180"/>
+                                <DataGridCheckBoxColumn Header="Random MAC" Binding="{Binding IsRandomizedMac}" Width="85"/>
+                                <DataGridTextColumn Header="Last Seen" Binding="{Binding LastSeen}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <!-- Station Intelligence Inspector -->
+                    <GroupBox Grid.Column="1" Header="Station Behavioral Profile &amp; Probes" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="12" DataContext="{Binding SelectedStationClient}">
+                                <TextBlock Text="{Binding MacAddress}" FontSize="16" FontWeight="Bold" Foreground="#F8FAFC"/>
+                                <TextBlock Text="{Binding Vendor}" FontSize="12" Foreground="#38BDF8" Margin="0,2,0,10"/>
+
+                                <Border Background="#1E2430" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+                                    <StackPanel>
+                                        <TextBlock Text="Association Status (Strict Truth):" FontSize="11" Foreground="#94A3B8"/>
+                                        <TextBlock Text="{Binding AssociatedApBssid}" FontSize="13" FontWeight="Bold" Foreground="#E2E8F0" Margin="0,2,0,0"/>
+                                        <TextBlock Text="{Binding AssociatedApSsid, StringFormat='SSID: {0}'}" FontSize="11" Foreground="#64748B"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="Probed SSIDs (Preferred Network List):" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,6,0,4"/>
+                                <ItemsControl ItemsSource="{Binding ProbeRequests}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#1A1F2B" CornerRadius="4" Padding="6,4" Margin="0,0,0,4">
+                                                <TextBlock Text="{Binding}" Foreground="#A7F3D0" FontFamily="Consolas" FontSize="11"/>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 4: THREAT CENTER -->
+            <TabItem Header="Threat Center">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="1*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Column="0" Header="Heuristic Threat Detections (Multi-Factor Analysis Engine)" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,8,0">
+                        <DataGrid ItemsSource="{Binding ThreatFindings}" SelectedItem="{Binding SelectedThreatFinding}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="75"/>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="80"/>
+                                <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="120"/>
+                                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="200"/>
+                                <DataGridTextColumn Header="Target BSSID" Binding="{Binding RelatedBssid}" Width="135"/>
+                                <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence, StringFormat='{}{0}%'}" Width="80"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="85"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Column="1" Header="Threat Dossier &amp; Remediation" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="12" DataContext="{Binding SelectedThreatFinding}">
+                                <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="Bold" Foreground="#F87171" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Category}" FontSize="12" Foreground="#94A3B8" Margin="0,2,0,8"/>
+
+                                <Border Background="#1E2430" CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="Heuristic Evidence:" FontWeight="Bold" FontSize="11" Foreground="#94A3B8"/>
+                                        <TextBlock Text="{Binding Evidence}" FontSize="11" Foreground="#E2E8F0" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="Standard Violation Reference:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBlock Text="{Binding StandardReference}" FontSize="11" Foreground="#FBBF24" Margin="0,0,0,8"/>
+
+                                <TextBlock Text="Explanation:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBlock Text="{Binding Explanation}" FontSize="11" Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                                <TextBlock Text="Recommended Remediation:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBlock Text="{Binding Remediation}" FontSize="11" Foreground="#6EE7B7" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                                <Button Content="Promote Threat to Active Incident" Command="{Binding PromoteThreatToIncidentCommand}" Background="#B91C1C" BorderBrush="#DC2626" Foreground="#FFFFFF" Padding="8,6"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 5: DRIFT MONITOR -->
+            <TabItem Header="Drift Monitor">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Left">
+                                <TextBlock Text="Baseline Airspace Drift &amp; Integrity Monitor" FontWeight="Bold" Foreground="#E2E8F0"/>
+                                <TextBlock Text="Compares live scans against approved baseline configurations to identify unauthorized encryption downgrades, PMF removals, and channel shifts." FontSize="11" Foreground="#94A3B8"/>
+                            </StackPanel>
+                            <Button Content="Update Baseline Snapshot" Command="{Binding SetBaselineFromCurrentCommand}" DockPanel.Dock="Right" HorizontalAlignment="Right" Padding="12,5" Background="#1E3A8A" BorderBrush="#2563EB" Foreground="#FFFFFF"/>
+                        </DockPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="1" Header="Detected Security Drifts &amp; Profile Shifts" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <DataGrid ItemsSource="{Binding SecurityDrifts}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp}" Width="130"/>
+                                <DataGridTextColumn Header="BSSID" Binding="{Binding Bssid}" Width="135"/>
+                                <DataGridTextColumn Header="SSID" Binding="{Binding Ssid}" Width="140"/>
+                                <DataGridTextColumn Header="Drift Title" Binding="{Binding Title}" Width="200"/>
+                                <DataGridTextColumn Header="Baseline State" Binding="{Binding Before}" Width="180"/>
+                                <DataGridTextColumn Header="Current Observed State" Binding="{Binding After}" Width="180"/>
+                                <DataGridTextColumn Header="Risk Impact" Binding="{Binding RiskImpact}" Width="100"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 6: RF & SPECTRUM INTELLIGENCE -->
+            <TabItem Header="RF Intelligence">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="Genuine 802.11 RF Channel Occupancy (Non-Fabricated)" FontWeight="Bold" Foreground="#E2E8F0"/>
+                            <TextBlock Text="Strictly calculated from detected BSSID channels, widths, and RSSI levels. Highlights co-channel interference on standard non-overlapping channels (1, 6, 11)." FontSize="11" Foreground="#94A3B8"/>
+                        </StackPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="1" Header="Channel Distribution Summary" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <DataGrid ItemsSource="{Binding AccessPoints}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Ch" Binding="{Binding Channel}" Width="50"/>
+                                <DataGridTextColumn Header="Band" Binding="{Binding Band}" Width="80"/>
+                                <DataGridTextColumn Header="SSID" Binding="{Binding Ssid}" Width="180"/>
+                                <DataGridTextColumn Header="BSSID" Binding="{Binding Bssid}" Width="140"/>
+                                <DataGridTextColumn Header="Width" Binding="{Binding ChannelWidth, StringFormat='{}{0} MHz'}" Width="80"/>
+                                <DataGridTextColumn Header="RSSI" Binding="{Binding Rssi, StringFormat='{}{0} dBm'}" Width="80"/>
+                                <DataGridTextColumn Header="Signal Quality" Binding="{Binding SignalQuality, StringFormat='{}{0}%'}" Width="90"/>
+                                <DataGridTextColumn Header="Phy Type" Binding="{Binding PhyType}" Width="100"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 7: PACKET FORENSICS -->
+            <TabItem Header="Packet Forensics">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="1.4*"/>
+                        <RowDefinition Height="1*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Frame List -->
+                    <GroupBox Grid.Row="0" Header="Dissected 802.11 Capture Frames" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,0,8">
+                        <DataGrid ItemsSource="{Binding Packets}" SelectedItem="{Binding SelectedPacket}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Frame" Binding="{Binding FrameNumber}" Width="55"/>
+                                <DataGridTextColumn Header="Capture Time" Binding="{Binding Timestamp}" Width="160"/>
+                                <DataGridTextColumn Header="Type" Binding="{Binding FrameType}" Width="90"/>
+                                <DataGridTextColumn Header="Subtype" Binding="{Binding Subtype}" Width="120"/>
+                                <DataGridTextColumn Header="Source" Binding="{Binding SourceMac}" Width="135"/>
+                                <DataGridTextColumn Header="Destination" Binding="{Binding DestMac}" Width="135"/>
+                                <DataGridTextColumn Header="BSSID" Binding="{Binding Bssid}" Width="135"/>
+                                <DataGridTextColumn Header="Ch" Binding="{Binding Channel}" Width="40"/>
+                                <DataGridTextColumn Header="RSSI" Binding="{Binding Rssi, StringFormat='{}{0} dBm'}" Width="65"/>
+                                <DataGridTextColumn Header="Length" Binding="{Binding LengthBytes, StringFormat='{}{0} B'}" Width="65"/>
+                                <DataGridTextColumn Header="Info Summary" Binding="{Binding Info}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <!-- Hex and ASCII Byte Inspector -->
+                    <GroupBox Grid.Row="1" Header="Forensic Raw Packet Byte Inspector (Hex + ASCII)" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <Grid Margin="10" DataContext="{Binding SelectedPacket}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1*"/>
+                                <ColumnDefinition Width="1*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBox Grid.Column="0" Text="{Binding RawBytesHex, Mode=OneWay}" FontFamily="Consolas" FontSize="11" Background="#0F131A" Foreground="#38BDF8" IsReadOnly="True" VerticalScrollBarVisibility="Auto" Margin="0,0,6,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding RawBytesAscii, Mode=OneWay}" FontFamily="Consolas" FontSize="11" Background="#0F131A" Foreground="#A7F3D0" IsReadOnly="True" VerticalScrollBarVisibility="Auto"/>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 8: HANDSHAKE FORENSICS -->
+            <TabItem Header="Handshake Forensics">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.8*"/>
+                        <ColumnDefinition Width="1*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Column="0" Header="Captured EAPOL &amp; PMKID Cryptographic Exchanges" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,8,0">
+                        <DataGrid ItemsSource="{Binding Handshakes}" SelectedItem="{Binding SelectedHandshake}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="AP BSSID" Binding="{Binding ApBssid}" Width="135"/>
+                                <DataGridTextColumn Header="Client MAC" Binding="{Binding ClientMac}" Width="135"/>
+                                <DataGridTextColumn Header="SSID" Binding="{Binding Ssid}" Width="140"/>
+                                <DataGridTextColumn Header="Completeness" Binding="{Binding HandshakeCompleteness}" Width="160"/>
+                                <DataGridTextColumn Header="Hashcat Status" Binding="{Binding ExportReadiness}" Width="160"/>
+                                <DataGridTextColumn Header="Captured At" Binding="{Binding CapturedAt}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Column="1" Header="Cryptographic Nonce &amp; MIC Inspector" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="12" DataContext="{Binding SelectedHandshake}">
+                                <TextBlock Text="{Binding Ssid, StringFormat='SSID: {0}'}" FontSize="16" FontWeight="Bold" Foreground="#F8FAFC"/>
+                                <TextBlock Text="{Binding Type}" FontSize="12" Foreground="#94A3B8" Margin="0,2,0,8"/>
+
+                                <TextBlock Text="Key Descriptor Version:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBlock Text="{Binding KeyVersionDescription}" FontSize="11" Foreground="#38BDF8" Margin="0,0,0,6"/>
+
+                                <TextBlock Text="ANonce (AP Authenticator Nonce):" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBox Text="{Binding AnonCe, Mode=OneWay}" FontFamily="Consolas" FontSize="10" Background="#1E2430" Foreground="#38BDF8" IsReadOnly="True" Margin="0,0,0,6"/>
+
+                                <TextBlock Text="SNonce (Station Supplicant Nonce):" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBox Text="{Binding SnonCe, Mode=OneWay}" FontFamily="Consolas" FontSize="10" Background="#1E2430" Foreground="#38BDF8" IsReadOnly="True" Margin="0,0,0,6"/>
+
+                                <TextBlock Text="MIC (Message Integrity Code):" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBox Text="{Binding MicHex, Mode=OneWay}" FontFamily="Consolas" FontSize="10" Background="#1E2430" Foreground="#34D399" IsReadOnly="True" Margin="0,0,0,6"/>
+
+                                <TextBlock Text="PMKID (Zero-Client Handshake):" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBox Text="{Binding Pmkid, Mode=OneWay}" FontFamily="Consolas" FontSize="10" Background="#1E2430" Foreground="#F59E0B" IsReadOnly="True" Margin="0,0,0,10"/>
+
+                                <TextBlock Text="Hashcat Mode 22000 Export Line:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,4,0,2"/>
+                                <TextBox Text="{Binding HashcatFormat, Mode=OneWay}" FontFamily="Consolas" FontSize="10" Background="#1E2430" Foreground="#C084FC" IsReadOnly="True" TextWrapping="Wrap" Height="60" Margin="0,0,0,10"/>
+
+                                <Button Content="Copy Hashcat 22000 Line to Clipboard" Command="{Binding CopyHashcatFormatCommand}" Background="#7C3AED" BorderBrush="#8B5CF6" Foreground="#FFFFFF" Padding="8,6"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 9: INCIDENT CENTER -->
+            <TabItem Header="Incident Center">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="1*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Column="0" Header="Operational Wireless Incidents &amp; Triage Lifecycle" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,8,0">
+                        <DataGrid ItemsSource="{Binding Incidents}" SelectedItem="{Binding SelectedIncident}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Incident ID" Binding="{Binding Id}" Width="120"/>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="80"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
+                                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220"/>
+                                <DataGridTextColumn Header="Target BSSID" Binding="{Binding BssidTarget}" Width="135"/>
+                                <DataGridTextColumn Header="Assigned To" Binding="{Binding AssignedTo}" Width="140"/>
+                                <DataGridTextColumn Header="Created" Binding="{Binding CreatedAt}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Column="1" Header="Incident Triage &amp; Status Transition" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="12" DataContext="{Binding SelectedIncident}">
+                                <TextBlock Text="{Binding Id}" FontSize="12" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="Bold" Foreground="#F87171" TextWrapping="Wrap" Margin="0,2,0,8"/>
+
+                                <Border Background="#1E2430" CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="Summary &amp; Evidence:" FontWeight="Bold" FontSize="11" Foreground="#94A3B8"/>
+                                        <TextBlock Text="{Binding Summary}" FontSize="11" Foreground="#E2E8F0" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="Update Incident Status:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,8,0,6"/>
+                                <UniformGrid Columns="2" Margin="0,0,0,8">
+                                    <Button Content="Investigating" Command="{Binding UpdateIncidentStatusCommand}" CommandParameter="Investigating" Background="#D97706" BorderBrush="#F59E0B" Foreground="#FFFFFF" Padding="6,4" Margin="2"/>
+                                    <Button Content="Confirmed Rogue" Command="{Binding UpdateIncidentStatusCommand}" CommandParameter="Confirmed" Background="#DC2626" BorderBrush="#EF4444" Foreground="#FFFFFF" Padding="6,4" Margin="2"/>
+                                    <Button Content="False Positive" Command="{Binding UpdateIncidentStatusCommand}" CommandParameter="False Positive" Background="#475569" BorderBrush="#64748B" Foreground="#FFFFFF" Padding="6,4" Margin="2"/>
+                                    <Button Content="Resolve &amp; Close" Command="{Binding UpdateIncidentStatusCommand}" CommandParameter="Resolved" Background="#059669" BorderBrush="#10B981" Foreground="#FFFFFF" Padding="6,4" Margin="2"/>
+                                </UniformGrid>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 10: ENTERPRISE ASSET INVENTORY -->
+            <TabItem Header="Enterprise Assets">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="Authorized Enterprise Wireless Infrastructure Inventory" FontWeight="Bold" Foreground="#E2E8F0"/>
+                            <TextBlock Text="Maintain the authorized asset inventory. APs broadcasting corporate SSIDs not present here trigger immediate PCI-DSS 4.0 Rogue Hardware alerts." FontSize="11" Foreground="#94A3B8"/>
+                        </StackPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="1" Header="Approved Access Points &amp; Network Gateways" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <DataGrid ItemsSource="{Binding EnterpriseAssets}" SelectedItem="{Binding SelectedEnterpriseAsset}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Asset ID" Binding="{Binding Id}" Width="85"/>
+                                <DataGridTextColumn Header="MAC Address" Binding="{Binding MacAddress}" Width="135"/>
+                                <DataGridTextColumn Header="SSID" Binding="{Binding Ssid}" Width="150"/>
+                                <DataGridTextColumn Header="Classification" Binding="{Binding Classification}" Width="100"/>
+                                <DataGridTextColumn Header="Approval" Binding="{Binding ApprovalStatus}" Width="100"/>
+                                <DataGridTextColumn Header="Site" Binding="{Binding Site}" Width="120"/>
+                                <DataGridTextColumn Header="Building" Binding="{Binding Building}" Width="80"/>
+                                <DataGridTextColumn Header="Floor" Binding="{Binding AreaFloor}" Width="70"/>
+                                <DataGridTextColumn Header="Hardware Vendor" Binding="{Binding Vendor}" Width="130"/>
+                                <DataGridTextColumn Header="Last Verified" Binding="{Binding LastSeen}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 11: PROJECT DATABASE -->
+            <TabItem Header="Project Database">
+                <Grid Margin="12">
+                    <GroupBox Header="SQLite Relational Audit Projects (WAL Mode / Concurrent Storage)" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <DataGrid ItemsSource="{Binding Projects}" SelectedItem="{Binding CurrentProject}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Project ID" Binding="{Binding Id}" Width="120"/>
+                                <DataGridTextColumn Header="Project Name" Binding="{Binding Name}" Width="220"/>
+                                <DataGridTextColumn Header="Location" Binding="{Binding Location}" Width="140"/>
+                                <DataGridTextColumn Header="Auditor" Binding="{Binding AuditorName}" Width="150"/>
+                                <DataGridTextColumn Header="Saved APs" Binding="{Binding SavedNetworksCount}" Width="80"/>
+                                <DataGridTextColumn Header="Handshakes" Binding="{Binding CapturedHandshakesCount}" Width="90"/>
+                                <DataGridTextColumn Header="Created" Binding="{Binding CreatedAt}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 12: COMPLIANCE MATRIX (NIST SP 800-153 & PCI-DSS 4.0) -->
+            <TabItem Header="Compliance">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="NIST SP 800-153 &amp; PCI-DSS 4.0 Wireless Security Assessment Matrix" FontWeight="Bold" Foreground="#E2E8F0"/>
+                            <TextBlock Text="Automated policy evaluation checking open networks, deprecated ciphers, WPS registrar vulnerability, and PMF requirements against live radio observations." FontSize="11" Foreground="#94A3B8"/>
+                        </StackPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="1" Header="Security Compliance Rule Evaluation" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <DataGrid ItemsSource="{Binding ComplianceItems}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Rule ID" Binding="{Binding RuleId}" Width="80"/>
+                                <DataGridTextColumn Header="Standard" Binding="{Binding Standard}" Width="130"/>
+                                <DataGridTextColumn Header="Section" Binding="{Binding Section}" Width="80"/>
+                                <DataGridTextColumn Header="Requirement" Binding="{Binding Requirement}" Width="260"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80"/>
+                                <DataGridTextColumn Header="Violations" Binding="{Binding ViolationsCount}" Width="80"/>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="90"/>
+                                <DataGridTextColumn Header="Remediation Guidance" Binding="{Binding Recommendation}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 13: INVESTIGATIONS (DEEP INCIDENT CASE FILES) -->
+            <TabItem Header="Investigations">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.5*"/>
+                        <ColumnDefinition Width="1*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Column="0" Header="Active Case File Dossier" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,8,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="12" DataContext="{Binding SelectedIncident}">
+                                <DockPanel Margin="0,0,0,8">
+                                    <TextBlock Text="{Binding Id}" FontSize="18" FontWeight="Bold" Foreground="#38BDF8" DockPanel.Dock="Left"/>
+                                    <Border Background="#334155" CornerRadius="4" Padding="6,2" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                                        <TextBlock Text="{Binding Status}" FontWeight="SemiBold" Foreground="#A7F3D0" FontSize="11"/>
+                                    </Border>
+                                </DockPanel>
+
+                                <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold" Foreground="#F1F5F9" Margin="0,0,0,6"/>
+                                <TextBlock Text="{Binding Summary}" FontSize="11" Foreground="#CBD5E1" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="Target Infrastructure:" FontWeight="Bold" Foreground="#94A3B8" Margin="0,0,0,4"/>
+                                <TextBlock Text="{Binding BssidTarget, StringFormat='Target BSSID: {0}'}" FontFamily="Consolas" FontSize="11" Foreground="#38BDF8"/>
+                                <TextBlock Text="{Binding SsidTarget, StringFormat='Target SSID: {0}'}" FontSize="11" Foreground="#E2E8F0" Margin="0,0,0,10"/>
+
+                                <TextBlock Text="Chronological Case Timeline:" FontWeight="Bold" Foreground="#94A3B8" Margin="0,6,0,4"/>
+                                <DataGrid ItemsSource="{Binding Timeline}" AutoGenerateColumns="False" Height="140" Margin="0,0,0,10">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="130"/>
+                                        <DataGridTextColumn Header="Event" Binding="{Binding EventType}" Width="100"/>
+                                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+                                        <DataGridTextColumn Header="Actor" Binding="{Binding Actor}" Width="90"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </GroupBox>
+
+                    <GroupBox Grid.Column="1" Header="Auditor Case Notes &amp; Evidence Log" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <DataGrid Grid.Row="0" ItemsSource="{Binding SelectedIncident.Notes}" AutoGenerateColumns="False" Margin="0,0,0,10">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp}" Width="120"/>
+                                    <DataGridTextColumn Header="Auditor" Binding="{Binding Author}" Width="100"/>
+                                    <DataGridTextColumn Header="Note" Binding="{Binding Text}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <StackPanel Grid.Row="1">
+                                <TextBlock Text="Add Investigation Note:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,0,0,4"/>
+                                <TextBox Text="{Binding NewIncidentNoteText, UpdateSourceTrigger=PropertyChanged}" Background="#1E2430" Foreground="#F8FAFC" Height="50" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                <Button Content="Log Note to Incident" Command="{Binding AddIncidentNoteCommand}" Background="#2563EB" BorderBrush="#3B82F6" Foreground="#FFFFFF" Padding="10,6" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 14: EVIDENCE LOCKER -->
+            <TabItem Header="Evidence">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="Forensic Evidence Vault &amp; Chain-of-Custody Store" FontWeight="Bold" Foreground="#E2E8F0"/>
+                            <TextBlock Text="Immutable cryptographic artifacts: raw packet frames, EAPOL handshake nonces/MIC, SHA-256 signatures, and detection triggers." FontSize="11" Foreground="#94A3B8"/>
+                        </StackPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="1" Header="Logged Forensic Artifacts" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <DataGrid ItemsSource="{Binding EvidenceItems}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Evidence ID" Binding="{Binding EvidenceId}" Width="140"/>
+                                <DataGridTextColumn Header="Artifact Type" Binding="{Binding Type}" Width="160"/>
+                                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="200"/>
+                                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="160"/>
+                                <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp}" Width="130"/>
+                                <DataGridTextColumn Header="SHA-256 Digest" Binding="{Binding Sha256Checksum}" Width="140"/>
+                                <DataGridTextColumn Header="Payload Digest / Summary" Binding="{Binding PayloadSummary}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 15: HARDWARE DIAGNOSTICS -->
+            <TabItem Header="Diagnostics">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="Local System Wireless Subsystem &amp; Driver Diagnostics" FontWeight="Bold" Foreground="#E2E8F0"/>
+                            <TextBlock Text="Direct introspection of Windows NDIS 6.x WLAN interfaces, kernel state, elevation privileges, and supported radio bands." FontSize="11" Foreground="#94A3B8"/>
+                        </StackPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="1" Header="Active Wireless Interfaces (WlanApi Enumeration)" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <DataGrid ItemsSource="{Binding Adapters}" SelectedItem="{Binding SelectedAdapter}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Adapter Name" Binding="{Binding Name}" Width="220"/>
+                                <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="260"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90"/>
+                                <DataGridTextColumn Header="Current Channel" Binding="{Binding CurrentChannel}" Width="110"/>
+                                <DataGridCheckBoxColumn Header="Monitor Capable" Binding="{Binding MonitorModeSupported}" Width="110"/>
+                                <DataGridCheckBoxColumn Header="Hopping" Binding="{Binding IsChannelHopping}" Width="80"/>
+                                <DataGridTextColumn Header="Interface GUID" Binding="{Binding Id}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 16: REPORTS & BRIEFING -->
+            <TabItem Header="Reports">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="4" Padding="14" Margin="0,0,0,10">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Left">
+                                <TextBlock Text="Executive Wireless Security Audit Reporting Engine" FontWeight="Bold" FontSize="14" Foreground="#E2E8F0"/>
+                                <TextBlock Text="Generates self-contained, standalone HTML5 reports suitable for executive briefings and compliance archives." FontSize="11" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <Button Content="Generate &amp; Export HTML Report" Command="{Binding ExportReportCommand}" Background="#2563EB" BorderBrush="#3B82F6" Foreground="#FFFFFF" Padding="14,6" FontWeight="Bold" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="1" Header="Audit Report Summary &amp; Scope Overview" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="16">
+                                <TextBlock Text="Project Title: " FontWeight="Bold" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding CurrentProject.Name}" FontSize="16" FontWeight="Bold" Foreground="#F8FAFC" Margin="0,0,0,10"/>
+
+                                <TextBlock Text="Audit Scope &amp; Environment:" FontWeight="Bold" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding CurrentProject.Location, StringFormat='Location: {0}'}" FontSize="12" Foreground="#CBD5E1"/>
+                                <TextBlock Text="{Binding CurrentProject.AuditorName, StringFormat='Lead Auditor: {0}'}" FontSize="12" Foreground="#CBD5E1" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="Current Assessment Posture:" FontWeight="Bold" Foreground="#94A3B8" Margin="0,4,0,4"/>
+                                <TextBlock Text="{Binding OverallRiskScore, StringFormat='Overall Risk Index: {0} / 100'}" FontSize="13" Foreground="#F87171"/>
+                                <TextBlock Text="{Binding TotalApsCount, StringFormat='Total Access Points Evaluated: {0}'}" FontSize="12" Foreground="#E2E8F0"/>
+                                <TextBlock Text="{Binding RogueApsCount, StringFormat='Critical Rogue APs / Clones: {0}'}" FontSize="12" Foreground="#EF4444"/>
+                                <TextBlock Text="{Binding HandshakesCount, StringFormat='Cryptographic Handshakes Logged: {0}'}" FontSize="12" Foreground="#A7F3D0" Margin="0,0,0,16"/>
+
+                                <TextBlock Text="Compliance Standards Included in Report:" FontWeight="Bold" Foreground="#94A3B8" Margin="0,0,0,4"/>
+                                <TextBlock Text="• NIST SP 800-153: Guidelines for Securing Wireless Local Area Networks" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="• PCI-DSS v4.0 Requirement 11.2: Wireless Vulnerability Assessments" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="• IEEE 802.11w Protected Management Frames (PMF) Verification" FontSize="11" Foreground="#94A3B8"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 17: HISTORY & AUDIT LOGS -->
+            <TabItem Header="History">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BrushSurfaceDark}" BorderBrush="{StaticResource BrushBorderDark}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="Persistent Subsystem Audit History &amp; Diagnostics Trail" FontWeight="Bold" Foreground="#E2E8F0"/>
+                            <TextBlock Text="Chronological event log stored in SQLite database (winwifi_audit.db). Tracks scanner sweeps, detections, and user triage." FontSize="11" Foreground="#94A3B8"/>
+                        </StackPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="1" Header="Complete Subsystem Event Ledger" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <DataGrid ItemsSource="{Binding Logs}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp}" Width="130"/>
+                                <DataGridTextColumn Header="Severity Level" Binding="{Binding Level}" Width="90"/>
+                                <DataGridTextColumn Header="Subsystem Source" Binding="{Binding Source}" Width="140"/>
+                                <DataGridTextColumn Header="Event Detail" Binding="{Binding Message}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- TAB 18: SETTINGS & LAB -->
+            <TabItem Header="Settings / Lab">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.4*"/>
+                        <ColumnDefinition Width="1*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Column="0" Header="Offline Training Scenarios &amp; Interactive Security Labs" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="0,0,8,0">
+                        <DataGrid ItemsSource="{Binding LabScenarios}" SelectedItem="{Binding SelectedLabScenario}" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Scenario ID" Binding="{Binding Id}" Width="80"/>
+                                <DataGridTextColumn Header="Scenario Title" Binding="{Binding Title}" Width="220"/>
+                                <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="110"/>
+                                <DataGridTextColumn Header="Difficulty" Binding="{Binding Difficulty}" Width="90"/>
+                                <DataGridTextColumn Header="Target Threat" Binding="{Binding TargetThreat}" Width="120"/>
+                                <DataGridTextColumn Header="Learning Objective" Binding="{Binding LearningObjective}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Column="1" Header="Platform Preferences &amp; Database Maintenance" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="14">
+                                <TextBlock Text="Presentation Profile:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,0,0,6"/>
+                                <Button Command="{Binding ToggleExpertModeCommand}" Background="#1E293B" BorderBrush="#475569" Padding="10,6" Margin="0,0,0,14">
+                                    <TextBlock Text="Toggle Beginner / Expert Mode" FontWeight="SemiBold" Foreground="#38BDF8"/>
+                                </Button>
+
+                                <TextBlock Text="Relational Database Maintenance:" FontWeight="Bold" Foreground="#CBD5E1" Margin="0,0,0,6"/>
+                                <Border Background="#1E2430" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+                                    <StackPanel>
+                                        <TextBlock Text="Database: winwifi_audit.db (SQLite WAL Mode)" FontSize="11" Foreground="#94A3B8"/>
+                                        <TextBlock Text="Engine: Microsoft.Data.Sqlite 8.0" FontSize="11" Foreground="#64748B" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Button Content="Run Automated Native Verification Suite" Command="{Binding RunSelfTestsCommand}" Background="#0F766E" BorderBrush="#14B8A6" Foreground="#FFFFFF" Padding="10,6" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                                <Button Content="Export Full Audit Report to Desktop" Command="{Binding ExportReportCommand}" Background="#2563EB" BorderBrush="#3B82F6" Foreground="#FFFFFF" Padding="10,6" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <!-- 3. Bottom Diagnostic Event Stream & Console -->
+        <GroupBox Grid.Row="2" Header="Diagnostic Audit Event Stream &amp; Subsystem Log (SQLite Persistent)" Foreground="#94A3B8" BorderBrush="{StaticResource BrushBorderDark}" Margin="10,0,10,10">
+            <DataGrid ItemsSource="{Binding Logs}" AutoGenerateColumns="False">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp}" Width="110"/>
+                    <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="75"/>
+                    <DataGridTextColumn Header="Subsystem" Binding="{Binding Source}" Width="140"/>
+                    <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
+    </Grid>
+</Window>

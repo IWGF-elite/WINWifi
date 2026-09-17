@@ -1,0 +1,32 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34330.188
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "WinWiFi.Desktop", "WinWiFi.Desktop\WinWiFi.Desktop.csproj", "{A31B6940-5712-4BD8-9A71-29C3516E44A1}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "WinWiFi.CLI", "WinWiFi.CLI\WinWiFi.CLI.csproj", "{B89C3241-1153-4CF2-9C8E-7865239DFB02}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A31B6940-5712-4BD8-9A71-29C3516E44A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A31B6940-5712-4BD8-9A71-29C3516E44A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A31B6940-5712-4BD8-9A71-29C3516E44A1}.Debug|x64.ActiveCfg = Debug|x64
+		{A31B6940-5712-4BD8-9A71-29C3516E44A1}.Debug|x64.Build.0 = Debug|x64
+		{A31B6940-5712-4BD8-9A71-29C3516E44A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A31B6940-5712-4BD8-9A71-29C3516E44A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A31B6940-5712-4BD8-9A71-29C3516E44A1}.Release|x64.ActiveCfg = Release|x64
+		{A31B6940-5712-4BD8-9A71-29C3516E44A1}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {B1C7480E-73D2-4752-BE9B-4DCE28C91302}
+	EndGlobalSection
+EndGlobal
