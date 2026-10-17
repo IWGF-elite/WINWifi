@@ -1,8 +1,0 @@
-==========================================================
-  WinWiFi 3.0.0 Local Native Bridge Daemon (: 38990)    
-==========================================================
-[Bridge] Starting HTTP / SSE bridge on http://127.0.0.1:38990/
-[Bridge] Exposing real-time wlanapi.dll & netsh telemetry to Web UI
-[Bridge] Press Ctrl+C to terminate the bridge daemon.
-
-[HttpBridgeServer] Listening on http://127.0.0.1:38990/
