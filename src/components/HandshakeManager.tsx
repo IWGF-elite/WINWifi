@@ -182,7 +182,13 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
       ) : (
         <div className="space-y-3">
           {handshakes.map((h, idx) => {
-            const isForensic = h.origin === 'IMPORTED' || (!h.isSimulated && h.origin !== 'TRAINING');
+            // A handshake is only ever genuinely "forensic" when it came
+            // from a real imported capture file. isSimulated must win
+            // regardless of origin tag — this app has no monitor-mode
+            // packet capture path, so any client-generated handshake is
+            // fabricated and must be labeled as such, never as a live
+            // over-the-air capture.
+            const isForensic = h.origin === 'IMPORTED' && !h.isSimulated;
             return (
               <div
                 key={`${h.apBssid}-${idx}`}
@@ -204,8 +210,8 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
                             IMPORTED FORENSIC DATA
                           </span>
                         ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
-                            LIVE OVER-THE-AIR CAPTURE
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/30">
+                            SIMULATED (NO MONITOR-MODE CAPTURE)
                           </span>
                         )}
                       </div>

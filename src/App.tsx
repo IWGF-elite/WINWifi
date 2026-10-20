@@ -232,7 +232,7 @@ export default function App() {
           ipAssigned: '172.16.8.109',
         }
       ],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '70:81:05:32:89:FE',
@@ -269,7 +269,7 @@ export default function App() {
           ipAssigned: '10.240.16.55',
         }
       ],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '00:26:86:14:99:A2',
@@ -294,7 +294,7 @@ export default function App() {
       securityScore: 82,
       issues: [],
       clients: [],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '9C:53:22:8A:10:04',
@@ -319,7 +319,7 @@ export default function App() {
       securityScore: 80,
       issues: [],
       clients: [],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '24:F5:A2:81:33:90',
@@ -356,7 +356,7 @@ export default function App() {
           ipAssigned: '10.240.15.22',
         }
       ],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '40:B0:34:66:91:02',
@@ -381,7 +381,7 @@ export default function App() {
       securityScore: 82,
       issues: [],
       clients: [],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '00:1E:06:55:7A:19',
@@ -406,7 +406,7 @@ export default function App() {
       securityScore: 92,
       issues: [],
       clients: [],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: 'B8:8D:12:44:81:AA',
@@ -431,7 +431,7 @@ export default function App() {
       securityScore: 84,
       issues: [],
       clients: [],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: 'D8:47:32:77:90:1C',
@@ -456,7 +456,7 @@ export default function App() {
       securityScore: 90,
       issues: [],
       clients: [],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '18:E8:29:44:01:FE',
@@ -481,7 +481,7 @@ export default function App() {
       securityScore: 78,
       issues: [],
       clients: [],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '04:42:1A:99:82:31',
@@ -506,7 +506,7 @@ export default function App() {
       securityScore: 82,
       issues: [],
       clients: [],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     },
     {
       bssid: '68:72:51:30:99:04',
@@ -543,7 +543,7 @@ export default function App() {
           ipAssigned: '10.240.13.44',
         }
       ],
-      dataSourceOrigin: 'LIVE_WINDOWS',
+      dataSourceOrigin: 'TRAINING',
     }
   ]);
 
@@ -565,6 +565,22 @@ export default function App() {
 
   // Immediate Hardware Scan Refresh
   const handleRefreshScan = async () => {
+    if (dataSourceProfile === 'LIVE_WINDOWS') {
+      // Live mode: trigger an immediate real poll of the local scanner
+      // service instead of fabricating jitter.
+      const ok = await scannerService.fetchOnce();
+      const log = db.appendLog({
+        level: ok ? 'SUCCESS' : 'WARN',
+        source: 'SCANNER',
+        message: ok
+          ? `Immediate live scan refresh completed via local scanner service. Updated telemetry for ${accessPoints.length} BSSIDs.`
+          : `Immediate live scan refresh failed — local scanner service unreachable at ${scannerService.getEndpoint()}.`,
+      });
+      setLogs((prev) => [log, ...prev]);
+      return;
+    }
+
+    // Demo/benchmark/training modes only: simulate a refreshed sweep.
     const hoppingChannels = [1, 6, 11, 36, 40, 44, 48, 149, 153, 161];
     const randCh = hoppingChannels[Math.floor(Math.random() * hoppingChannels.length)];
     setCurrentChannel(randCh);
@@ -586,7 +602,7 @@ export default function App() {
     const log = db.appendLog({
       level: 'SUCCESS',
       source: 'SCANNER',
-      message: `Immediate RF spectrum scan cycle completed across 36 channels (2.4/5/6 GHz). Updated telemetry for ${accessPoints.length} BSSIDs.`,
+      message: `Simulated RF spectrum scan cycle completed across 36 channels (2.4/5/6 GHz). Updated telemetry for ${accessPoints.length} BSSIDs.`,
     });
     setLogs((prev) => [log, ...prev]);
   };
@@ -677,9 +693,40 @@ export default function App() {
     setLogs((prev) => [log, ...prev]);
   };
 
-  // Active RF Scanning & Dynamic Discovery Loop
+  // Live scanner wiring: when in LIVE_WINDOWS mode, accessPoints and
+  // scannerStatus come strictly from the real local scanner service
+  // (wifi_scanner_service.py via netsh), never from fabricated data.
+  useEffect(() => {
+    if (dataSourceProfile !== 'LIVE_WINDOWS') {
+      scannerService.stopPolling();
+      return;
+    }
+
+    const unsubNetworks = scannerService.subscribeNetworks((networks) => {
+      setAccessPoints(networks);
+    });
+    const unsubStatus = scannerService.subscribeStatus((status) => {
+      setScannerStatus(status);
+      setBridgeState(status.isOnline ? 'CONNECTED' : 'DISCONNECTED');
+    });
+    scannerService.startPolling();
+
+    return () => {
+      unsubNetworks();
+      unsubStatus();
+      scannerService.stopPolling();
+    };
+  }, [dataSourceProfile, scannerService]);
+
+  // Simulated RF Scanning & Dynamic Discovery Loop
+  // IMPORTANT: this generates fabricated jitter and fabricated "newly
+  // discovered" access points for the Benchmark/Training/Offline demo
+  // modes only. It must never run in LIVE_WINDOWS mode, where
+  // accessPoints are driven exclusively by the real scanner above —
+  // otherwise fake networks would display under a "live" badge.
   useEffect(() => {
     if (!isScanning) return;
+    if (dataSourceProfile === 'LIVE_WINDOWS') return;
 
     const hoppingChannels = [1, 6, 11, 36, 40, 44, 48, 149, 153, 161, 69];
     let hopIndex = 0;
@@ -765,7 +812,7 @@ export default function App() {
     }, 800);
 
     return () => clearInterval(interval);
-  }, [isScanning, accessPoints, db]);
+  }, [isScanning, accessPoints, db, dataSourceProfile]);
 
   // Capture Handshake: Fully interactive across all modes
   const handleCaptureHandshake = useCallback((ap: AccessPoint) => {
@@ -1203,6 +1250,9 @@ export default function App() {
               setSelectedBssid(ap.bssid);
               handleNavigate('networks');
             }}
+            scannerStatus={scannerStatus}
+            onRetryScanner={() => scannerService.fetchOnce()}
+            onUpdateScannerEndpoint={(url) => scannerService.setEndpoint(url)}
           />
         )}
 
@@ -1262,6 +1312,9 @@ export default function App() {
                 initialFilter={tabFilterParam}
                 onSelectAP={(ap) => setSelectedBssid(ap.bssid)}
                 onUpdateAP={handleUpdateAP}
+                scannerStatus={scannerStatus}
+                onRetryScanner={() => scannerService.fetchOnce()}
+                onUpdateScannerEndpoint={(url) => scannerService.setEndpoint(url)}
               />
             ) : (
               <NetworkDiscovery
@@ -1276,6 +1329,9 @@ export default function App() {
                 onRefreshScan={handleRefreshScan}
                 onOpenBridgeConfig={() => setShowArchitectureModal(true)}
                 isDarkMode={isDarkMode}
+                scannerStatus={scannerStatus}
+                onRetryScanner={() => scannerService.fetchOnce()}
+                onUpdateScannerEndpoint={(url) => scannerService.setEndpoint(url)}
               />
             )}
 
