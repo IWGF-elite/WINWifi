@@ -24,6 +24,7 @@ interface ThreatCenterProps {
   onNavigate: (tab: ActiveTab, filterParam?: string) => void;
   onSelectAP: (ap: AccessPoint) => void;
   onRefreshThreats: () => void;
+  onTriageThreat?: (bssid: string, status: 'Trusted' | 'False Positive' | 'Confirmed Rogue') => void;
 }
 
 export const ThreatCenter: React.FC<ThreatCenterProps> = ({
@@ -32,7 +33,8 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
   uiMode,
   onNavigate,
   onSelectAP,
-  onRefreshThreats
+  onRefreshThreats,
+  onTriageThreat
 }) => {
   const threatEngine = ThreatEngine.getInstance();
   const [activeSubTab, setActiveSubTab] = useState<'rogues' | 'changes'>('rogues');
@@ -41,7 +43,11 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
   const rogueAPs = accessPoints.filter(a => a.isRogueCandidate || a.classification === 'Rogue' || a.classification === 'Suspicious');
 
   const handleAnalystOverride = (bssid: string, status: 'Trusted' | 'False Positive' | 'Confirmed Rogue') => {
-    threatEngine.markAnalystClassification(bssid, status);
+    if (onTriageThreat) {
+      onTriageThreat(bssid, status);
+    } else {
+      threatEngine.markAnalystClassification(bssid, status);
+    }
     onRefreshThreats();
   };
 

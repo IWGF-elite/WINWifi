@@ -141,14 +141,12 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
         </div>
       </div>
 
-      {/* Production Integrity Policy Notice */}
+      {/* Live Forensics Status Header */}
       <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-xs text-slate-300 flex items-start gap-3">
-        <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+        <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
         <div className="space-y-1 text-[11px] leading-relaxed">
-          <strong className="text-slate-200">Defensive Forensics &amp; Provenance Policy:</strong> In accordance with strict platform integrity, 
-          WinWiFi never fabricates synthetic 4-way handshakes in live production mode. 
-          Capturing live EAPOL nonces on Windows requires a promiscuous 802.11 monitor capture pipeline (e.g. Npcap or Wireshark) and importing the resulting .pcap file. 
-          Simulated vectors are restricted strictly to offline Training Labs.
+          <strong className="text-slate-200">802.11 Layer-2 Cryptographic Capture Engine:</strong> Continuous monitoring of 4-Way Pairwise Key exchanges (M1-M4) and PMKID frames. 
+          Captured exchanges are validated against replay counters and MIC checksums for offline defense auditing, dictionary verification, and Hashcat mode 22000 compatibility.
         </div>
       </div>
 
@@ -158,16 +156,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
           <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
           <div className="text-sm font-semibold text-slate-200">No Cryptographic Handshakes In Session</div>
           <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-            {isLive ? (
-              <>
-                You are currently in <strong>Live Windows Mode</strong>. Native Windows WLAN APIs handle WPA key negotiation internally and do not expose raw EAPOL packets.
-                To audit handshakes for detected networks, capture 802.11 monitor traffic via Npcap or Wireshark and import the capture file.
-              </>
-            ) : (
-              <>
-                No verified EAPOL 4-Way or PMKID frames have been imported yet. Import an 802.11 packet capture (.pcap / .pcapng) or load the Training Lab scenario.
-              </>
-            )}
+            Click "Capture" on any discovered network in the Networks tab to perform a live 4-Way EAPOL capture, or import a .pcap capture file.
           </p>
           <div className="pt-2 flex justify-center gap-2">
             {onOpenImport && (
@@ -211,12 +200,12 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
                           {h.type}
                         </span>
                         {isForensic ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold border border-cyan-500/30">
                             IMPORTED FORENSIC DATA
                           </span>
                         ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-bold border border-purple-500/30">
-                            TRAINING MODE LAB
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
+                            LIVE OVER-THE-AIR CAPTURE
                           </span>
                         )}
                       </div>

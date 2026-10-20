@@ -20,12 +20,14 @@ interface IncidentCenterProps {
   incidents: IncidentRecord[];
   uiMode: UIMode;
   onRefreshIncidents: () => void;
+  onUpdateIncidentStatus?: (id: string, status: IncidentRecord['status'], resolution?: string) => void;
 }
 
 export const IncidentCenter: React.FC<IncidentCenterProps> = ({
   incidents = [],
   uiMode,
-  onRefreshIncidents
+  onRefreshIncidents,
+  onUpdateIncidentStatus
 }) => {
   const threatEngine = ThreatEngine.getInstance();
   const [selectedIncidentId, setSelectedIncidentId] = useState<string>(incidents[0]?.id || '');
@@ -50,12 +52,17 @@ export const IncidentCenter: React.FC<IncidentCenterProps> = ({
     onRefreshIncidents();
   };
 
-  const handleUpdateStatus = (newStatus: IncidentRecord['status']) => {
+  const handleUpdateStatus = (newStatus: IncidentRecord['status'], explicitResolution?: string) => {
     if (!selectedIncident) return;
-    threatEngine.updateIncidentStatus(selectedIncident.id, newStatus, resolutionText);
+    const res = explicitResolution || resolutionText;
+    if (onUpdateIncidentStatus) {
+      onUpdateIncidentStatus(selectedIncident.id, newStatus, res);
+    } else {
+      threatEngine.updateIncidentStatus(selectedIncident.id, newStatus, res);
+      onRefreshIncidents();
+    }
     setIsResolving(false);
     setResolutionText('');
-    onRefreshIncidents();
   };
 
   const filteredIncidents = incidents.filter(i => {
@@ -188,8 +195,38 @@ export const IncidentCenter: React.FC<IncidentCenterProps> = ({
                     <span className="text-xs text-slate-400">Confidence: <strong>{selectedIncident.confidence}%</strong></span>
                   </div>
 
-                  {/* Status Dropdown */}
-                  <div className="flex items-center gap-2">
+                  {/* Status Dropdown & Fast Triage Buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => handleUpdateStatus('Investigating', 'Operator initiated active RF triage and spectrum verification.')}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        selectedIncident.status === 'Investigating'
+                          ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      Investigating
+                    </button>
+                    <button
+                      onClick={() => handleUpdateStatus('Resolved', 'Remediation confirmed: Rogue isolated or AP reconfigured to authorized policy.')}
+                      className={`px-2 py-1 rounded text-xs font-semibold transition-colors flex items-center gap-1 ${
+                        selectedIncident.status === 'Resolved'
+                          ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
+                          : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40'
+                      }`}
+                    >
+                      <Check className="w-3 h-3" /> Mitigated / Resolved
+                    </button>
+                    <button
+                      onClick={() => handleUpdateStatus('False Positive', 'Verified authorized infrastructure variation; no policy violation.')}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        selectedIncident.status === 'False Positive'
+                          ? 'bg-purple-500/30 text-purple-300 border border-purple-500/50'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      False Positive
+                    </button>
                     <select
                       value={selectedIncident.status}
                       onChange={(e) => handleUpdateStatus(e.target.value as IncidentRecord['status'])}

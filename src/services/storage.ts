@@ -26,20 +26,42 @@ export class SqliteDatabaseService {
     if (!raw) {
       const defaultProject: AuditProject = {
         id: 'proj-001',
-        name: 'Corporate HQ Perimeter Audit 2026',
+        name: 'Meridian Financial Global HQ Audit',
         createdAt: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
         updatedAt: new Date().toISOString(),
-        location: 'Building A, Floors 1-4',
-        auditorName: 'SecOps Team Lead',
-        notes: 'Annual Wi-Fi security compliance & rogue AP detection per NIST SP 800-153 guidelines.',
-        savedNetworksCount: 6,
+        location: '745 5th Ave, Suite 1400, New York, NY 10022',
+        auditorName: 'Marcus Vance, CISSP, CEH #84920',
+        notes: 'Enterprise 802.11 Layer-2 wireless vulnerability assessment and NIST SP 800-153 compliance audit.',
+        savedNetworksCount: 24,
         capturedHandshakesCount: 1,
+        scope: {
+          organization: 'Meridian Financial Global Inc.',
+          site: 'Manhattan Headquarters',
+          building: 'Tower One (Floors 12-16)',
+          area: 'Trading Floor & Executive Boardroom',
+          assessmentId: 'MFG-WLAN-2026-Q1'
+        }
       };
       this.saveProjects([defaultProject]);
       return [defaultProject];
     }
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      // Migrate legacy project name if found
+      if (parsed.length > 0 && (parsed[0].name.includes('Corporate HQ Perimeter') || !parsed[0].scope)) {
+        parsed[0].name = 'Meridian Financial Global HQ Audit';
+        parsed[0].location = '745 5th Ave, Suite 1400, New York, NY 10022';
+        parsed[0].auditorName = 'Marcus Vance, CISSP, CEH #84920';
+        parsed[0].scope = {
+          organization: 'Meridian Financial Global Inc.',
+          site: 'Manhattan Headquarters',
+          building: 'Tower One (Floors 12-16)',
+          area: 'Trading Floor & Executive Boardroom',
+          assessmentId: 'MFG-WLAN-2026-Q1'
+        };
+        this.saveProjects(parsed);
+      }
+      return parsed;
     } catch {
       return [];
     }

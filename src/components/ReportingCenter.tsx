@@ -109,6 +109,32 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadCsv = () => {
+    const headers = ['BSSID', 'SSID', 'Channel', 'Band', 'Security', 'Cipher', 'WPS', 'PMF', 'Signal_dBm', 'Score', 'Vendor', 'Classification'];
+    const rows = accessPoints.map(a => [
+      `"${a.bssid}"`,
+      `"${(a.ssid || '').replace(/"/g, '""')}"`,
+      a.channel,
+      `"${a.band}"`,
+      `"${a.security}"`,
+      `"${a.cipher}"`,
+      a.wpsEnabled ? 'ENABLED' : 'DISABLED',
+      a.pmfRequired ? 'REQUIRED' : 'DISABLED',
+      a.rssi,
+      a.securityScore,
+      `"${(a.vendor || '').replace(/"/g, '""')}"`,
+      `"${a.classification || 'Unknown'}"`
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `WinWiFi_Inventory_${currentProject.name.replace(/\s+/g, '_')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6 pb-8">
       {/* Top Controls */}
@@ -126,7 +152,7 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Level Selector */}
             <div className="bg-slate-800 p-0.5 rounded-lg border border-slate-700 flex text-xs">
               <button
@@ -149,9 +175,16 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
 
             <button
               onClick={handlePrint}
-              className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
             >
               <Printer className="w-3.5 h-3.5" /> Print / PDF
+            </button>
+            <button
+              onClick={handleDownloadCsv}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
+              title="Export complete access point inventory as CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" /> Export CSV
             </button>
             <button
               onClick={handleDownloadHtml}

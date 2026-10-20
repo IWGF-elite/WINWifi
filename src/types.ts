@@ -6,8 +6,11 @@ export type SecurityType =
   | 'WPA-Personal (TKIP)' 
   | 'WPA2-Personal (AES)' 
   | 'WPA2-Enterprise (802.1X)' 
+  | 'WPA2-Enterprise (EAP-SIM)'
   | 'WPA3-Personal (SAE)' 
   | 'WPA3-Enterprise' 
+  | 'WPA3-Enterprise (802.1X)'
+  | 'WPA3-Enterprise (CNSA 192-bit)'
   | 'OWE (Enhanced Open)';
 
 export type CipherType = 'None' | 'WEP' | 'TKIP' | 'CCMP (AES)' | 'GCMP-256';

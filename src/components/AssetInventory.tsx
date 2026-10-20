@@ -18,6 +18,8 @@ import {
   SlidersHorizontal
 } from 'lucide-react';
 import { AccessPoint, AssetClassification, UIMode } from '../types';
+import { LocalScannerState } from '../services/localScannerService';
+import { ScannerOfflineState } from './ScannerOfflineState';
 
 interface AssetInventoryProps {
   accessPoints: AccessPoint[];
@@ -25,6 +27,9 @@ interface AssetInventoryProps {
   initialFilter?: string;
   onSelectAP: (ap: AccessPoint) => void;
   onUpdateAP: (ap: AccessPoint) => void;
+  scannerStatus?: LocalScannerState;
+  onRetryScanner?: () => Promise<boolean>;
+  onUpdateScannerEndpoint?: (url: string) => void;
 }
 
 export const AssetInventory: React.FC<AssetInventoryProps> = ({
@@ -32,7 +37,10 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
   uiMode,
   initialFilter = '',
   onSelectAP,
-  onUpdateAP
+  onUpdateAP,
+  scannerStatus,
+  onRetryScanner,
+  onUpdateScannerEndpoint,
 }) => {
   const [searchTerm, setSearchTerm] = useState(initialFilter);
   const [classificationFilter, setClassificationFilter] = useState<string>('all');
@@ -144,6 +152,16 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
 
   return (
     <div className="space-y-5 pb-8">
+      {/* Scanner Offline Notice */}
+      {scannerStatus && !scannerStatus.isOnline && (
+        <ScannerOfflineState
+          scannerStatus={scannerStatus}
+          onRetry={onRetryScanner || (() => Promise.resolve(false))}
+          onUpdateEndpoint={onUpdateScannerEndpoint || (() => {})}
+          isDarkMode={true}
+        />
+      )}
+
       {/* Header with Search & Filters */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">

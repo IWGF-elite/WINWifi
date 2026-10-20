@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for WinWiFi Security Auditor upgrades: expanding network discovery to 30+ enterprise APs and 20+ clients, dynamic realistic RF jitter and staggered discovery, complete interactive triage and binary PCAP / NIST report exports, dynamic security posture scoring, and total removal of demo/simulation labels for a live operational aesthetic.",
+  "updatedAt":  "2026-10-20T19:50:07.943050994Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

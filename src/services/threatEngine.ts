@@ -23,37 +23,71 @@ export class ThreatEngine {
     this.incidents = [
       {
         id: 'INC-00042',
-        title: 'Suspected Evil Twin: Unauthorized Clone of Corporate SSID',
+        title: 'Suspected Evil Twin: Unauthorized Clone of "Meridian_Guest_Portal"',
         severity: 'CRITICAL',
-        confidence: 94,
+        confidence: 96,
         status: 'Investigating',
         createdAt: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
         updatedAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-        assignedTo: 'Lead Security Auditor',
-        summary: 'Detected duplicate SSID "Corp_Secure" on an unauthorized MAC OUI with downgraded security (Open cleartext vs WPA2-Enterprise baseline).',
-        bssidTarget: 'AA:BB:CC:DD:EE:99',
-        ssidTarget: 'Corp_Secure',
+        assignedTo: 'Lead Security Auditor (Marcus Vance)',
+        summary: 'Detected duplicate SSID "Meridian_Guest_Portal" on unauthorized Shenzhen Bilian OUI (6C:5E:7A:B2:90:1C) broadcasting on Floor 14 with +8 dBm signal delta.',
+        bssidTarget: '6C:5E:7A:B2:90:1C',
+        ssidTarget: 'Meridian_Guest_Portal',
         evidenceIds: ['EVD-001', 'EVD-002', 'EVD-005'],
         notes: [
-          { timestamp: new Date(Date.now() - 1000 * 60 * 30).toLocaleTimeString(), author: 'ThreatEngine', text: 'Automatic anomaly flag: OUI manufacturer mismatch and cleartext broadcast on 2.4GHz Ch 1.' },
-          { timestamp: new Date(Date.now() - 1000 * 60 * 12).toLocaleTimeString(), author: 'Auditor', text: 'Triangulated physical location near Reception Building A. Verifying physical rogue AP device.' }
+          { timestamp: new Date(Date.now() - 1000 * 60 * 30).toLocaleTimeString(), author: 'ThreatEngine', text: 'Automatic anomaly flag: OUI manufacturer mismatch ("Shenzhen Bilian" vs authorized "Aruba Networks") on 2.4 GHz Ch 6.' },
+          { timestamp: new Date(Date.now() - 1000 * 60 * 12).toLocaleTimeString(), author: 'Marcus Vance', text: 'Triangulated physical RF signature near Floor 14 Conference Room 1402. Investigating rogue physical device.' }
         ]
       },
       {
         id: 'INC-00038',
-        title: 'Legacy WEP-128 Protocol Detected on Internal Warehouse Network',
+        title: 'Legacy WEP-128 Protocol Active on Sub-Basement Warehouse Bay',
         severity: 'HIGH',
         confidence: 100,
         status: 'Open',
         createdAt: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
         updatedAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-        assignedTo: 'Network Operations',
-        summary: 'Warehouse scanner network using deprecated WEP-128 encryption. Violates PCI-DSS 4.0 Requirement 2.1 and NIST SP 800-153 §4.2.',
-        bssidTarget: '00:14:D1:68:90:22',
-        ssidTarget: 'Warehouse_Barcodes',
+        assignedTo: 'Facilities IT Operations',
+        summary: 'Depot inventory scanner network using deprecated WEP-128 encryption. Violates PCI-DSS 4.0 Requirement 2.1 and NIST SP 800-153 §4.2.',
+        bssidTarget: '00:14:D1:6C:5B:99',
+        ssidTarget: 'Warehouse_Logistics_B4',
         evidenceIds: ['EVD-003'],
         notes: [
-          { timestamp: new Date(Date.now() - 1000 * 60 * 120).toLocaleTimeString(), author: 'ThreatEngine', text: 'Automated policy violation flagged during baseline inventory scan.' }
+          { timestamp: new Date(Date.now() - 1000 * 60 * 120).toLocaleTimeString(), author: 'ThreatEngine', text: 'Automated policy violation flagged: Deprecated RC4 cipher with static 24-bit initialization vectors.' }
+        ]
+      },
+      {
+        id: 'INC-00045',
+        title: 'WPS 1.0 External Registrar Active on Executive Boardroom AP',
+        severity: 'HIGH',
+        confidence: 90,
+        status: 'Investigating',
+        createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+        updatedAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+        assignedTo: 'Lead Security Auditor (Marcus Vance)',
+        summary: 'NETGEAR extender (F8:1A:67:8B:11:02) advertising active Wi-Fi Protected Setup PIN negotiation susceptible to offline Pixie Dust nonce recovery.',
+        bssidTarget: 'F8:1A:67:8B:11:02',
+        ssidTarget: 'NETGEAR_Executive_Suite',
+        evidenceIds: ['EVD-004', 'EVD-007'],
+        notes: [
+          { timestamp: new Date(Date.now() - 1000 * 60 * 40).toLocaleTimeString(), author: 'ThreatEngine', text: 'Detected WPS 1.0 beacon information element with unrandomized E-S1/E-S2 nonces.' }
+        ]
+      },
+      {
+        id: 'INC-00049',
+        title: 'Unmonitored Wi-Fi Direct P2P Broadcast on Multi-Function Printer',
+        severity: 'MEDIUM',
+        confidence: 88,
+        status: 'Open',
+        createdAt: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
+        updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+        assignedTo: 'SecOps Team',
+        summary: 'HP LaserJet Enterprise printer broadcasting ad-hoc P2P network DIRECT-HP-LaserJet-M608 without client isolation.',
+        bssidTarget: '70:5A:0F:84:33:10',
+        ssidTarget: 'DIRECT-HP-LaserJet-M608',
+        evidenceIds: ['EVD-009'],
+        notes: [
+          { timestamp: new Date(Date.now() - 1000 * 60 * 85).toLocaleTimeString(), author: 'ThreatEngine', text: 'Wi-Fi Direct ad-hoc beacon detected on production 2.4 GHz spectrum.' }
         ]
       }
     ];
@@ -61,20 +95,20 @@ export class ThreatEngine {
     this.securityChanges = [
       {
         id: 'CHG-101',
-        bssid: 'AA:BB:CC:DD:EE:99',
-        ssid: 'Corp_Secure',
+        bssid: '6C:5E:7A:B2:90:1C',
+        ssid: 'Meridian_Guest_Portal',
         timestamp: new Date(Date.now() - 1000 * 60 * 35).toLocaleTimeString(),
         type: 'new_bssid',
         title: 'New Unrecognized BSSID Appeared',
         before: 'Not in Baseline',
-        after: 'Active Broadcast on Ch 1',
+        after: 'Active Broadcast on Ch 6 (Shenzhen Bilian)',
         riskImpact: 'CRITICAL',
         evidenceIds: ['EVD-001']
       },
       {
         id: 'CHG-102',
         bssid: 'F8:1A:67:8B:11:02',
-        ssid: 'Netgear_Office_Ext',
+        ssid: 'NETGEAR_Executive_Suite',
         timestamp: new Date(Date.now() - 1000 * 60 * 75).toLocaleTimeString(),
         type: 'wps_change',
         title: 'WPS 1.0 External Registrar Activated',
@@ -82,6 +116,18 @@ export class ThreatEngine {
         after: 'WPS PIN Enabled & Unlocked',
         riskImpact: 'HIGH',
         evidenceIds: ['EVD-004']
+      },
+      {
+        id: 'CHG-103',
+        bssid: '70:5A:0F:84:33:10',
+        ssid: 'DIRECT-HP-LaserJet-M608',
+        timestamp: new Date(Date.now() - 1000 * 60 * 95).toLocaleTimeString(),
+        type: 'new_bssid',
+        title: 'Ad-Hoc Wi-Fi Direct Beacon Detected',
+        before: 'Offline / Standby',
+        after: 'Active P2P Broadcast on Ch 6',
+        riskImpact: 'MEDIUM',
+        evidenceIds: ['EVD-009']
       }
     ];
   }

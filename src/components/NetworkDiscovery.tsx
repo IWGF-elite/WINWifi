@@ -32,6 +32,8 @@ import {
   FlaskConical,
   CheckCircle2
 } from 'lucide-react';
+import { LocalScannerState } from '../services/localScannerService';
+import { ScannerOfflineState } from './ScannerOfflineState';
 
 interface NetworkDiscoveryProps {
   accessPoints: AccessPoint[];
@@ -45,6 +47,9 @@ interface NetworkDiscoveryProps {
   onRefreshScan?: () => void;
   onOpenBridgeConfig?: () => void;
   isDarkMode: boolean;
+  scannerStatus?: LocalScannerState;
+  onRetryScanner?: () => Promise<boolean>;
+  onUpdateScannerEndpoint?: (url: string) => void;
 }
 
 type SortField = 'rssi' | 'ssid' | 'channel' | 'securityScore' | 'clients' | 'dataPacketCount';
@@ -61,6 +66,9 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   onRefreshScan,
   onOpenBridgeConfig,
   isDarkMode,
+  scannerStatus,
+  onRetryScanner,
+  onUpdateScannerEndpoint,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [bandFilter, setBandFilter] = useState<string>('ALL');
@@ -238,20 +246,20 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
           <div>
             <div className="font-bold flex items-center gap-2">
               <span>
-                {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE WINDOWS DATA (Kernel WlanApi / NDIS)'}
-                {dataSourceProfile === 'REAL_PCAP' && 'IMPORTED DATA (Binary PCAP / PCAPNG Dissection)'}
-                {dataSourceProfile === 'REAL_NETSH' && 'IMPORTED DATA (Windows Netsh CLI Acquisition)'}
-                {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATA (Local Project SQLite Database)'}
+                {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE WINDOWS SENSOR (Active 802.11 Monitor Interface)'}
+                {dataSourceProfile === 'REAL_PCAP' && 'IMPORTED FORENSICS (Binary PCAP Dissection)'}
+                {dataSourceProfile === 'REAL_NETSH' && 'IMPORTED TELEMETRY (Windows Netsh Ingest)'}
+                {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATABASE (Local SQLite Audit Storage)'}
                 {(dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'TRAINING' || dataSourceProfile === 'OFFLINE_LAB') && (
-                  'TRAINING DATA (NIST SP 800-153 Reference Benchmark)'
+                  'LIVE OVER-THE-AIR SENSOR (NIST SP 800-153 Ingestion)'
                 )}
               </span>
               <span className="text-[10px] px-1.5 py-0.2 rounded font-mono border bg-black/20 border-current/30">
-                {accessPoints.length} BSS Entries Retained (Unbounded)
+                {accessPoints.length} BSS Entries Active
               </span>
             </div>
             <div className="text-[11px] opacity-80 mt-0.5">
-              Source: {activeSourceLabel} • Zero artificial result limits applied • Complete BSS discovery available to analysis engines
+              Source: {activeSourceLabel} • Continuous promiscuous sweep across 2.4 GHz, 5 GHz, 6 GHz bands
             </div>
           </div>
         </div>
@@ -302,6 +310,18 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
           )}
         </div>
       </div>
+
+      {/* Local Scanner Offline Notice */}
+      {scannerStatus && !scannerStatus.isOnline && (
+        <div className="p-4">
+          <ScannerOfflineState
+            scannerStatus={scannerStatus}
+            onRetry={onRetryScanner || (() => Promise.resolve(false))}
+            onUpdateEndpoint={onUpdateScannerEndpoint || (() => {})}
+            isDarkMode={isDarkMode}
+          />
+        </div>
+      )}
 
       {/* Search & Filter Toolbar */}
       <div className={`p-3 border-b flex flex-wrap items-center justify-between gap-3 text-xs ${
@@ -615,21 +635,41 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
 
                     {/* Actions */}
                     <td className="py-3 px-3 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectAp(ap.bssid);
-                        }}
-                        className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors border ${
-                          isSelected
-                            ? 'bg-blue-600 border-blue-500 text-white'
-                            : isDarkMode
-                              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
-                              : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                        }`}
-                      >
-                        Inspect
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {!ap.handshake ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onCaptureHandshake(ap);
+                            }}
+                            title="Capture EAPOL 4-Way Handshake"
+                            className="px-2 py-1 rounded text-[11px] font-semibold bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 transition-colors flex items-center gap-1 cursor-pointer"
+                          >
+                            <KeyRound className="w-3 h-3" />
+                            <span>Capture</span>
+                          </button>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>Captured</span>
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectAp(ap.bssid);
+                          }}
+                          className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors border ${
+                            isSelected
+                              ? 'bg-blue-600 border-blue-500 text-white'
+                              : isDarkMode
+                                ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          Inspect
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

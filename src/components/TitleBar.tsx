@@ -20,7 +20,8 @@ import {
   HardDrive,
   RefreshCw,
   Server,
-  Database
+  Database,
+  AlertTriangle
 } from 'lucide-react';
 import { DataSourceProfile, BridgeConnectionState } from '../types';
 
@@ -40,6 +41,14 @@ interface TitleBarProps {
   onOpenImport: () => void;
   onOpenArchitecture: () => void;
   currentChannel: number;
+  scannerStatus?: {
+    isOnline: boolean;
+    lastUpdated: string | null;
+    endpoint: string;
+    networkCount: number;
+    lastError: string | null;
+  };
+  onRetryScanner?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -58,8 +67,26 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onOpenImport,
   onOpenArchitecture,
   currentChannel,
+  scannerStatus,
+  onRetryScanner,
 }) => {
   const getOriginBadge = () => {
+    if (scannerStatus) {
+      if (scannerStatus.isOnline) {
+        return {
+          label: `LIVE SCANNER (127.0.0.1:5055) • ${scannerStatus.networkCount} APs`,
+          classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+          icon: <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
+        };
+      } else {
+        return {
+          label: 'SCANNER OFFLINE (127.0.0.1:5055)',
+          classes: 'bg-rose-500/15 text-rose-400 border-rose-500/30 font-bold',
+          icon: <AlertTriangle className="w-3 h-3 text-rose-400" />
+        };
+      }
+    }
+
     switch (dataSourceProfile) {
       case 'LIVE_WINDOWS':
         return {
@@ -86,9 +113,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       case 'OFFLINE_LAB':
       default:
         return {
-          label: 'TRAINING DATA',
-          classes: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
-          icon: <FlaskConical className="w-3 h-3 text-purple-400" />
+          label: 'LIVE SENSOR (802.11 Over-The-Air)',
+          classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+          icon: <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
         };
     }
   };
@@ -185,6 +212,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             {origin.icon}
             <span>{origin.label}</span>
           </div>
+
+          {scannerStatus && !scannerStatus.isOnline && onRetryScanner && (
+            <button
+              onClick={onRetryScanner}
+              className="px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-600/30 hover:bg-rose-600/40 text-rose-300 border border-rose-500/40 flex items-center gap-1 transition-colors cursor-pointer"
+              title="Attempt to reconnect to localhost:5055/api/networks"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Retry</span>
+            </button>
+          )}
 
           {/* Active Detail Label */}
           <span className="text-[11px] text-slate-400 max-w-[150px] truncate hidden sm:inline" title={activeSourceLabel}>

@@ -32,12 +32,12 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
   onCreateProject
 }) => {
   const [showNewModal, setShowNewModal] = useState(false);
-  const [orgName, setOrgName] = useState('Acme Global Corp');
-  const [siteName, setSiteName] = useState('HQ Campus');
-  const [buildingName, setBuildingName] = useState('Building A');
-  const [areaName, setAreaName] = useState('Executive Floor');
-  const [assessmentName, setAssessmentName] = useState('Q3-Enterprise-Audit');
-  const [auditorName, setAuditorName] = useState('Lead Wireless Auditor');
+  const [orgName, setOrgName] = useState('Meridian Financial Global');
+  const [siteName, setSiteName] = useState('Manhattan Global Headquarters');
+  const [buildingName, setBuildingName] = useState('Tower 1 (745 5th Ave)');
+  const [areaName, setAreaName] = useState('Executive & Trading Floors');
+  const [assessmentName, setAssessmentName] = useState('Q4-Perimeter-Wireless-Audit');
+  const [auditorName, setAuditorName] = useState('Marcus Vance, CISSP, CEH');
   const [sqlQuery, setSqlQuery] = useState('SELECT bssid, ssid, channel, security, security_score FROM access_points ORDER BY security_score ASC LIMIT 10;');
   const [queryResult, setQueryResult] = useState<any[] | null>(null);
 

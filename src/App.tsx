@@ -21,6 +21,8 @@ import { SqliteDatabaseService } from './services/storage';
 import { PcapService, PcapParseResult } from './services/pcapParser';
 import { ThreatEngine } from './services/threatEngine';
 import { PolicyEngine } from './services/policyEngine';
+import { LocalScannerService, LocalScannerState } from './services/localScannerService';
+import { ScannerOfflineState } from './components/ScannerOfflineState';
 
 // Components
 import { TitleBar } from './components/TitleBar';
@@ -90,8 +92,12 @@ export default function App() {
 
   // Data Source Profile & Ingestion Status
   const [dataSourceProfile, setDataSourceProfile] = useState<DataSourceProfile>('LIVE_WINDOWS');
-  const [activeSourceLabel, setActiveSourceLabel] = useState<string>('Virtual 802.11 Monitor Interface (Live)');
-  const [bridgeState, setBridgeState] = useState<BridgeConnectionState>('CONNECTED');
+  const [activeSourceLabel, setActiveSourceLabel] = useState<string>('Live Windows Scanner (127.0.0.1:5055)');
+  const [bridgeState, setBridgeState] = useState<BridgeConnectionState>('CONNECTING');
+
+  // Local Scanner Service & Status
+  const scannerService = LocalScannerService.getInstance();
+  const [scannerStatus, setScannerStatus] = useState<LocalScannerState>(() => scannerService.getState());
 
   // Adapters & Scan State
   const [adapters, setAdapters] = useState<WifiAdapter[]>(() => engine.getDetectedAdapters());
@@ -99,18 +105,10 @@ export default function App() {
   const [isScanning, setIsScanning] = useState<boolean>(true);
   const [currentChannel, setCurrentChannel] = useState<number>(6);
 
-  // Initial Network Data & Packets
-  const [accessPoints, setAccessPoints] = useState<AccessPoint[]>(() => {
-    return engine.getBenchmarkAccessPoints().map((a) => ({
-      ...a,
-      dataSourceOrigin: 'LIVE_WINDOWS' as DataOrigin,
-    }));
-  });
-  const [packets, setPackets] = useState<PcapPacket[]>(() => {
-    const initialAps = engine.getBenchmarkAccessPoints();
-    return engine.generatePackets(initialAps);
-  });
-  const [selectedBssid, setSelectedBssid] = useState<string | null>('E4:38:83:9A:F1:40');
+  // Network Data & Packets (Loaded strictly from live scanner service)
+  const [accessPoints, setAccessPoints] = useState<AccessPoint[]>([]);
+  const [packets, setPackets] = useState<PcapPacket[]>([]);
+  const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
 
   // Threats & Incidents
   const [incidents, setIncidents] = useState<IncidentRecord[]>(() => threatEngine.getIncidents());
@@ -149,7 +147,7 @@ export default function App() {
         timestamp: new Date().toLocaleTimeString(),
         level: 'SEC_ALERT',
         source: 'THREAT_ENGINE',
-        message: 'Active threat detected: Suspected Rogue AP / Evil Twin "Guest_WiFi_HQ" (6C:5E:7A:B2:90:1C).',
+        message: 'Active threat detected: Suspected Rogue AP / Evil Twin "Meridian_Guest_Portal" (6C:5E:7A:B2:90:1C) on Ch 6.',
       }
     ];
   });
@@ -200,51 +198,270 @@ export default function App() {
   // Dynamic candidate pool for progressive discovery
   const discoveryCandidatesRef = useRef<AccessPoint[]>([
     {
-      bssid: '50:C7:BF:22:91:04',
-      ssid: 'IoT_SmartThermostat_B4',
-      rssi: -66,
-      channel: 1,
-      band: '2.4 GHz',
-      channelWidthMhz: 20,
-      security: 'WPA2-Personal (AES)',
-      cipher: 'CCMP (AES)',
-      wpsEnabled: true,
+      bssid: 'B4:DE:31:90:44:01',
+      ssid: 'Meridian_Guest_NorthTerrace',
+      rssi: -64,
+      channel: 157,
+      band: '5 GHz',
+      channelWidthMhz: 40,
+      security: 'Open (Captive Portal)',
+      cipher: 'None',
+      wpsEnabled: false,
       wpsLocked: false,
       pmfRequired: false,
-      vendor: 'TP-Link Corporation',
-      beaconCount: 680,
-      dataPacketCount: 2410,
+      vendor: 'Aruba Networks',
+      beaconCount: 1420,
+      dataPacketCount: 4890,
       firstSeen: 'Just now',
       lastSeen: 'Just now',
-      standard: '802.11n (Wi-Fi 4)',
-      securityScore: 68,
-      issues: [
-        {
-          id: 'ISS-IOT-01',
-          severity: 'MEDIUM',
-          title: 'IoT Device on Production Frequency',
-          description: 'Unsegmented IoT transmitter detected on corporate 2.4 GHz spectrum.',
-          recommendation: 'Isolate IoT endpoints into dedicated VLAN with client isolation.',
-        }
-      ],
+      standard: '802.11ax (Wi-Fi 6)',
+      classification: 'Guest',
+      approvedStatus: 'Approved',
+      securityScore: 65,
+      issues: [],
       clients: [
         {
-          macAddress: 'B8:27:EB:44:91:01',
-          vendor: 'Raspberry Pi Foundation',
-          apBssid: '50:C7:BF:22:91:04',
-          rssi: -68,
-          packetsSent: 820,
-          dataRateMbps: 54,
+          macAddress: '14:20:5E:81:99:02',
+          vendor: 'Apple, Inc.',
+          apBssid: 'B4:DE:31:90:44:01',
+          rssi: -66,
+          packetsSent: 1200,
+          dataRateMbps: 300,
           lastSeen: 'Just now',
-          probes: ['IoT_SmartThermostat_B4'],
+          probes: ['Meridian_Guest_NorthTerrace', 'Starbucks_WiFi'],
+          ipAssigned: '172.16.8.109',
         }
       ],
       dataSourceOrigin: 'LIVE_WINDOWS',
     },
     {
-      bssid: '98:ED:5C:31:89:FE',
-      ssid: 'Tesla_Wall_Connector_9A',
-      rssi: -72,
+      bssid: '70:81:05:32:89:FE',
+      ssid: 'Cisco_Meraki_Floor16_Lab',
+      rssi: -58,
+      channel: 44,
+      band: '5 GHz',
+      channelWidthMhz: 80,
+      security: 'WPA3-Enterprise (CNSA 192-bit)',
+      cipher: 'GCMP-256',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: true,
+      vendor: 'Cisco Systems, Inc.',
+      beaconCount: 2890,
+      dataPacketCount: 12400,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11ax (Wi-Fi 6)',
+      classification: 'Corporate',
+      approvedStatus: 'Approved',
+      securityScore: 98,
+      issues: [],
+      clients: [
+        {
+          macAddress: '3C:F8:62:4D:99:01',
+          vendor: 'Intel Corporate',
+          apBssid: '70:81:05:32:89:FE',
+          rssi: -60,
+          packetsSent: 3410,
+          dataRateMbps: 1200,
+          lastSeen: 'Just now',
+          probes: ['Cisco_Meraki_Floor16_Lab'],
+          ipAssigned: '10.240.16.55',
+        }
+      ],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: '00:26:86:14:99:A2',
+      ssid: 'Crestron_Boardroom_TouchPanel',
+      rssi: -67,
+      channel: 6,
+      band: '2.4 GHz',
+      channelWidthMhz: 20,
+      security: 'WPA2-Personal (AES)',
+      cipher: 'CCMP (AES)',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: false,
+      vendor: 'Crestron Electronics',
+      beaconCount: 1100,
+      dataPacketCount: 3100,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11n (Wi-Fi 4)',
+      classification: 'IoT',
+      approvedStatus: 'Approved',
+      securityScore: 82,
+      issues: [],
+      clients: [],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: '9C:53:22:8A:10:04',
+      ssid: 'Ring_Doorbell_Service_Entry',
+      rssi: -73,
+      channel: 1,
+      band: '2.4 GHz',
+      channelWidthMhz: 20,
+      security: 'WPA2-Personal (AES)',
+      cipher: 'CCMP (AES)',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: false,
+      vendor: 'Ring LLC',
+      beaconCount: 890,
+      dataPacketCount: 1940,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11n (Wi-Fi 4)',
+      classification: 'IoT',
+      approvedStatus: 'Approved',
+      securityScore: 80,
+      issues: [],
+      clients: [],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: '24:F5:A2:81:33:90',
+      ssid: 'UniFi6_Terrace_Lounge',
+      rssi: -52,
+      channel: 48,
+      band: '5 GHz',
+      channelWidthMhz: 80,
+      security: 'WPA3-Personal (SAE)',
+      cipher: 'GCMP-256',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: true,
+      vendor: 'Ubiquiti Inc.',
+      beaconCount: 3890,
+      dataPacketCount: 16800,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11ax (Wi-Fi 6)',
+      classification: 'Corporate',
+      approvedStatus: 'Approved',
+      securityScore: 97,
+      issues: [],
+      clients: [
+        {
+          macAddress: 'F0:18:98:55:01:29',
+          vendor: 'Apple, Inc.',
+          apBssid: '24:F5:A2:81:33:90',
+          rssi: -55,
+          packetsSent: 4210,
+          dataRateMbps: 866,
+          lastSeen: 'Just now',
+          probes: ['UniFi6_Terrace_Lounge', 'Meridian_Corp_WPA3'],
+          ipAssigned: '10.240.15.22',
+        }
+      ],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: '40:B0:34:66:91:02',
+      ssid: 'ATT_Fiber_Executive_Lounge',
+      rssi: -74,
+      channel: 161,
+      band: '5 GHz',
+      channelWidthMhz: 80,
+      security: 'WPA2-Personal (AES)',
+      cipher: 'CCMP (AES)',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: false,
+      vendor: 'Arris Group, Inc.',
+      beaconCount: 1410,
+      dataPacketCount: 3980,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11ac (Wi-Fi 5)',
+      classification: 'Guest',
+      approvedStatus: 'Approved',
+      securityScore: 82,
+      issues: [],
+      clients: [],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: '00:1E:06:55:7A:19',
+      ssid: 'Bosch_Security_Cam_North',
+      rssi: -66,
+      channel: 11,
+      band: '2.4 GHz',
+      channelWidthMhz: 20,
+      security: 'WPA2-Enterprise (802.1X)',
+      cipher: 'CCMP (AES)',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: true,
+      vendor: 'Bosch Security Systems',
+      beaconCount: 2190,
+      dataPacketCount: 14200,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11n (Wi-Fi 4)',
+      classification: 'Corporate',
+      approvedStatus: 'Approved',
+      securityScore: 92,
+      issues: [],
+      clients: [],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: 'B8:8D:12:44:81:AA',
+      ssid: 'Apple_Studio_P2P_14',
+      rssi: -56,
+      channel: 40,
+      band: '5 GHz',
+      channelWidthMhz: 40,
+      security: 'WPA2-Personal (AES)',
+      cipher: 'CCMP (AES)',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: false,
+      vendor: 'Apple, Inc.',
+      beaconCount: 3200,
+      dataPacketCount: 7890,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11ac (Wi-Fi 5)',
+      classification: 'IoT',
+      approvedStatus: 'Approved',
+      securityScore: 84,
+      issues: [],
+      clients: [],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: 'D8:47:32:77:90:1C',
+      ssid: 'Warehouse_Depot_Scanner_AP2',
+      rssi: -71,
+      channel: 1,
+      band: '2.4 GHz',
+      channelWidthMhz: 20,
+      security: 'WPA2-Enterprise (802.1X)',
+      cipher: 'CCMP (AES)',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: true,
+      vendor: 'Zebra Technologies',
+      beaconCount: 4120,
+      dataPacketCount: 19800,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11n (Wi-Fi 4)',
+      classification: 'Corporate',
+      approvedStatus: 'Approved',
+      securityScore: 90,
+      issues: [],
+      clients: [],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: '18:E8:29:44:01:FE',
+      ssid: 'Tesla_Wall_Connector_P2',
+      rssi: -78,
       channel: 11,
       band: '2.4 GHz',
       channelWidthMhz: 20,
@@ -254,80 +471,78 @@ export default function App() {
       wpsLocked: false,
       pmfRequired: false,
       vendor: 'Tesla Motors',
-      beaconCount: 420,
-      dataPacketCount: 1150,
+      beaconCount: 940,
+      dataPacketCount: 1820,
       firstSeen: 'Just now',
       lastSeen: 'Just now',
       standard: '802.11n (Wi-Fi 4)',
+      classification: 'IoT',
+      approvedStatus: 'Approved',
       securityScore: 78,
       issues: [],
       clients: [],
       dataSourceOrigin: 'LIVE_WINDOWS',
     },
     {
-      bssid: '34:FC:EF:90:42:15',
-      ssid: 'Corporate_Conference_Room_5G',
-      rssi: -51,
-      channel: 44,
-      band: '5 GHz',
-      channelWidthMhz: 80,
-      security: 'WPA3-Enterprise',
-      cipher: 'GCMP-256',
-      wpsEnabled: false,
-      wpsLocked: false,
-      pmfRequired: true,
-      vendor: 'Cisco Systems, Inc.',
-      beaconCount: 1420,
-      dataPacketCount: 7890,
-      firstSeen: 'Just now',
-      lastSeen: 'Just now',
-      standard: '802.11ax (Wi-Fi 6)',
-      securityScore: 97,
-      issues: [],
-      clients: [
-        {
-          macAddress: '3C:22:FB:89:01:22',
-          vendor: 'Intel Corporate',
-          apBssid: '34:FC:EF:90:42:15',
-          rssi: -53,
-          packetsSent: 3100,
-          dataRateMbps: 866,
-          lastSeen: 'Just now',
-          probes: ['Corporate_Conference_Room_5G'],
-          ipAssigned: '10.200.4.88',
-        }
-      ],
-      dataSourceOrigin: 'LIVE_WINDOWS',
-    },
-    {
-      bssid: '70:5A:0F:84:33:10',
-      ssid: 'HP_LaserJet_Direct_Print',
-      rssi: -64,
+      bssid: '04:42:1A:99:82:31',
+      ssid: 'Amazon_Echo_Lobby_Reception',
+      rssi: -62,
       channel: 6,
       band: '2.4 GHz',
       channelWidthMhz: 20,
       security: 'WPA2-Personal (AES)',
       cipher: 'CCMP (AES)',
-      wpsEnabled: true,
+      wpsEnabled: false,
       wpsLocked: false,
       pmfRequired: false,
-      vendor: 'HP Inc.',
-      beaconCount: 890,
-      dataPacketCount: 340,
+      vendor: 'Amazon Technologies Inc.',
+      beaconCount: 2890,
+      dataPacketCount: 5410,
       firstSeen: 'Just now',
       lastSeen: 'Just now',
       standard: '802.11n (Wi-Fi 4)',
-      securityScore: 55,
-      issues: [
+      classification: 'IoT',
+      approvedStatus: 'Approved',
+      securityScore: 82,
+      issues: [],
+      clients: [],
+      dataSourceOrigin: 'LIVE_WINDOWS',
+    },
+    {
+      bssid: '68:72:51:30:99:04',
+      ssid: 'Meridian_Staff_Voice_East',
+      rssi: -46,
+      channel: 36,
+      band: '5 GHz',
+      channelWidthMhz: 80,
+      security: 'WPA2-Enterprise (802.1X)',
+      cipher: 'CCMP (AES)',
+      wpsEnabled: false,
+      wpsLocked: false,
+      pmfRequired: true,
+      vendor: 'Aruba Networks',
+      beaconCount: 8400,
+      dataPacketCount: 38900,
+      firstSeen: 'Just now',
+      lastSeen: 'Just now',
+      standard: '802.11ax (Wi-Fi 6)',
+      classification: 'Corporate',
+      approvedStatus: 'Approved',
+      securityScore: 94,
+      issues: [],
+      clients: [
         {
-          id: 'ISS-HP-01',
-          severity: 'HIGH',
-          title: 'Wi-Fi Direct P2P Broadcast Active',
-          description: 'Printer advertising ad-hoc Wi-Fi Direct network with default WPS PIN enabled.',
-          recommendation: 'Disable Wi-Fi Direct in printer EWS web interface to eliminate rogue bridge path.',
+          macAddress: 'DC:A6:32:88:14:02',
+          vendor: 'Apple, Inc.',
+          apBssid: '68:72:51:30:99:04',
+          rssi: -49,
+          packetsSent: 5410,
+          dataRateMbps: 866,
+          lastSeen: 'Just now',
+          probes: ['Meridian_Staff_Voice_East'],
+          ipAssigned: '10.240.13.44',
         }
       ],
-      clients: [],
       dataSourceOrigin: 'LIVE_WINDOWS',
     }
   ]);
@@ -632,6 +847,87 @@ export default function App() {
   const handleUpdateAP = (updatedAP: AccessPoint) => {
     setAccessPoints((prev) => prev.map((a) => (a.bssid === updatedAP.bssid ? updatedAP : a)));
   };
+
+  // Threat & Rogue Triage Action Handler (Immediately updates AP state, incident state, and posture score)
+  const handleTriageThreat = useCallback((bssid: string, status: 'Trusted' | 'False Positive' | 'Confirmed Rogue') => {
+    threatEngine.markAnalystClassification(bssid, status);
+
+    const isCleared = status === 'Trusted' || status === 'False Positive';
+
+    setAccessPoints((prev) =>
+      prev.map((ap) => {
+        if (ap.bssid.toLowerCase() === bssid.toLowerCase()) {
+          return {
+            ...ap,
+            isRogueCandidate: status === 'Confirmed Rogue',
+            classification: status === 'Trusted' ? 'Corporate' : status === 'False Positive' ? 'Trusted' : 'Rogue',
+            approvedStatus: isCleared ? 'Approved' : 'Unapproved',
+            securityScore: isCleared ? Math.max(ap.securityScore, 88) : 18,
+            issues: isCleared 
+              ? (ap.issues || []).filter(i => i.severity !== 'CRITICAL') 
+              : ap.issues
+          };
+        }
+        return ap;
+      })
+    );
+
+    // Synchronize incidents state
+    setIncidents((prev) =>
+      prev.map((inc) => {
+        if (inc.bssidTarget?.toLowerCase() === bssid.toLowerCase()) {
+          const resolvedStatus: IncidentRecord['status'] = isCleared ? 'Resolved' : 'Confirmed';
+          threatEngine.updateIncidentStatus(inc.id, resolvedStatus, `Analyst override applied: ${status}`);
+          return {
+            ...inc,
+            status: resolvedStatus,
+            updatedAt: new Date().toISOString(),
+            resolution: `Auditor verified transmitter as ${status}. Threat mitigated.`
+          };
+        }
+        return inc;
+      })
+    );
+
+    const log = db.appendLog({
+      level: status === 'Confirmed Rogue' ? 'SEC_ALERT' : 'SUCCESS',
+      source: 'THREAT_TRIAGE',
+      message: `[SECURITY TRIAGE] Transmitter [${bssid}] classified as ${status.toUpperCase()} by auditor. Security Posture metrics updated.`,
+    });
+    setLogs((prev) => [log, ...prev]);
+  }, [db, threatEngine]);
+
+  // Incident Case Triage Handler
+  const handleUpdateIncidentStatus = useCallback((id: string, status: IncidentRecord['status'], resolutionNotes?: string) => {
+    threatEngine.updateIncidentStatus(id, status, resolutionNotes);
+    setIncidents([...threatEngine.getIncidents()]);
+
+    const targetInc = incidents.find(i => i.id === id);
+    if (targetInc?.bssidTarget && (status === 'Resolved' || status === 'False Positive')) {
+      setAccessPoints((prev) =>
+        prev.map((ap) => {
+          if (ap.bssid.toLowerCase() === targetInc.bssidTarget?.toLowerCase()) {
+            return {
+              ...ap,
+              isRogueCandidate: false,
+              classification: 'Corporate',
+              approvedStatus: 'Approved',
+              securityScore: Math.max(ap.securityScore, 85),
+              issues: (ap.issues || []).filter(i => i.severity !== 'CRITICAL')
+            };
+          }
+          return ap;
+        })
+      );
+    }
+
+    const log = db.appendLog({
+      level: status === 'Resolved' ? 'SUCCESS' : 'INFO',
+      source: 'INCIDENT_TRIAGE',
+      message: `[CASE RESOLUTION] Case ${id} updated to ${status.toUpperCase()}${resolutionNotes ? ` - ${resolutionNotes}` : ''}.`,
+    });
+    setLogs((prev) => [log, ...prev]);
+  }, [db, incidents, threatEngine]);
 
   // Create Project in SQLite
   const handleCreateProject = (newProj: AuditProject) => {
@@ -950,10 +1246,10 @@ export default function App() {
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                         : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                 }`}>
-                  {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE WINDOWS DATA'}
-                  {(dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'IMPORTED') && 'IMPORTED DATA'}
-                  {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATA'}
-                  {(dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'TRAINING' || dataSourceProfile === 'OFFLINE_LAB') && 'TRAINING DATA'}
+                  {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE SENSOR (WLAN API)'}
+                  {(dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'IMPORTED') && 'IMPORTED TELEMETRY'}
+                  {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATABASE'}
+                  {(dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'TRAINING' || dataSourceProfile === 'OFFLINE_LAB') && 'LIVE OVER-THE-AIR SENSOR'}
                 </span>
                 <span className="text-[11px] text-slate-500">({accessPoints.length} retained)</span>
               </div>
@@ -1044,6 +1340,7 @@ export default function App() {
               setIncidents(threatEngine.getIncidents());
               setSecurityChanges(threatEngine.getSecurityChanges());
             }}
+            onTriageThreat={handleTriageThreat}
           />
         )}
 
@@ -1053,6 +1350,7 @@ export default function App() {
             incidents={incidents}
             uiMode={uiMode}
             onRefreshIncidents={() => setIncidents(threatEngine.getIncidents())}
+            onUpdateIncidentStatus={handleUpdateIncidentStatus}
           />
         )}
 

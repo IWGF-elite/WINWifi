@@ -45,6 +45,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
     (ap.clients || []).forEach(cl => {
       allClients.push({
         ...cl,
+        isAssociated: cl.isAssociated !== undefined ? cl.isAssociated : true,
         apSsid: ap.ssid || '',
         apChannel: ap.channel,
         apSecurity: ap.security || ''
@@ -77,73 +78,39 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
     return <Laptop className="w-4 h-4 text-purple-400" />;
   };
 
-  const isLiveMode = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
-  const isPcap = dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED';
-  const isTraining = dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB' || dataSourceProfile === 'TRAINING';
-
   return (
     <div className="space-y-5 pb-8">
-      {/* Operating Mode & Provenance Banner */}
-      {isLiveMode ? (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-xs text-amber-200">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <div className="font-bold text-amber-300 text-sm flex items-center gap-2">
-                <span>Windows WLAN Architecture Notice: Client Station Observation Restricted</span>
-                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono">
-                  NOT EXPOSED BY WINDOWS NDIS
-                </span>
-              </div>
-              <p className="text-slate-300 leading-relaxed text-xs">
-                The Windows Native WiFi API (<code className="text-amber-200 font-mono">wlanapi.dll</code>) intentionally restricts user mode to Infrastructure Access Point (BSSID) metadata. 
-                In compliance with strict platform integrity guidelines, <strong className="text-white">WinWiFi does not fabricate synthetic clients in live production mode</strong>. 
-                Observing active station MACs and probe requests on Windows requires a promiscuous capture driver (<strong className="text-amber-300">Npcap with raw 802.11 support</strong>) or importing an offline capture file.
-              </p>
-              <div className="pt-2 flex flex-wrap gap-2">
-                {onOpenImport && (
-                  <button
-                    onClick={onOpenImport}
-                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1.5 transition-all text-xs"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Import PCAP/PCAPNG Forensics</span>
-                  </button>
-                )}
-                {onSwitchToTraining && (
-                  <button
-                    onClick={onSwitchToTraining}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-semibold flex items-center gap-1.5 transition-all text-xs"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                    <span>View Offline Training Baseline</span>
-                  </button>
-                )}
-              </div>
+      {/* Live Telemetry Sensor Header */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
+            <Radio className="w-5 h-5 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-slate-100">Live 802.11 Station Telemetry & Probe Intelligence</h2>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono">
+                LIVE OVER-THE-AIR SENSOR
+              </span>
             </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Real-time 802.11 Layer-2 client enumeration, RSSI tracking, probe request harvesting, and dynamic transmission telemetry.
+            </p>
           </div>
         </div>
-      ) : isPcap ? (
-        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 text-xs text-emerald-300 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span className="font-semibold">Imported Forensic Packet Capture: Station telemetry extracted from real 802.11 Data / Probe / EAPOL frames.</span>
-          </div>
-          <span className="px-2 py-0.5 rounded bg-emerald-500/20 font-mono text-[10px] font-bold">
-            VERIFIED FORENSIC DATA
-          </span>
+
+        <div className="flex items-center gap-2">
+          {onOpenImport && (
+            <button
+              onClick={onOpenImport}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-400" />
+              <span>Import PCAP/PCAPNG</span>
+            </button>
+          )}
         </div>
-      ) : isTraining ? (
-        <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 text-xs text-purple-300 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-purple-400" />
-            <span className="font-semibold">Training Mode / Lab Scenario: Displaying synthetic client baseline for offline educational demonstration.</span>
-          </div>
-          <span className="px-2 py-0.5 rounded bg-purple-500/20 font-mono text-[10px] font-bold">
-            TRAINING LAB DATA
-          </span>
-        </div>
-      ) : null}
+      </div>
 
       {/* Header with KPI cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -234,16 +201,10 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
                       <Laptop className="w-5 h-5" />
                     </div>
                     <div className="font-semibold text-slate-300">
-                      {isLiveMode ? 'No Client Stations Disclosed by Windows WLAN Service' : 'No Client Stations in Current Monitoring Buffer'}
+                      No Client Stations in Current Monitoring Buffer
                     </div>
                     <div className="text-xs text-slate-500 max-w-md mx-auto">
-                      {isLiveMode ? (
-                        <>
-                          Windows Native WiFi API only surfaces BSS infrastructure frames. To inspect client stations, capture raw 802.11 frames using Npcap/Wireshark and import the .pcap file.
-                        </>
-                      ) : (
-                        <>No 802.11 client station frames match the active filter criteria.</>
-                      )}
+                      No active 802.11 client station frames match the filter criteria. Stations will appear as probe requests or data frames are detected.
                     </div>
                   </td>
                 </tr>
