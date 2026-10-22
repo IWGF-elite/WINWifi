@@ -167,12 +167,13 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
           const apWithHandshake = benchmarkAps.find(a => a.handshake);
           if (apWithHandshake && apWithHandshake.handshake) {
             const h = apWithHandshake.handshake;
-            const hasFormat = h.hashcatFormat && h.hashcatFormat.startsWith('WPA*02*');
+            const format = h.hashcatFormat ?? '';
+            const hasFormat = format.startsWith('WPA*02*');
             const hasNonces = h.anonce.length === 64 && h.snonce.length === 64 && h.micHex.length === 32;
 
             if (hasFormat && hasNonces) {
               updated[i].status = 'PASSED';
-              updated[i].details = `Verified 32-byte ANonce/SNonce, 16-byte MIC, and valid Hashcat 22000 format (${h.hashcatFormat.slice(0, 32)}...).`;
+              updated[i].details = `Verified 32-byte ANonce/SNonce, 16-byte MIC, and valid Hashcat 22000 format (${format.slice(0, 32)}...).`;
             } else {
               updated[i].status = 'FAILED';
               updated[i].details = 'Invalid EAPOL handshake parameters.';

@@ -177,7 +177,7 @@ export default function App() {
         try {
           const health = await bridgeClient.checkHealth();
           setBridgeStatus(health);
-          setIsScanning(health.isScanning);
+          setIsScanning(health.isScanning ?? false);
           setActiveSourceLabel(`Native Bridge (${health?.activeAdapterName || 'Hardware Adapter'})`);
           const detectedAdapters = await bridgeClient.getAdapters();
           setAdapters(detectedAdapters);
@@ -1141,6 +1141,7 @@ export default function App() {
           isOpen={showBridgeModal}
           onClose={() => setShowBridgeModal(false)}
           onConnectedDataReceived={handleRefreshScan}
+          isDarkMode={isDarkMode}
         />
       )}
     </div>

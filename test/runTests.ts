@@ -78,8 +78,8 @@ runTest('T4: Cryptographic Handshake & Hashcat 22000 Structure', () => {
     throw new Error('No handshake in benchmark');
   }
   const hs = apWithHandshake.handshake;
-  if (!hs.hashcatFormat.startsWith('WPA*02*')) {
-    throw new Error(`Invalid Hashcat prefix: ${hs.hashcatFormat}`);
+  if (!hs.hashcatFormat?.startsWith('WPA*02*')) {
+    throw new Error(`Invalid Hashcat prefix: ${hs.hashcatFormat ?? '(missing)'}`);
   }
   if (!hs.capturedSteps || hs.capturedSteps.length < 2) {
     throw new Error('Incomplete handshake messages');
@@ -246,6 +246,7 @@ runTest('T11: Incident Center Lifecycle Transitions', () => {
   const initialStatus = inc.status;
   threatEngine.updateIncidentStatus(inc.id, 'Investigating', 'Verification tester note');
   const updated = threatEngine.getIncidents().find((i: any) => i.id === inc.id);
+  if (!updated) throw new Error('Incident disappeared after lifecycle update');
   if (updated.status !== 'Investigating' || updated.notes.length === 0) {
     throw new Error('Incident lifecycle update failed');
   }
