@@ -1,0 +1,8 @@
+{
+  "name": "working 1 WinWiFi Security Auditor",
+  "description": "Next-generation Windows wireless security platform combining deep 802.11 forensics, automated threat detection, NIST SP 800-153 compliance, and enterprise SecOps intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

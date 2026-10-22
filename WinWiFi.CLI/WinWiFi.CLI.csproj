@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>winwifi-cli</AssemblyName>
+    <RootNamespace>WinWiFi</RootNamespace>
+    <Version>3.0.0</Version>
+    <Description>WinWiFi Native Security Daemon &amp; CLI Bridge</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- MVVM Toolkit & Dependency Injection -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.4" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\WinWiFi.Desktop\Data\**\*.cs" LinkBase="Data" />
+    <Compile Include="..\WinWiFi.Desktop\Interop\**\*.cs" LinkBase="Interop" />
+    <Compile Include="..\WinWiFi.Desktop\Models\**\*.cs" LinkBase="Models" />
+    <Compile Include="..\WinWiFi.Desktop\Services\**\*.cs" LinkBase="Services" />
+    <Compile Include="..\WinWiFi.Desktop\Tests\**\*.cs" LinkBase="Tests" />
+  </ItemGroup>
+
+</Project>

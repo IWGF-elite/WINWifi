@@ -1,0 +1,28 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+work/
+20??-??-??/
+*.log
+*.zip
+*.exe
+*.dll
+.env*
+!.env.example
+
+# .NET build output
+bin/
+obj/
+bin.bak/
+obj.bak/
+*.pdb
+publish*/
+
+# SQLite databases (runtime data, not source)
+*.db
+*.db-shm
+*.db-wal
+*.db*
+Data Source=*
