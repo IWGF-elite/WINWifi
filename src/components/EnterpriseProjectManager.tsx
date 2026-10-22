@@ -236,7 +236,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
                 <Database className="w-4 h-4 text-blue-400" />
-                Integrated SQLite Persistence Query Terminal
+                Local Data Query Preview (Supported SELECT Subset)
               </h3>
               <button
                 onClick={handleRunSql}

@@ -297,24 +297,24 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
           Local Administrative Automation & REST API
         </h2>
         <p className="text-xs text-slate-400">
-          WinWiFi exposes local-only (loopback) read-only endpoints for SOC integration, SIEM logging, and enterprise orchestration.
+          The Windows bridge exposes local endpoints for network observations, incidents, diagnostics, and health. Scan and import actions are also available through the bridge.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs font-mono">
           <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-            <span className="text-emerald-400 font-bold">GET</span> /api/v1/projects
-            <div className="text-slate-500 text-[10px] font-sans mt-0.5">Enumerate assessment projects</div>
+            <span className="text-emerald-400 font-bold">GET</span> /api/networks
+            <div className="text-slate-500 text-[10px] font-sans mt-0.5">Read current Windows WLAN observations</div>
           </div>
           <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-            <span className="text-emerald-400 font-bold">GET</span> /api/v1/networks
-            <div className="text-slate-500 text-[10px] font-sans mt-0.5">Stream live AP inventory & scores</div>
+            <span className="text-emerald-400 font-bold">GET</span> /api/incidents
+            <div className="text-slate-500 text-[10px] font-sans mt-0.5">Read locally recorded incidents</div>
           </div>
           <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-            <span className="text-emerald-400 font-bold">GET</span> /api/v1/threats
-            <div className="text-slate-500 text-[10px] font-sans mt-0.5">Retrieve active rogue AP alerts</div>
+            <span className="text-emerald-400 font-bold">GET</span> /api/diagnostics
+            <div className="text-slate-500 text-[10px] font-sans mt-0.5">Read adapter and scanner diagnostics</div>
           </div>
           <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-            <span className="text-emerald-400 font-bold">GET</span> /api/v1/health
+            <span className="text-emerald-400 font-bold">GET</span> /api/health
             <div className="text-slate-500 text-[10px] font-sans mt-0.5">Check scanner & adapter status</div>
           </div>
         </div>
