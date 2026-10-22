@@ -1,0 +1,9 @@
+Wireless security depends on seeing the evidence clearly. WinWiFi Security Auditor brings network inventory, threat review, packet analysis, and reporting into one Windows workspace.
+
+Command Center summarizes network posture, priority findings, and active cases. In Networks, search access points, compare security details, and open a record for technical context. RF Spectrum makes channel activity across 2.4, 5, and 6 gigahertz easy to compare.
+
+Threats and Investigations connect suspicious indicators with case status, evidence, and analyst notes. For packet review, load PCAP or PCAPNG files, filter frames, and inspect decoded 802.11 fields beside raw bytes. Handshakes organizes EAPOL records and supported Hashcat 22000 exports for authorized assessments.
+
+Reports turn findings into executive context and prioritized remediation. Projects keep assessment scope in view.
+
+WinWiFi Security Auditor. Clear evidence. Focused analysis. Actionable reporting.

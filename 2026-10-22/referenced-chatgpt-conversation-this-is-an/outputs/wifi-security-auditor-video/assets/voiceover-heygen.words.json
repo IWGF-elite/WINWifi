@@ -1,0 +1,782 @@
+[
+  {
+    "id": "w0",
+    "text": "Wireless",
+    "start": 0.256,
+    "end": 0.896
+  },
+  {
+    "id": "w1",
+    "text": "security",
+    "start": 1.109,
+    "end": 1.3227
+  },
+  {
+    "id": "w2",
+    "text": "depends",
+    "start": 1.536,
+    "end": 2.0907
+  },
+  {
+    "id": "w3",
+    "text": "on",
+    "start": 2.219,
+    "end": 2.389
+  },
+  {
+    "id": "w4",
+    "text": "seeing",
+    "start": 2.475,
+    "end": 2.688
+  },
+  {
+    "id": "w5",
+    "text": "the",
+    "start": 2.859,
+    "end": 2.9867
+  },
+  {
+    "id": "w6",
+    "text": "evidence",
+    "start": 3.029,
+    "end": 3.2427
+  },
+  {
+    "id": "w7",
+    "text": "clearly.",
+    "start": 3.541,
+    "end": 4.224
+  },
+  {
+    "id": "w8",
+    "text": "WinWiFi",
+    "start": 4.608,
+    "end": 5.333
+  },
+  {
+    "id": "w9",
+    "text": "Security",
+    "start": 5.376,
+    "end": 5.717
+  },
+  {
+    "id": "w10",
+    "text": "Auditor",
+    "start": 5.888,
+    "end": 6.229
+  },
+  {
+    "id": "w11",
+    "text": "brings",
+    "start": 6.315,
+    "end": 6.741
+  },
+  {
+    "id": "w12",
+    "text": "network",
+    "start": 6.912,
+    "end": 7.253
+  },
+  {
+    "id": "w13",
+    "text": "inventory,",
+    "start": 7.339,
+    "end": 8.085
+  },
+  {
+    "id": "w14",
+    "text": "threat",
+    "start": 8.363,
+    "end": 8.6187
+  },
+  {
+    "id": "w15",
+    "text": "review,",
+    "start": 8.704,
+    "end": 9.088
+  },
+  {
+    "id": "w16",
+    "text": "packet",
+    "start": 9.344,
+    "end": 9.728
+  },
+  {
+    "id": "w17",
+    "text": "analysis,",
+    "start": 9.771,
+    "end": 10.475
+  },
+  {
+    "id": "w18",
+    "text": "and",
+    "start": 10.624,
+    "end": 10.88
+  },
+  {
+    "id": "w19",
+    "text": "reporting",
+    "start": 10.923,
+    "end": 11.264
+  },
+  {
+    "id": "w20",
+    "text": "into",
+    "start": 11.435,
+    "end": 11.605
+  },
+  {
+    "id": "w21",
+    "text": "one",
+    "start": 11.819,
+    "end": 12.0747
+  },
+  {
+    "id": "w22",
+    "text": "Windows",
+    "start": 12.203,
+    "end": 12.544
+  },
+  {
+    "id": "w23",
+    "text": "workspace.",
+    "start": 12.672,
+    "end": 13.335
+  },
+  {
+    "id": "w24",
+    "text": "Command",
+    "start": 13.529,
+    "end": 13.827
+  },
+  {
+    "id": "w25",
+    "text": "Center",
+    "start": 13.955,
+    "end": 14.126
+  },
+  {
+    "id": "w26",
+    "text": "summarizes",
+    "start": 14.297,
+    "end": 14.979
+  },
+  {
+    "id": "w27",
+    "text": "network",
+    "start": 15.065,
+    "end": 15.534
+  },
+  {
+    "id": "w28",
+    "text": "posture,",
+    "start": 15.619,
+    "end": 16.302
+  },
+  {
+    "id": "w29",
+    "text": "priority",
+    "start": 16.515,
+    "end": 16.899
+  },
+  {
+    "id": "w30",
+    "text": "findings,",
+    "start": 17.027,
+    "end": 17.603
+  },
+  {
+    "id": "w31",
+    "text": "and",
+    "start": 17.71,
+    "end": 17.838
+  },
+  {
+    "id": "w32",
+    "text": "active",
+    "start": 17.881,
+    "end": 18.1367
+  },
+  {
+    "id": "w33",
+    "text": "cases.",
+    "start": 18.35,
+    "end": 18.926
+  },
+  {
+    "id": "w34",
+    "text": "In",
+    "start": 19.289,
+    "end": 19.886
+  },
+  {
+    "id": "w35",
+    "text": "Networks,",
+    "start": 19.929,
+    "end": 20.569
+  },
+  {
+    "id": "w36",
+    "text": "search",
+    "start": 20.782,
+    "end": 20.995
+  },
+  {
+    "id": "w37",
+    "text": "access",
+    "start": 21.166,
+    "end": 21.379
+  },
+  {
+    "id": "w38",
+    "text": "points,",
+    "start": 21.635,
+    "end": 22.126
+  },
+  {
+    "id": "w39",
+    "text": "compare",
+    "start": 22.361,
+    "end": 22.702
+  },
+  {
+    "id": "w40",
+    "text": "security",
+    "start": 22.83,
+    "end": 23.171
+  },
+  {
+    "id": "w41",
+    "text": "details,",
+    "start": 23.342,
+    "end": 23.769
+  },
+  {
+    "id": "w42",
+    "text": "and",
+    "start": 24.025,
+    "end": 24.238
+  },
+  {
+    "id": "w43",
+    "text": "open",
+    "start": 24.323,
+    "end": 24.5367
+  },
+  {
+    "id": "w44",
+    "text": "a",
+    "start": 24.707,
+    "end": 24.75
+  },
+  {
+    "id": "w45",
+    "text": "record",
+    "start": 24.793,
+    "end": 24.963
+  },
+  {
+    "id": "w46",
+    "text": "for",
+    "start": 25.219,
+    "end": 25.347
+  },
+  {
+    "id": "w47",
+    "text": "technical",
+    "start": 25.39,
+    "end": 25.731
+  },
+  {
+    "id": "w48",
+    "text": "context.",
+    "start": 25.859,
+    "end": 26.641
+  },
+  {
+    "id": "w49",
+    "text": "RF",
+    "start": 26.953,
+    "end": 27.252
+  },
+  {
+    "id": "w50",
+    "text": "Spectrum",
+    "start": 27.295,
+    "end": 27.721
+  },
+  {
+    "id": "w51",
+    "text": "makes",
+    "start": 27.807,
+    "end": 27.892
+  },
+  {
+    "id": "w52",
+    "text": "channel",
+    "start": 28.02,
+    "end": 28.233
+  },
+  {
+    "id": "w53",
+    "text": "activity",
+    "start": 28.404,
+    "end": 28.7026
+  },
+  {
+    "id": "w54",
+    "text": "across",
+    "start": 28.959,
+    "end": 29.172
+  },
+  {
+    "id": "w55",
+    "text": "2.4,",
+    "start": 29.343,
+    "end": 30.172
+  },
+  {
+    "id": "w56",
+    "text": "5,",
+    "start": 30.379,
+    "end": 30.793
+  },
+  {
+    "id": "w57",
+    "text": "and",
+    "start": 30.836,
+    "end": 31.092
+  },
+  {
+    "id": "w58",
+    "text": "6",
+    "start": 31.135,
+    "end": 31.348
+  },
+  {
+    "id": "w59",
+    "text": "gigahertz",
+    "start": 31.476,
+    "end": 31.945
+  },
+  {
+    "id": "w60",
+    "text": "easy",
+    "start": 32.116,
+    "end": 32.2866
+  },
+  {
+    "id": "w61",
+    "text": "to",
+    "start": 32.457,
+    "end": 32.5426
+  },
+  {
+    "id": "w62",
+    "text": "compare.",
+    "start": 32.585,
+    "end": 33.289
+  },
+  {
+    "id": "w63",
+    "text": "Threats",
+    "start": 33.695,
+    "end": 34.164
+  },
+  {
+    "id": "w64",
+    "text": "and",
+    "start": 34.249,
+    "end": 34.377
+  },
+  {
+    "id": "w65",
+    "text": "Investigations",
+    "start": 34.42,
+    "end": 35.017
+  },
+  {
+    "id": "w66",
+    "text": "connect",
+    "start": 35.273,
+    "end": 35.529
+  },
+  {
+    "id": "w67",
+    "text": "suspicious",
+    "start": 35.871,
+    "end": 36.3826
+  },
+  {
+    "id": "w68",
+    "text": "indicators",
+    "start": 36.639,
+    "end": 37.065
+  },
+  {
+    "id": "w69",
+    "text": "with",
+    "start": 37.236,
+    "end": 37.4066
+  },
+  {
+    "id": "w70",
+    "text": "case",
+    "start": 37.492,
+    "end": 37.705
+  },
+  {
+    "id": "w71",
+    "text": "status,",
+    "start": 37.791,
+    "end": 38.324
+  },
+  {
+    "id": "w72",
+    "text": "evidence,",
+    "start": 38.473,
+    "end": 38.943
+  },
+  {
+    "id": "w73",
+    "text": "and",
+    "start": 39.113,
+    "end": 39.241
+  },
+  {
+    "id": "w74",
+    "text": "analyst",
+    "start": 39.284,
+    "end": 39.7106
+  },
+  {
+    "id": "w75",
+    "text": "notes.",
+    "start": 39.796,
+    "end": 40.34
+  },
+  {
+    "id": "w76",
+    "text": "For",
+    "start": 40.67,
+    "end": 40.7978
+  },
+  {
+    "id": "w77",
+    "text": "packet",
+    "start": 40.84,
+    "end": 41.224
+  },
+  {
+    "id": "w78",
+    "text": "review,",
+    "start": 41.267,
+    "end": 41.672
+  },
+  {
+    "id": "w79",
+    "text": "load",
+    "start": 41.95,
+    "end": 42.248
+  },
+  {
+    "id": "w80",
+    "text": "PCAP",
+    "start": 42.419,
+    "end": 42.8885
+  },
+  {
+    "id": "w81",
+    "text": "or",
+    "start": 43.017,
+    "end": 43.1445
+  },
+  {
+    "id": "w82",
+    "text": "PCAPNG",
+    "start": 43.187,
+    "end": 44.1258
+  },
+  {
+    "id": "w83",
+    "text": "files,",
+    "start": 44.169,
+    "end": 44.681
+  },
+  {
+    "id": "w84",
+    "text": "filter",
+    "start": 44.937,
+    "end": 45.5765
+  },
+  {
+    "id": "w85",
+    "text": "frames,",
+    "start": 45.619,
+    "end": 46.024
+  },
+  {
+    "id": "w86",
+    "text": "and",
+    "start": 46.174,
+    "end": 46.472
+  },
+  {
+    "id": "w87",
+    "text": "inspect",
+    "start": 46.515,
+    "end": 46.9418
+  },
+  {
+    "id": "w88",
+    "text": "decoded",
+    "start": 47.198,
+    "end": 47.624
+  },
+  {
+    "id": "w89",
+    "text": "802.11",
+    "start": 47.795,
+    "end": 49.459
+  },
+  {
+    "id": "w90",
+    "text": "fields",
+    "start": 49.544,
+    "end": 49.928
+  },
+  {
+    "id": "w91",
+    "text": "beside",
+    "start": 50.014,
+    "end": 50.355
+  },
+  {
+    "id": "w92",
+    "text": "raw",
+    "start": 50.441,
+    "end": 50.611
+  },
+  {
+    "id": "w93",
+    "text": "bytes.",
+    "start": 50.697,
+    "end": 51.315
+  },
+  {
+    "id": "w94",
+    "text": "Handshakes",
+    "start": 51.721,
+    "end": 52.3605
+  },
+  {
+    "id": "w95",
+    "text": "organizes",
+    "start": 52.531,
+    "end": 53.0858
+  },
+  {
+    "id": "w96",
+    "text": "EAPOL",
+    "start": 53.171,
+    "end": 53.683
+  },
+  {
+    "id": "w97",
+    "text": "records",
+    "start": 53.726,
+    "end": 54.0245
+  },
+  {
+    "id": "w98",
+    "text": "and",
+    "start": 54.153,
+    "end": 54.2805
+  },
+  {
+    "id": "w99",
+    "text": "supported",
+    "start": 54.323,
+    "end": 54.707
+  },
+  {
+    "id": "w100",
+    "text": "Hashcat",
+    "start": 54.878,
+    "end": 55.411
+  },
+  {
+    "id": "w101",
+    "text": "22000",
+    "start": 55.411,
+    "end": 55.944
+  },
+  {
+    "id": "w102",
+    "text": "exports",
+    "start": 56.115,
+    "end": 56.584
+  },
+  {
+    "id": "w103",
+    "text": "for",
+    "start": 56.755,
+    "end": 57.096
+  },
+  {
+    "id": "w104",
+    "text": "authorized",
+    "start": 57.139,
+    "end": 57.651
+  },
+  {
+    "id": "w105",
+    "text": "assessments.",
+    "start": 57.822,
+    "end": 58.579
+  },
+  {
+    "id": "w106",
+    "text": "Reports",
+    "start": 58.91,
+    "end": 59.4217
+  },
+  {
+    "id": "w107",
+    "text": "turn",
+    "start": 59.592,
+    "end": 59.891
+  },
+  {
+    "id": "w108",
+    "text": "findings",
+    "start": 60.019,
+    "end": 60.531
+  },
+  {
+    "id": "w109",
+    "text": "into",
+    "start": 60.659,
+    "end": 60.787
+  },
+  {
+    "id": "w110",
+    "text": "executive",
+    "start": 60.958,
+    "end": 61.3417
+  },
+  {
+    "id": "w111",
+    "text": "context",
+    "start": 61.512,
+    "end": 61.9817
+  },
+  {
+    "id": "w112",
+    "text": "and",
+    "start": 62.238,
+    "end": 62.579
+  },
+  {
+    "id": "w113",
+    "text": "prioritized",
+    "start": 62.664,
+    "end": 63.347
+  },
+  {
+    "id": "w114",
+    "text": "remediation.",
+    "start": 63.603,
+    "end": 64.392
+  },
+  {
+    "id": "w115",
+    "text": "Projects",
+    "start": 64.755,
+    "end": 65.608
+  },
+  {
+    "id": "w116",
+    "text": "keep",
+    "start": 65.694,
+    "end": 65.992
+  },
+  {
+    "id": "w117",
+    "text": "assessment",
+    "start": 66.078,
+    "end": 66.5897
+  },
+  {
+    "id": "w118",
+    "text": "scope",
+    "start": 66.675,
+    "end": 66.931
+  },
+  {
+    "id": "w119",
+    "text": "in",
+    "start": 67.059,
+    "end": 67.187
+  },
+  {
+    "id": "w120",
+    "text": "view.",
+    "start": 67.272,
+    "end": 67.763
+  },
+  {
+    "id": "w121",
+    "text": "WinWiFi",
+    "start": 68.083,
+    "end": 68.8937
+  },
+  {
+    "id": "w122",
+    "text": "Security",
+    "start": 69.022,
+    "end": 69.4057
+  },
+  {
+    "id": "w123",
+    "text": "Auditor.",
+    "start": 69.576,
+    "end": 70.216
+  },
+  {
+    "id": "w124",
+    "text": "Clear",
+    "start": 70.558,
+    "end": 70.856
+  },
+  {
+    "id": "w125",
+    "text": "evidence.",
+    "start": 70.984,
+    "end": 71.496
+  },
+  {
+    "id": "w126",
+    "text": "Focused",
+    "start": 71.795,
+    "end": 72.2217
+  },
+  {
+    "id": "w127",
+    "text": "analysis.",
+    "start": 72.35,
+    "end": 73.032
+  },
+  {
+    "id": "w128",
+    "text": "Actionable",
+    "start": 73.246,
+    "end": 73.715
+  },
+  {
+    "id": "w129",
+    "text": "reporting.",
+    "start": 73.843,
+    "end": 74.45569160997732
+  }
+]

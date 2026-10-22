@@ -1,0 +1,43 @@
+[Script Info]
+Title: WinWiFi Narration Captions
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Caption,Arial,30,&H00F6FAFF,&H000000FF,&H80050A12,&HAA050A12,0,0,0,0,100,100,0,0,3,1.4,0.6,2,130,130,46,1
+
+[Events]
+Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+Dialogue: 0,0:00:00.22,0:00:03.11,Caption,,0,0,0,,Wireless security depends on seeing the
+Dialogue: 0,0:00:02.99,0:00:04.34,Caption,,0,0,0,,evidence clearly.
+Dialogue: 0,0:00:04.57,0:00:08.21,Caption,,0,0,0,,WinWiFi Security Auditor\Nbrings network inventory,
+Dialogue: 0,0:00:08.32,0:00:11.38,Caption,,0,0,0,,threat review, packet\Nanalysis, and reporting
+Dialogue: 0,0:00:11.40,0:00:13.46,Caption,,0,0,0,,into one Windows workspace.
+Dialogue: 0,0:00:13.49,0:00:17.02,Caption,,0,0,0,,Command Center summarizes\Nnetwork posture, priority
+Dialogue: 0,0:00:16.99,0:00:19.05,Caption,,0,0,0,,findings, and active cases.
+Dialogue: 0,0:00:19.25,0:00:22.82,Caption,,0,0,0,,In Networks, search\Naccess points, compare
+Dialogue: 0,0:00:22.79,0:00:25.08,Caption,,0,0,0,,security details, and open a record
+Dialogue: 0,0:00:25.18,0:00:26.76,Caption,,0,0,0,,for technical context.
+Dialogue: 0,0:00:26.91,0:00:29.29,Caption,,0,0,0,,RF Spectrum makes\Nchannel activity across
+Dialogue: 0,0:00:29.30,0:00:32.41,Caption,,0,0,0,,2.4, 5, and 6 gigahertz easy
+Dialogue: 0,0:00:32.42,0:00:33.41,Caption,,0,0,0,,to compare.
+Dialogue: 0,0:00:33.66,0:00:37.18,Caption,,0,0,0,,Threats and Investigations\Nconnect suspicious indicators
+Dialogue: 0,0:00:37.20,0:00:39.83,Caption,,0,0,0,,with case status, evidence, and analyst
+Dialogue: 0,0:00:39.76,0:00:40.46,Caption,,0,0,0,,notes.
+Dialogue: 0,0:00:40.63,0:00:43.26,Caption,,0,0,0,,For packet review, load PCAP or
+Dialogue: 0,0:00:43.15,0:00:46.59,Caption,,0,0,0,,PCAPNG files, filter frames, and
+Dialogue: 0,0:00:46.48,0:00:50.05,Caption,,0,0,0,,inspect decoded 802.11 fields
+Dialogue: 0,0:00:49.97,0:00:51.43,Caption,,0,0,0,,beside raw bytes.
+Dialogue: 0,0:00:51.68,0:00:54.83,Caption,,0,0,0,,Handshakes organizes EAPOL\Nrecords and supported
+Dialogue: 0,0:00:54.84,0:00:58.70,Caption,,0,0,0,,Hashcat 22000 exports\Nfor authorized assessments.
+Dialogue: 0,0:00:58.87,0:01:02.10,Caption,,0,0,0,,Reports turn findings\Ninto executive context
+Dialogue: 0,0:01:02.20,0:01:04.51,Caption,,0,0,0,,and prioritized remediation.
+Dialogue: 0,0:01:04.71,0:01:07.88,Caption,,0,0,0,,Projects keep assessment scope in view.
+Dialogue: 0,0:01:08.04,0:01:10.34,Caption,,0,0,0,,WinWiFi Security Auditor.
+Dialogue: 0,0:01:10.52,0:01:11.62,Caption,,0,0,0,,Clear evidence.
+Dialogue: 0,0:01:11.76,0:01:13.15,Caption,,0,0,0,,Focused analysis.
+Dialogue: 0,0:01:13.21,0:01:14.58,Caption,,0,0,0,,Actionable reporting.

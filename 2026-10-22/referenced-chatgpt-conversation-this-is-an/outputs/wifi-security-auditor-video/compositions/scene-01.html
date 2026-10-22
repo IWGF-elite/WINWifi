@@ -1,0 +1,23 @@
+<!doctype html><html lang="en"><body><template><style>
+#root{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:radial-gradient(ellipse at 50% 36%,#182033 0,#0b0e14 56%,#08090c 100%);color:#e8edf6;font-family:Inter,sans-serif}
+.screen{position:absolute;inset:0;padding:38px 58px;display:flex;flex-direction:column;align-items:center}
+.brandline{height:42px;width:100%;display:flex;align-items:center;gap:13px;font-size:16px;color:#cbd5e1}
+.mark{width:24px;height:24px;background:#2563eb;border-radius:6px;display:grid;place-items:center;color:white;font-size:15px}
+.spacer{flex:1}.count{font:12px ui-monospace,monospace;letter-spacing:.12em;color:#94a3b8}
+.status{font:11px ui-monospace,monospace;letter-spacing:.08em;color:#9dc5ff;border:1px solid #2b4775;border-radius:4px;padding:7px 10px;background:#101829}
+.stage{position:relative;width:100%;height:790px;margin-top:16px;display:flex;align-items:center;justify-content:center;background:linear-gradient(130deg,#0e121a,#101522);border:1px solid #293246;border-radius:13px;box-shadow:0 28px 80px #0008;overflow:hidden}
+.image-wrap{width:calc(100% - 40px);height:calc(100% - 34px);display:flex;align-items:center;justify-content:center;transform-origin:center}
+.shot{display:block;width:100%;height:100%;object-fit:contain}
+.caption{width:100%;height:104px;display:flex;align-items:center;justify-content:space-between;padding:0 10px}
+.caption-left{display:flex;flex-direction:column;gap:7px}.kicker{font:11px ui-monospace,monospace;color:#60a5fa;letter-spacing:.16em;text-transform:uppercase}
+.title{font-size:27px;font-weight:650;letter-spacing:-.025em}
+.dots{display:flex;gap:8px}.dot{width:6px;height:6px;border-radius:8px;background:#394150}.dot.active{width:24px;background:#3b82f6}
+.progress{position:absolute;left:58px;right:58px;bottom:22px;height:2px;background:#192232}.progress i{display:block;height:100%;background:#3b82f6}
+</style>
+<div id="root" data-composition-id="p1" data-width="1920" data-height="1080"><div class="screen">
+  <div class="brandline"><span class="mark">⬡</span><b>WinWiFi Security Auditor</b><span class="spacer"></span><span class="status">WINDOWS-FOCUSED WIRELESS SECURITY</span><span class="count">01 / 09</span></div>
+  <div class="stage"><div class="image-wrap"><img class="shot" src="assets/linkedin/post-09.jpg" alt="Command Center screen from the user's LinkedIn post"></div></div>
+  <div class="caption"><div class="caption-left"><div class="kicker">01 — Command Center</div><div class="title">A clear operational view.</div></div><div class="dots"><i class="dot active"></i><i class="dot "></i><i class="dot "></i><i class="dot "></i><i class="dot "></i><i class="dot "></i><i class="dot "></i><i class="dot "></i><i class="dot "></i></div></div>
+  <div class="progress"><i style="width:11.11111111111111%"></i></div>
+ </div></div>
+<script>const tl=gsap.timeline({paused:true});tl.fromTo("#root",{opacity:0},{opacity:1,duration:.28,ease:"power2.out"},0);tl.fromTo(".image-wrap",{scale:1},{scale:1.04,duration:13,ease:"none"},0);tl.to("#root",{opacity:0,duration:.28,ease:"power1.in"},12.72);window.__timelines=window.__timelines||{};window.__timelines["p1"]=tl;</script></template></body></html>
