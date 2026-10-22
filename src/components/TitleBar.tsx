@@ -26,6 +26,7 @@ interface TitleBarProps {
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
   dataSourceProfile: DataSourceProfile;
+  hasFreshLiveData?: boolean;
   activeSourceLabel: string;
   isScanning: boolean;
   onToggleScan: () => void;
@@ -48,6 +49,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   isDarkMode,
   onToggleDarkMode,
   dataSourceProfile,
+  hasFreshLiveData = false,
   activeSourceLabel,
   isScanning,
   onToggleScan,
@@ -69,7 +71,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
     switch (dataSourceProfile) {
       case 'LIVE_WINDOWS':
         return {
-          label: 'LIVE WINDOWS DATA',
+          label: hasFreshLiveData ? 'LIVE WINDOWS DATA' : 'WAITING FOR SCAN',
           classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
           icon: <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
         };
@@ -90,11 +92,16 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       case 'TRAINING':
       case 'BENCHMARK':
       case 'OFFLINE_LAB':
-      default:
         return {
           label: 'TRAINING DATA',
           classes: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
           icon: <FlaskConical className="w-3 h-3 text-purple-400" />
+        };
+      default:
+        return {
+          label: 'NO DATA',
+          classes: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
+          icon: <Database className="w-3 h-3 text-slate-400" />
         };
     }
   };

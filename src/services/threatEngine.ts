@@ -2,7 +2,6 @@ import { AccessPoint, IncidentRecord, SecurityChange, TimelineEvent } from '../t
 
 export class ThreatEngine {
   private static instance: ThreatEngine;
-  private knownGoodBaselines: Set<string> = new Set(['00:11:22:33:44:00', '00:11:22:33:44:01', '00:11:22:33:44:02']);
   private trustedOverrides: Set<string> = new Set();
   private confirmedRogues: Set<string> = new Set();
   private falsePositives: Set<string> = new Set();
@@ -14,76 +13,8 @@ export class ThreatEngine {
   public static getInstance(): ThreatEngine {
     if (!ThreatEngine.instance) {
       ThreatEngine.instance = new ThreatEngine();
-      ThreatEngine.instance.initDefaultIncidents();
     }
     return ThreatEngine.instance;
-  }
-
-  private initDefaultIncidents() {
-    this.incidents = [
-      {
-        id: 'INC-00042',
-        title: 'Suspected Evil Twin: Unauthorized Clone of Corporate SSID',
-        severity: 'CRITICAL',
-        confidence: 94,
-        status: 'Investigating',
-        createdAt: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
-        updatedAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-        assignedTo: 'Lead Security Auditor',
-        summary: 'Detected duplicate SSID "Corp_Secure" on an unauthorized MAC OUI with downgraded security (Open cleartext vs WPA2-Enterprise baseline).',
-        bssidTarget: 'AA:BB:CC:DD:EE:99',
-        ssidTarget: 'Corp_Secure',
-        evidenceIds: ['EVD-001', 'EVD-002', 'EVD-005'],
-        notes: [
-          { timestamp: new Date(Date.now() - 1000 * 60 * 30).toLocaleTimeString(), author: 'ThreatEngine', text: 'Automatic anomaly flag: OUI manufacturer mismatch and cleartext broadcast on 2.4GHz Ch 1.' },
-          { timestamp: new Date(Date.now() - 1000 * 60 * 12).toLocaleTimeString(), author: 'Auditor', text: 'Triangulated physical location near Reception Building A. Verifying physical rogue AP device.' }
-        ]
-      },
-      {
-        id: 'INC-00038',
-        title: 'Legacy WEP-128 Protocol Detected on Internal Warehouse Network',
-        severity: 'HIGH',
-        confidence: 100,
-        status: 'Open',
-        createdAt: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-        assignedTo: 'Network Operations',
-        summary: 'Warehouse scanner network using deprecated WEP-128 encryption. Violates PCI-DSS 4.0 Requirement 2.1 and NIST SP 800-153 §4.2.',
-        bssidTarget: '00:14:D1:68:90:22',
-        ssidTarget: 'Warehouse_Barcodes',
-        evidenceIds: ['EVD-003'],
-        notes: [
-          { timestamp: new Date(Date.now() - 1000 * 60 * 120).toLocaleTimeString(), author: 'ThreatEngine', text: 'Automated policy violation flagged during baseline inventory scan.' }
-        ]
-      }
-    ];
-
-    this.securityChanges = [
-      {
-        id: 'CHG-101',
-        bssid: 'AA:BB:CC:DD:EE:99',
-        ssid: 'Corp_Secure',
-        timestamp: new Date(Date.now() - 1000 * 60 * 35).toLocaleTimeString(),
-        type: 'new_bssid',
-        title: 'New Unrecognized BSSID Appeared',
-        before: 'Not in Baseline',
-        after: 'Active Broadcast on Ch 1',
-        riskImpact: 'CRITICAL',
-        evidenceIds: ['EVD-001']
-      },
-      {
-        id: 'CHG-102',
-        bssid: 'F8:1A:67:8B:11:02',
-        ssid: 'Netgear_Office_Ext',
-        timestamp: new Date(Date.now() - 1000 * 60 * 75).toLocaleTimeString(),
-        type: 'wps_change',
-        title: 'WPS 1.0 External Registrar Activated',
-        before: 'WPS Disabled',
-        after: 'WPS PIN Enabled & Unlocked',
-        riskImpact: 'HIGH',
-        evidenceIds: ['EVD-004']
-      }
-    ];
   }
 
   public analyzeThreats(accessPoints: AccessPoint[]): {

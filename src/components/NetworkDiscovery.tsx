@@ -238,7 +238,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
           <div>
             <div className="font-bold flex items-center gap-2">
               <span>
-                {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE WINDOWS DATA (Kernel WlanApi / NDIS)'}
+                {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE WINDOWS DATA (Native WLAN bridge)'}
                 {dataSourceProfile === 'REAL_PCAP' && 'IMPORTED DATA (Binary PCAP / PCAPNG Dissection)'}
                 {dataSourceProfile === 'REAL_NETSH' && 'IMPORTED DATA (Windows Netsh CLI Acquisition)'}
                 {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATA (Local Project SQLite Database)'}
@@ -247,11 +247,11 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                 )}
               </span>
               <span className="text-[10px] px-1.5 py-0.2 rounded font-mono border bg-black/20 border-current/30">
-                {accessPoints.length} BSS Entries Retained (Unbounded)
+                {accessPoints.length} BSS entries loaded
               </span>
             </div>
             <div className="text-[11px] opacity-80 mt-0.5">
-              Source: {activeSourceLabel} • Zero artificial result limits applied • Complete BSS discovery available to analysis engines
+              Source: {activeSourceLabel} • Displayed observations are available to analysis engines
             </div>
           </div>
         </div>

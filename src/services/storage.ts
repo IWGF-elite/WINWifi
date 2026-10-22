@@ -26,20 +26,31 @@ export class SqliteDatabaseService {
     if (!raw) {
       const defaultProject: AuditProject = {
         id: 'proj-001',
-        name: 'Corporate HQ Perimeter Audit 2026',
-        createdAt: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
+        name: 'New Wi-Fi Assessment',
+        createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        location: 'Building A, Floors 1-4',
-        auditorName: 'SecOps Team Lead',
-        notes: 'Annual Wi-Fi security compliance & rogue AP detection per NIST SP 800-153 guidelines.',
-        savedNetworksCount: 6,
-        capturedHandshakesCount: 1,
+        location: 'Not specified',
+        auditorName: 'Not assigned',
+        notes: '',
+        savedNetworksCount: 0,
+        capturedHandshakesCount: 0,
       };
       this.saveProjects([defaultProject]);
       return [defaultProject];
     }
     try {
-      return JSON.parse(raw);
+      const projects = JSON.parse(raw) as AuditProject[];
+      const starter = projects.find(project => project.id === 'proj-001' && project.name === 'Corporate HQ Perimeter Audit 2026');
+      if (starter) {
+        starter.name = 'New Wi-Fi Assessment';
+        starter.location = 'Not specified';
+        starter.auditorName = 'Not assigned';
+        starter.notes = '';
+        starter.savedNetworksCount = 0;
+        starter.capturedHandshakesCount = 0;
+        this.saveProjects(projects);
+      }
+      return projects;
     } catch {
       return [];
     }

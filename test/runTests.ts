@@ -239,11 +239,11 @@ runTest('T10: Offline Architecture Integrity', () => {
 // 11. Incident Lifecycle State Transitions
 runTest('T11: Incident Center Lifecycle Transitions', () => {
   const threatEngine = ThreatEngine.getInstance();
-  const incidents = threatEngine.getIncidents();
-  if (incidents.length === 0) throw new Error('No incidents initialized');
-
-  const inc = incidents[0];
-  const initialStatus = inc.status;
+  threatEngine.setIncidents([]);
+  if (threatEngine.getIncidents().length !== 0) throw new Error('Threat engine populated incidents without observed data');
+  const inc = threatEngine.createIncident({
+    title: 'Test incident', severity: 'LOW', confidence: 50, summary: 'Created by lifecycle test'
+  });
   threatEngine.updateIncidentStatus(inc.id, 'Investigating', 'Verification tester note');
   const updated = threatEngine.getIncidents().find((i: any) => i.id === inc.id);
   if (!updated) throw new Error('Incident disappeared after lifecycle update');

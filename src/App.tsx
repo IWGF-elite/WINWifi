@@ -113,7 +113,12 @@ export default function App() {
   const dataSourceProfileRef = useRef(dataSourceProfile);
   useEffect(() => { dataSourceProfileRef.current = dataSourceProfile; }, [dataSourceProfile]);
   const [activeSourceLabel, setActiveSourceLabel] = useState<string>('Waiting for the local Windows bridge');
-
+  const [lastLiveDataAt, setLastLiveDataAt] = useState<number | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 5_000);
+    return () => window.clearInterval(timer);
+  }, []);
   // Adapters & Scan State
   const [adapters, setAdapters] = useState<WifiAdapter[]>([]);
   const [selectedAdapterId, setSelectedAdapterId] = useState<string>('');
@@ -123,7 +128,7 @@ export default function App() {
   // Network Data & Packets
   const [accessPoints, setAccessPoints] = useState<AccessPoint[]>(() => {
     const projectId = db.getCurrentProjectId();
-    return applyAnalystOverrides(db.getAccessPoints(projectId), db.getAnalystOverrides(projectId));
+    return applyAnalystOverrides(db.getAccessPoints(projectId).filter(ap => ap.dataSourceOrigin !== 'TRAINING'), db.getAnalystOverrides(projectId));
   });
   const [packets, setPackets] = useState<PcapPacket[]>([]);
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
@@ -131,7 +136,7 @@ export default function App() {
   // Threats & Incidents
   const [incidents, setIncidents] = useState<IncidentRecord[]>(() => {
     const saved = db.getIncidents();
-    return (saved ?? threatEngine.getIncidents()).map(incident => ({ ...incident, notes: [...(incident.notes || [])], evidenceIds: [...(incident.evidenceIds || [])] }));
+    return (saved ?? []).filter(incident => !['INC-00042', 'INC-00038'].includes(incident.id)).map(incident => ({ ...incident, notes: [...(incident.notes || [])], evidenceIds: [...(incident.evidenceIds || [])] }));
   });
   const [securityChanges, setSecurityChanges] = useState<SecurityChange[]>(() => threatEngine.getSecurityChanges());
 
@@ -158,13 +163,23 @@ export default function App() {
   const [networkViewMode, setNetworkViewMode] = useState<'inventory' | 'discovery'>('inventory');
   const [bridgeNotice, setBridgeNotice] = useState('');
 
+  useEffect(() => {
+    if (bridgeState !== 'CONNECTED' || dataSourceProfile !== 'LIVE_WINDOWS' || lastLiveDataAt === null) return;
+    const remaining = Math.max(0, 30_000 - (Date.now() - lastLiveDataAt));
+    const timer = window.setTimeout(() => {
+      setDataSourceProfile(current => current === 'LIVE_WINDOWS' ? 'OFFLINE' : current);
+      setActiveSourceLabel('Last Windows WLAN observation is older than 30 seconds');
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [bridgeState, dataSourceProfile, lastLiveDataAt]);
+
   const bridgeClient = NativeBridgeClient.getInstance();
 
   // Subscribe to Native Windows Bridge events (SSE & Polling)
   useEffect(() => {
     threatEngine.setIncidents(incidents);
-    if (db.getIncidents() === null) db.saveIncidents(incidents);
-  // Seed the local incident store once from the bundled starter cases.
+    if (db.getIncidents() === null || db.getIncidents()?.some(incident => ['INC-00042', 'INC-00038'].includes(incident.id))) db.saveIncidents(incidents);
+  // Keep the incident engine aligned with the user's persisted incident records.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -172,8 +187,8 @@ export default function App() {
     const unsubStatus = bridgeClient.onStateChange(async (state) => {
       setBridgeState(state);
       if (state === 'CONNECTED') {
-        setDataSourceProfile('LIVE_WINDOWS');
         setBridgeNotice('');
+        setActiveSourceLabel('Windows bridge connected; waiting for WLAN observations');
         try {
           const health = await bridgeClient.checkHealth();
           setBridgeStatus(health);
@@ -186,6 +201,7 @@ export default function App() {
           setActiveSourceLabel('Native Bridge (Port 38989)');
         }
       } else if (state === 'DISCONNECTED' || state === 'ERROR') {
+        setLastLiveDataAt(null);
         if (dataSourceProfileRef.current === 'LIVE_WINDOWS') {
           setAccessPoints([]);
           setDataSourceProfile('OFFLINE');
@@ -199,8 +215,16 @@ export default function App() {
         const projectId = currentProjectIdRef.current;
         const resolvedAps = applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId));
         setAccessPoints(resolvedAps);
-        db.saveAccessPoints(projectId, resolvedAps);
-        setDataSourceProfile('LIVE_WINDOWS');
+        if (resolvedAps.length > 0) {
+          db.saveAccessPoints(projectId, resolvedAps);
+          setDataSourceProfile('LIVE_WINDOWS');
+          setLastLiveDataAt(Date.now());
+          setActiveSourceLabel(`Windows WLAN bridge (${resolvedAps.length} access points)`);
+        } else if (dataSourceProfileRef.current === 'LIVE_WINDOWS') {
+          setDataSourceProfile('OFFLINE');
+          setLastLiveDataAt(null);
+          setActiveSourceLabel('Windows bridge connected; no WLAN observations returned');
+        }
         setSelectedBssid((current) => resolvedAps.some(ap => ap.bssid === current) ? current : resolvedAps[0]?.bssid ?? null);
         const count = resolvedAps.length;
         const log = db.appendLog({
@@ -300,10 +324,13 @@ export default function App() {
     try {
       const result = await bridgeClient.refreshScan(selectedAdapterId || undefined);
       setAccessPoints(result.accessPoints);
-      setDataSourceProfile('LIVE_WINDOWS');
+      setDataSourceProfile(result.accessPoints.length ? 'LIVE_WINDOWS' : 'OFFLINE');
+      setLastLiveDataAt(result.accessPoints.length ? Date.now() : null);
+      setActiveSourceLabel(result.accessPoints.length ? `Windows WLAN bridge (${result.accessPoints.length} access points)` : 'Windows bridge connected; no WLAN observations returned');
+      if (result.accessPoints.length) db.saveAccessPoints(currentProjectId, result.accessPoints);
       setSelectedBssid(result.accessPoints[0]?.bssid ?? null);
       const log = db.appendLog({
-        level: 'SUCCESS', source: 'BRIDGE_REFRESH',
+        level: result.count > 0 ? 'SUCCESS' : 'INFO', source: 'BRIDGE_REFRESH',
         message: `Windows WLAN refresh completed (${result.count} access points returned).`,
       });
       setLogs((prev) => [log, ...prev]);
@@ -345,7 +372,7 @@ export default function App() {
       dataSourceOrigin: 'IMPORTED' as DataOrigin,
     })), db.getAnalystOverrides(currentProjectId));
     setAccessPoints(taggedAps);
-    setPackets(engine.generatePackets(taggedAps));
+    setPackets([]);
     db.saveAccessPoints(currentProjectId, taggedAps);
     setDataSourceProfile('REAL_NETSH');
     setActiveSourceLabel(`Windows Netsh (${taggedAps.length} APs)`);
@@ -595,6 +622,7 @@ export default function App() {
         isDarkMode={isDarkMode}
         onToggleDarkMode={handleToggleDarkMode}
         dataSourceProfile={dataSourceProfile}
+        hasFreshLiveData={bridgeState === 'CONNECTED' && dataSourceProfile === 'LIVE_WINDOWS' && lastLiveDataAt !== null && clockNow - lastLiveDataAt < 30_000}
         activeSourceLabel={activeSourceLabel}
         isScanning={isScanning}
         onToggleScan={handleToggleScan}
@@ -885,7 +913,7 @@ export default function App() {
                   }`}
                 >
                   <Radio className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Real Discovery Grid ({accessPoints.length} BSS)</span>
+                  <span>Network Discovery Grid ({accessPoints.length} BSS)</span>
                 </button>
               </div>
 
@@ -1035,15 +1063,16 @@ export default function App() {
             currentProject={currentProject}
             projects={projects}
             accessPoints={accessPoints}
+            dataSourceProfile={dataSourceProfile}
             onSwitchProject={(proj) => {
               setCurrentProjectId(proj.id);
               db.setCurrentProjectId(proj.id);
-              const projectAps = applyAnalystOverrides(db.getAccessPoints(proj.id), db.getAnalystOverrides(proj.id));
+              const projectAps = applyAnalystOverrides(db.getAccessPoints(proj.id).filter(ap => ap.dataSourceOrigin !== 'TRAINING'), db.getAnalystOverrides(proj.id));
               setAccessPoints(projectAps);
               setPackets([]);
               setSelectedBssid(null);
-              setDataSourceProfile(projectAps.length > 0 ? 'IMPORTED' : 'OFFLINE');
-              setActiveSourceLabel(projectAps.length > 0 ? `Saved data (${projectAps.length} access points)` : 'No saved network data in this project');
+              setDataSourceProfile('OFFLINE');
+              setActiveSourceLabel(projectAps.length > 0 ? `Saved snapshot (${projectAps.length} access points)` : 'No saved network data in this project');
             }}
             onCreateProject={handleCreateProject}
           />

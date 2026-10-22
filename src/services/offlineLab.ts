@@ -297,7 +297,7 @@ export const TRAINING_SCENARIOS: TrainingLabScenario[] = [
     guidedExplanation: {
       overview: 'An attacker has deployed a portable rogue access point (e.g. Wi-Fi Pineapple or ESP8266) broadcasting the trusted corporate SSID "Corp_Secure" to trick mobile devices into auto-connecting.',
       whyItMatters: 'Victims connecting to the rogue AP have their traffic intercepted, credentials captured, or are redirected to credential-harvesting phishing portals.',
-      howToInvestigate: 'Open the Threats tab. Notice the 94% confidence rating and the divergence evidence. Open the Investigations tab to review INC-00042.',
+      howToInvestigate: 'Open the Threats tab and review the simulated divergence evidence. Use the incident workflow to record findings if you want to practice case handling.',
       remediation: 'Physically locate the rogue device using signal triangulation. Instruct employees not to connect to unencrypted versions of corporate SSIDs.'
     }
   },

@@ -14,12 +14,13 @@ import {
   Clock,
   ArrowRight
 } from 'lucide-react';
-import { AuditProject, AccessPoint, EnterpriseScope } from '../types';
+import { AuditProject, AccessPoint, EnterpriseScope, DataSourceProfile } from '../types';
 
 interface EnterpriseProjectManagerProps {
   currentProject: AuditProject;
   projects: AuditProject[];
   accessPoints: AccessPoint[];
+  dataSourceProfile: DataSourceProfile;
   onSwitchProject: (proj: AuditProject) => void;
   onCreateProject: (proj: AuditProject) => void;
 }
@@ -28,18 +29,21 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
   currentProject,
   projects = [],
   accessPoints = [],
+  dataSourceProfile,
   onSwitchProject,
   onCreateProject
 }) => {
   const [showNewModal, setShowNewModal] = useState(false);
-  const [orgName, setOrgName] = useState('Acme Global Corp');
-  const [siteName, setSiteName] = useState('HQ Campus');
-  const [buildingName, setBuildingName] = useState('Building A');
-  const [areaName, setAreaName] = useState('Executive Floor');
-  const [assessmentName, setAssessmentName] = useState('Q3-Enterprise-Audit');
-  const [auditorName, setAuditorName] = useState('Lead Wireless Auditor');
+  const [orgName, setOrgName] = useState('');
+  const [siteName, setSiteName] = useState('');
+  const [buildingName, setBuildingName] = useState('');
+  const [areaName, setAreaName] = useState('');
+  const [assessmentName, setAssessmentName] = useState('');
+  const [auditorName, setAuditorName] = useState('');
   const [sqlQuery, setSqlQuery] = useState('SELECT bssid, ssid, channel, security, security_score FROM access_points ORDER BY security_score ASC LIMIT 10;');
   const [queryResult, setQueryResult] = useState<any[] | null>(null);
+  const approvedCount = accessPoints.filter(ap => ap.approvedStatus === 'Approved').length;
+  const reviewCount = accessPoints.filter(ap => ap.approvedStatus !== 'Approved').length;
 
   const handleCreateNew = () => {
     const newProj: AuditProject = {
@@ -51,7 +55,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
       auditorName,
       notes: `Target audit scope: ${orgName} > ${siteName} > ${buildingName} > ${areaName}`,
       savedNetworksCount: accessPoints.length,
-      capturedHandshakesCount: 1,
+      capturedHandshakesCount: 0,
       scope: {
         organization: orgName,
         site: siteName,
@@ -195,21 +199,19 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
               <div className="p-3 rounded-lg bg-slate-800/60 border border-slate-700/60">
                 <div className="text-slate-400">Current AP Inventory</div>
                 <div className="text-xl font-bold text-slate-100 mt-1">{accessPoints.length} APs</div>
-                <div className="text-[10px] text-emerald-400 mt-1">Live observation active</div>
+                <div className="text-[10px] text-slate-400 mt-1">{dataSourceProfile === 'LIVE_WINDOWS' ? 'Recent Windows observation' : dataSourceProfile === 'TRAINING' || dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB' ? 'Training data loaded' : 'No live observation'}</div>
               </div>
 
               <div className="p-3 rounded-lg bg-slate-800/60 border border-slate-700/60">
                 <div className="text-slate-400">Previous Approved Baseline</div>
-                <div className="text-xl font-bold text-slate-100 mt-1">
-                  {Math.max(1, accessPoints.length - 2)} APs
-                </div>
-                <div className="text-[10px] text-slate-400 mt-1">Recorded in Q2 audit</div>
+                <div className="text-xl font-bold text-slate-100 mt-1">{approvedCount} APs</div>
+                <div className="text-[10px] text-slate-400 mt-1">Currently marked approved</div>
               </div>
 
               <div className="p-3 rounded-lg bg-slate-800/60 border border-slate-700/60">
                 <div className="text-slate-400">Unapproved Drift</div>
-                <div className="text-xl font-bold text-amber-400 mt-1">+2 APs</div>
-                <div className="text-[10px] text-amber-300 mt-1">Requires security review</div>
+                <div className="text-xl font-bold text-amber-400 mt-1">{reviewCount} APs</div>
+                <div className="text-[10px] text-amber-300 mt-1">Needs analyst review</div>
               </div>
             </div>
           </div>

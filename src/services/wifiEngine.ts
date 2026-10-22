@@ -5,7 +5,6 @@ import {
   PcapPacket, 
   SecurityIssue,
   FrequencyBand,
-  WifiAdapter
 } from '../types';
 import { PcapService } from './pcapParser';
 
@@ -44,44 +43,6 @@ export class WifiEngine {
       relationalSqliteStorage: true,
       cryptographicValidator: true
     };
-  }
-
-  // Detected/Supported wireless adapters catalogue
-  public getDetectedAdapters(): WifiAdapter[] {
-    return [
-      {
-        id: 'wlan-0',
-        name: 'Alfa Network AWUS036ACH (Realtek RTL8812AU)',
-        description: 'High-Gain Dual-Band USB Wireless Adapter with NDIS RF Monitor Support',
-        macAddress: '00:C0:CA:97:12:44',
-        vendor: 'Alfa Network Inc.',
-        chipset: 'Realtek RTL8812AU',
-        driverVersion: '1030.38.303.2018 (AirPcap/Npcap Enhanced)',
-        monitorModeSupported: true,
-        packetInjectionSupported: true,
-        supportedBands: ['2.4 GHz', '5 GHz'],
-        currentChannel: 6,
-        isChannelHopping: true,
-        txPowerDbm: 30,
-        status: 'Ready',
-      },
-      {
-        id: 'wlan-1',
-        name: 'Intel(R) Wi-Fi 6E AX211 160MHz',
-        description: 'Integrated Windows WLAN Station Device (Standard NDIS Client)',
-        macAddress: '3C:F8:62:4D:11:80',
-        vendor: 'Intel Corporation',
-        chipset: 'Intel Harrison Peak AX211',
-        driverVersion: '23.40.0.4',
-        monitorModeSupported: false,
-        packetInjectionSupported: false,
-        supportedBands: ['2.4 GHz', '5 GHz', '6 GHz'],
-        currentChannel: 36,
-        isChannelHopping: false,
-        txPowerDbm: 20,
-        status: 'Ready',
-      },
-    ];
   }
 
   // Benchmark reference dataset (NIST SP 800-153 compliance scenarios)
