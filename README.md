@@ -3,17 +3,14 @@
 A Windows-focused 802.11 wireless security auditing platform combining a native
 `.NET 8` scanning/forensics engine with a browser-based analyst dashboard.
 
-- **`WinWiFi.Desktop/`** — Native `.NET 8` WPF desktop app. Talks directly to
-  `wlanapi.dll` for live scanning, dissects raw PCAP/PCAPNG captures and
-  EAPOL 4-way handshakes, scores networks against NIST SP 800-153, and
-  persists everything to a local SQLite database. Exposes a local HTTP bridge
-  (`http://127.0.0.1:38989`) that the web dashboard connects to.
+- **`WinWiFi.Desktop/`** — Native `.NET 8` WPF shell with the React dashboard
+  embedded through WebView2. The local bridge serves that dashboard and the
+  native Windows WLAN/PCAP/SQLite APIs on `http://127.0.0.1:38989`.
 - **`WinWiFi.CLI/`** — Headless console/daemon build of the same engine (no
   WPF dependency) for scripting or CI use.
 - **`src/`** — The React/TypeScript analyst dashboard (dashboards, threat
-  center, packet/handshake forensics, reporting, offline training lab). Can
-  run standalone against imported `.pcap` files and Windows `netsh` output,
-  or live against `WinWiFi.Desktop`'s HTTP bridge for real-time scanning.
+  center, packet/handshake forensics, reporting, offline training lab). The
+  same UI runs in a browser for development and inside the Windows app.
 
 ## Defensive scope
 
@@ -28,7 +25,7 @@ you own or are explicitly authorized to test.
 **Prerequisites:** Node.js 18+
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -41,13 +38,17 @@ training lab, with no native backend required.
 **Prerequisites:**
 - Windows 10 (Build 19041+) or Windows 11
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- Node.js 18+ to build/package the React dashboard
+- [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) to display the dashboard inside the desktop window
 - Visual Studio 2022, or VS Code + the C# Dev Kit extension
 
 ```powershell
 # Build everything
+npm ci
+npm run build
 dotnet build WinWiFi.sln -c Release
 
-# Run the WPF desktop app directly
+# Run the single-window desktop app directly (after building the dashboard)
 dotnet run --project WinWiFi.Desktop\WinWiFi.Desktop.csproj -c Release
 
 # ...or create a self-contained Windows release (no separate .NET install needed)
@@ -55,10 +56,11 @@ dotnet run --project WinWiFi.Desktop\WinWiFi.Desktop.csproj -c Release
 & .\publish\win-x64\WinWiFi.exe
 ```
 
-The desktop app starts the local-only HTTP bridge on `127.0.0.1:38989` and
-begins passive WLAN-cache observation when it finds an adapter. The web
-dashboard can connect from **Settings → Native Bridge**. The bridge only
-accepts loopback traffic and the dashboard's known localhost origins.
+The desktop app starts the local-only HTTP bridge on `127.0.0.1:38989`, serves
+the built dashboard from that address, and opens it in the app window. It begins
+passive WLAN-cache observation when it finds an adapter. No separate browser
+window or dashboard development server is needed for the packaged Windows app.
+The bridge only accepts loopback traffic and approved localhost origins.
 The default development origins are `localhost`/`127.0.0.1` on ports 3000 and
 5173. To override them, set `WINWIFI_ALLOWED_ORIGINS` before launching the app
 to a semicolon-separated list of loopback origins, for example

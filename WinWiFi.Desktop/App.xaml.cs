@@ -4,7 +4,6 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
 using WinWiFi.Data;
 using WinWiFi.Services;
-using WinWiFi.ViewModels;
 
 namespace WinWiFi;
 
@@ -23,7 +22,6 @@ public partial class App : Application
         services.AddSingleton<SqliteStorageService>();
         services.AddSingleton<INativeWifiService, NativeWifiService>();
         services.AddSingleton<WifiBackgroundScanner>();
-        services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();
 
         ServiceProvider = services.BuildServiceProvider();
@@ -42,14 +40,13 @@ public partial class App : Application
         {
             Trace.TraceError($"Unable to start the localhost dashboard bridge: {ex}");
             MessageBox.Show(
-                $"WinWiFi can still run as a desktop app, but its browser dashboard bridge did not start.\n\n{ex.Message}",
+                $"WinWiFi could not start its local dashboard bridge.\n\n{ex.Message}",
                 "WinWiFi local bridge",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
 
         var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
-        mainWindow.DataContext = ServiceProvider.GetRequiredService<MainViewModel>();
         mainWindow.Show();
     }
 

@@ -25,6 +25,7 @@ namespace WinWiFi.Services
         private readonly bool _ownsStorage;
         private readonly WifiBackgroundScanner _scanner;
         private readonly NativeSelfTests _selfTests;
+        private readonly string? _dashboardRoot;
 
         private CancellationTokenSource? _cts;
         private Task? _listenerTask;
@@ -33,7 +34,7 @@ namespace WinWiFi.Services
 
         internal static HashSet<string> ParseAllowedBrowserOrigins(string? configuredOrigins)
         {
-            var defaults = new[] { "http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173" };
+            var defaults = new[] { "http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:38989", "http://127.0.0.1:38989" };
             var origins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var candidates = string.IsNullOrWhiteSpace(configuredOrigins) ? defaults : configuredOrigins.Split(';');
             foreach (var candidate in candidates)
@@ -69,7 +70,8 @@ namespace WinWiFi.Services
             ReportGenerator? reportGenerator = null,
             SqliteStorageService? storage = null,
             WifiBackgroundScanner? scanner = null,
-            IEnumerable<string>? allowedBrowserOrigins = null)
+            IEnumerable<string>? allowedBrowserOrigins = null,
+            string? dashboardRoot = null)
         {
             _port = port;
             _listener = new HttpListener();
@@ -78,6 +80,9 @@ namespace WinWiFi.Services
             _allowedBrowserOrigins = allowedBrowserOrigins is null
                 ? ParseAllowedBrowserOrigins(Environment.GetEnvironmentVariable("WINWIFI_ALLOWED_ORIGINS"))
                 : new HashSet<string>(allowedBrowserOrigins.Where(origin => ParseAllowedBrowserOrigins(origin).Contains(origin.TrimEnd('/'))), StringComparer.OrdinalIgnoreCase);
+            _allowedBrowserOrigins.Add($"http://127.0.0.1:{_port}");
+            _allowedBrowserOrigins.Add($"http://localhost:{_port}");
+            _dashboardRoot = ResolveDashboardRoot(dashboardRoot);
 
             _securityAnalyzer = securityAnalyzer ?? new SecurityAnalyzer();
             _wifiService = wifiService ?? new NativeWifiService(_securityAnalyzer);
@@ -260,7 +265,6 @@ namespace WinWiFi.Services
             {
                 switch (path)
                 {
-                    case "":
                     case "/api":
                     case "/api/status":
                     case "/api/health":
@@ -349,8 +353,14 @@ namespace WinWiFi.Services
                         break;
 
                     default:
-                        response.StatusCode = (int)HttpStatusCode.NotFound;
-                        await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "endpoint_not_found", $"Endpoint '{path}' not found.");
+                        if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "endpoint_not_found", $"Endpoint '{path}' not found.");
+                        }
+                        else
+                        {
+                            await HandleDashboardFileAsync(request, response, path);
+                        }
                         break;
                 }
             }
@@ -392,6 +402,72 @@ namespace WinWiFi.Services
             };
             await WriteJsonAsync(response, status);
         }
+
+        private static string? ResolveDashboardRoot(string? configuredRoot)
+        {
+            var candidates = configuredRoot is null
+                ? new[] { Path.Combine(AppContext.BaseDirectory, "dashboard"), Path.Combine(AppContext.BaseDirectory, "dist"), Path.Combine(Directory.GetCurrentDirectory(), "dist") }
+                : new[] { configuredRoot };
+            return candidates.Select(Path.GetFullPath).FirstOrDefault(Directory.Exists);
+        }
+
+        private async Task HandleDashboardFileAsync(HttpListenerRequest request, HttpListenerResponse response, string requestPath)
+        {
+            if (!request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) && !request.HttpMethod.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "The dashboard accepts GET and HEAD requests.");
+                return;
+            }
+
+            if (_dashboardRoot is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                response.ContentType = "text/html; charset=utf-8";
+                var missing = Encoding.UTF8.GetBytes("<!doctype html><title>WinWiFi dashboard missing</title><h1>Dashboard files are missing</h1><p>Build the React dashboard or use the Windows release package, which includes the dashboard folder.</p>");
+                response.ContentLength64 = missing.Length;
+                if (!request.HttpMethod.Equals("HEAD", StringComparison.OrdinalIgnoreCase)) await response.OutputStream.WriteAsync(missing);
+                return;
+            }
+
+            string relativePath;
+            try { relativePath = Uri.UnescapeDataString(requestPath).TrimStart('/').Replace('/', Path.DirectorySeparatorChar); }
+            catch (UriFormatException) { relativePath = string.Empty; }
+            string rootPrefix = _dashboardRoot.EndsWith(Path.DirectorySeparatorChar) ? _dashboardRoot : _dashboardRoot + Path.DirectorySeparatorChar;
+            string candidate = Path.GetFullPath(Path.Combine(_dashboardRoot, string.IsNullOrEmpty(relativePath) ? "index.html" : relativePath));
+            if (!candidate.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.Forbidden, "invalid_path", "The requested dashboard path is invalid.");
+                return;
+            }
+
+            if (!File.Exists(candidate)) candidate = Path.Combine(_dashboardRoot, "index.html"); // React client-side route fallback
+            if (!File.Exists(candidate))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "dashboard_not_found", "The dashboard entry point is missing from the installed files.");
+                return;
+            }
+
+            byte[] content = await File.ReadAllBytesAsync(candidate);
+            response.ContentType = GetDashboardContentType(Path.GetExtension(candidate));
+            response.ContentLength64 = content.Length;
+            response.Headers["Cache-Control"] = Path.GetFileName(candidate).Equals("index.html", StringComparison.OrdinalIgnoreCase) ? "no-cache" : "public, max-age=31536000, immutable";
+            if (!request.HttpMethod.Equals("HEAD", StringComparison.OrdinalIgnoreCase)) await response.OutputStream.WriteAsync(content);
+        }
+
+        private static string GetDashboardContentType(string extension) => extension.ToLowerInvariant() switch
+        {
+            ".html" => "text/html; charset=utf-8",
+            ".js" => "text/javascript; charset=utf-8",
+            ".css" => "text/css; charset=utf-8",
+            ".json" => "application/json; charset=utf-8",
+            ".svg" => "image/svg+xml",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".ico" => "image/x-icon",
+            ".woff" => "font/woff",
+            ".woff2" => "font/woff2",
+            _ => "application/octet-stream"
+        };
 
         private async Task HandleAdaptersAsync(HttpListenerResponse response)
         {

@@ -1,97 +1,63 @@
 using System;
+using System.IO;
+using System.Diagnostics;
 using System.Windows;
-using Microsoft.Win32;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-using System.Windows.Interop;
-using WinWiFi.ViewModels;
+using Microsoft.Web.WebView2.Core;
 
-namespace WinWiFi
+namespace WinWiFi;
+
+public partial class MainWindow : Window
 {
-    public partial class MainWindow : Window
+    private static readonly Uri DashboardUri = new("http://127.0.0.1:38989/");
+
+    public MainWindow()
     {
-        private const int DwmwaUseImmersiveDarkMode = 20;
+        InitializeComponent();
+        Loaded += OnLoaded;
+    }
 
-        public MainWindow()
+    private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        try
         {
-            InitializeComponent();
-            Loaded += OnLoaded;
-            Closing += OnClosing;
-        }
-
-        protected override void OnSourceInitialized(EventArgs e)
-        {
-            base.OnSourceInitialized(e);
-            try
+            string userDataFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinWiFi", "WebView2");
+            Directory.CreateDirectory(userDataFolder);
+            var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
+            await Dashboard.EnsureCoreWebView2Async(environment);
+            Dashboard.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            Dashboard.CoreWebView2.Settings.IsStatusBarEnabled = false;
+            Dashboard.CoreWebView2.NavigationStarting += (_, args) =>
             {
-                var useDarkMode = 1;
-                DwmSetWindowAttribute(new WindowInteropHelper(this).Handle,
-                    DwmwaUseImmersiveDarkMode, ref useDarkMode, sizeof(int));
-            }
-            catch (DllNotFoundException) { }
-            catch (EntryPointNotFoundException) { }
-        }
-
-        [DllImport("dwmapi.dll", PreserveSig = true)]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute,
-            ref int value, int valueSize);
-
-        private MainViewModel? ViewModel => DataContext as MainViewModel;
-
-        private async void OnLoaded(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (ViewModel != null) await ViewModel.InitializeAsync();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"WinWiFi opened, but its startup checks did not complete.\n\n{ex.Message}",
-                    "WinWiFi startup",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-            }
-        }
-
-        private async void OnClosing(object? sender, CancelEventArgs e)
-        {
-            if (ViewModel != null) await ViewModel.StopLiveScanningAsync();
-        }
-
-        private async void OnImportPcapClick(object sender, RoutedEventArgs e)
-        {
-            var dialog = new OpenFileDialog
-            {
-                Filter = "Wi-Fi Capture Files (*.pcap;*.cap;*.pcapng)|*.pcap;*.cap;*.pcapng|All Files (*.*)|*.*",
-                Title = "Select PCAP / PCAPNG Wireless Capture File"
+                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) ||
+                    !string.Equals(target.GetLeftPart(UriPartial.Authority), DashboardUri.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
+                    args.Cancel = true;
             };
-
-            if (dialog.ShowDialog() == true)
-            {
-                if (ViewModel != null)
-                    await ViewModel.ImportPcapAsync(dialog.FileName);
-            }
+            Dashboard.Source = DashboardUri;
         }
-
-        private void OnTabDiscoveryClick(object sender, RoutedEventArgs e)
+        catch (Exception ex)
         {
-            if (ViewModel != null) ViewModel.ActiveTab = "Discovery";
+            Dashboard.Visibility = Visibility.Collapsed;
+            StartupErrorMessage.Text =
+                $"{ex.Message}\n\nWinWiFi uses the Microsoft Edge WebView2 Runtime to show its dashboard. Install the runtime and relaunch the app.";
+            InstallWebView2Button.Visibility = File.Exists(Path.Combine(AppContext.BaseDirectory, "Install-WebView2Runtime.exe"))
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            StartupError.Visibility = Visibility.Visible;
         }
+    }
 
-        private void OnTabPacketsClick(object sender, RoutedEventArgs e)
+    private void OnInstallWebView2Click(object sender, RoutedEventArgs e)
+    {
+        string installer = Path.Combine(AppContext.BaseDirectory, "Install-WebView2Runtime.exe");
+        try
         {
-            if (ViewModel != null) ViewModel.ActiveTab = "Packets";
+            Process.Start(new ProcessStartInfo(installer) { UseShellExecute = true, Verb = "runas" });
         }
-
-        private void OnTabHandshakesClick(object sender, RoutedEventArgs e)
+        catch (Exception ex)
         {
-            if (ViewModel != null) ViewModel.ActiveTab = "Handshakes";
-        }
-
-        private void OnTabDatabaseClick(object sender, RoutedEventArgs e)
-        {
-            if (ViewModel != null) ViewModel.ActiveTab = "Database";
+            MessageBox.Show(ex.Message, "WebView2 Runtime installer", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 }

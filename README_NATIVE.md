@@ -1,9 +1,9 @@
 # WinWiFi Security Auditor - Native Windows Desktop (.NET 8 WPF)
 
 ## Architecture Overview
-WinWiFi is a native Windows desktop security audit suite built on **C# and .NET 8 WPF**, replacing browser sandbox constraints with direct Win32 hardware and OS integrations:
+WinWiFi is a Windows desktop app with a **C#/.NET 8 WPF shell** that embeds the same React dashboard used in browser development through WebView2. The native bridge provides Windows WLAN observations and local forensic services:
 
-- **Native Wi-Fi Engine (`wlanapi.dll`)**: Direct P/Invoke bindings for `WlanOpenHandle`, `WlanEnumInterfaces`, `WlanScan`, and `WlanGetNetworkBssList`. Accesses raw `DOT11_BSS_ENTRY` records with BSSIDs, frequencies (kHz), RSSI (dBm), beacon intervals, and raw Information Elements (IE tags).
+- **Native Wi-Fi Engine (`wlanapi.dll`)**: Reads the Windows WLAN BSS cache through native WLAN APIs. Observation is passive; it does not request channel scans, enter monitor mode, or inject packets.
 - **Fallback Ingestion Pipeline**: In non-elevated or restricted guest accounts, executes direct Windows `netsh wlan show networks mode=bssid` command-line parsing to extract live Wi-Fi signals with zero third-party drivers.
 - **Binary PCAP & PCAPNG Dissector**: In-process binary parser supporting standard Libpcap 2.4 (`0xa1b2c3d4`, `0xd4c3b2a1`) and Next-Generation Capture PCAPNG (`0x0A0D0D0A`). Decapsulates IEEE 802.11 Radiotap headers, MAC frames, and EAPOL 4-Way Handshakes.
 - **Cryptographic Validation & Hashcat Export**: Validates EAPOL M1/M2/M3/M4 key nonces (ANonce, SNonce) and Message Integrity Codes (MIC). Formats Hashcat Mode 22000 strings (`WPA*02*...`) for offline password auditing.
@@ -17,17 +17,21 @@ WinWiFi is a native Windows desktop security audit suite built on **C# and .NET 
 - Windows 10 (Build 19041+) or Windows 11
 - [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 - Visual Studio 2022 or VS Code with C# Dev Kit
+- Node.js 18+ to build the React dashboard
+- Microsoft Edge WebView2 Runtime (the Windows package includes its Microsoft bootstrapper if it is missing)
 
 ### Compilation Commands
 
-To build the solution:
+To compile the native solution after building the dashboard:
 ```powershell
+npm ci
+npm run build
 dotnet build WinWiFi.sln -c Release
 ```
 
-To publish as a single, self-contained Windows executable (`.exe`) that runs on any 64-bit Windows machine without requiring .NET pre-installed:
+To create the Explorer-ready Windows package:
 ```powershell
-dotnet publish WinWiFi.Desktop/WinWiFi.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish
+.\scripts\publish-windows.ps1
 ```
 
-The resulting executable will be located at `./publish/WinWiFi.exe`.
+Run `publish/win-x64/WinWiFi.exe`. Keep the `dashboard` folder beside it; if WebView2 Runtime is missing, run `Install-WebView2Runtime.exe` from the same folder.
