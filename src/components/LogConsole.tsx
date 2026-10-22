@@ -1,3 +1,4 @@
+import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
 import { AuditLog } from '../types';
 import { Terminal, Trash2, ShieldAlert, CheckCircle2, Info, AlertTriangle, Download } from 'lucide-react';
@@ -27,12 +28,7 @@ export const LogConsole: React.FC<LogConsoleProps> = ({
   const handleDownloadLogs = () => {
     const text = logs.map(l => `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}`).join('\n');
     const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `winwifi_audit_logs_${new Date().toISOString().slice(0, 10)}.log`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `winwifi_audit_logs_${new Date().toISOString().slice(0, 10)}.log`);
   };
 
   const getBadge = (lvl: AuditLog['level']) => {

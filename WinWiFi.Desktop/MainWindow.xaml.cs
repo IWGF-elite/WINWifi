@@ -28,6 +28,22 @@ public partial class MainWindow : Window
             await Dashboard.EnsureCoreWebView2Async(environment);
             Dashboard.CoreWebView2.Settings.AreDevToolsEnabled = false;
             Dashboard.CoreWebView2.Settings.IsStatusBarEnabled = false;
+            Dashboard.CoreWebView2.DownloadStarting += (_, args) =>
+            {
+                try
+                {
+                    string fileName = Path.GetFileName(args.ResultFilePath);
+                    string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                    string destination = Path.Combine(desktop, fileName);
+                    string stem = Path.GetFileNameWithoutExtension(destination);
+                    string extension = Path.GetExtension(destination);
+                    for (int suffix = 1; File.Exists(destination); suffix++)
+                        destination = Path.Combine(desktop, $"{stem} ({suffix}){extension}");
+                    args.ResultFilePath = destination;
+                    args.Handled = true;
+                }
+                catch { /* Let WebView2 use its normal Downloads destination if Desktop is unavailable. */ }
+            };
             Dashboard.CoreWebView2.NavigationStarting += (_, args) =>
             {
                 if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) ||

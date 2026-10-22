@@ -6,6 +6,7 @@ import { WifiEngine } from '../src/services/wifiEngine';
 import { SqliteDatabaseService } from '../src/services/storage';
 import { ThreatEngine } from '../src/services/threatEngine';
 import { NativeBridgeClient } from '../src/services/bridgeClient';
+import { PolicyEngine } from '../src/services/policyEngine';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -353,6 +354,40 @@ runTest('T13: SSE Failure Falls Back and Reconnects', () => {
     client.disconnect();
     (globalThis as any).EventSource = NativeEventSource;
     globalThis.setTimeout = nativeSetTimeout;
+  }
+});
+
+runTest('T14: Policy Selection and Evidence Persistence', () => {
+  const values = new Map<string, string>();
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear()
+    }
+  });
+  try {
+    const policyEngine = PolicyEngine.getInstance();
+    policyEngine.setActivePolicy('high-sec-policy');
+    if (policyEngine.getActivePolicy().id !== 'high-sec-policy') throw new Error('Selected policy was not activated');
+    const weakAp = WifiEngine.getInstance().getBenchmarkAccessPoints().find(ap => ap.security === 'Open');
+    if (!weakAp) throw new Error('No open AP available for policy evaluation');
+    const result = policyEngine.evaluateAP(weakAp);
+    if (result.status === 'Compliant' || result.policyName !== 'High Security Policy') throw new Error('Active policy did not evaluate the AP');
+    if (values.get('winwifi_active_policy') !== 'high-sec-policy') throw new Error('Policy choice was not persisted');
+
+    const db = SqliteDatabaseService.getInstance();
+    const evidence = { id: 'EVD-test', timestamp: new Date(0).toISOString(), type: 'note' as const, title: 'Test evidence', source: 'test', description: 'Persistence check' };
+    db.saveEvidenceItems([evidence]);
+    if (db.getEvidenceItems()[0]?.id !== evidence.id) throw new Error('Evidence record failed to persist');
+    db.deleteProjectData('project-to-delete');
+    if (values.has('winwifi_sqlite_access_points_project-to-delete')) throw new Error('Project AP data was not removed');
+  } finally {
+    if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
+    else delete (globalThis as any).localStorage;
   }
 });
 

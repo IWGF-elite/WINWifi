@@ -1,3 +1,4 @@
+import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
 import { 
   FileText, 
@@ -95,12 +96,7 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
 </html>
     `;
     const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `WinWiFi_Report_${currentProject.name.replace(/\s+/g, '_')}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `WinWiFi_Report_${currentProject.name.replace(/\s+/g, '_')}.html`);
   };
 
   return (

@@ -1,3 +1,4 @@
+import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
 import { HandshakeInfo, AccessPoint, PcapPacket, DataSourceProfile } from '../types';
 import { PcapService } from '../services/pcapParser';
@@ -97,12 +98,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
 
     const binaryBytes = PcapService.getInstance().exportBinaryPcap(packets);
     const blob = new Blob([binaryBytes.buffer], { type: 'application/vnd.tcpdump.pcap' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${h.ssid.replace(/\s+/g, '_')}_${h.apBssid.replace(/:/g, '')}.pcap`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${h.ssid.replace(/\s+/g, '_')}_${h.apBssid.replace(/:/g, '')}.pcap`);
   };
 
   const isLive = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';

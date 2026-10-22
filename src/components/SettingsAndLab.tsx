@@ -20,12 +20,14 @@ import { TRAINING_SCENARIOS } from '../services/offlineLab';
 
 interface SettingsAndLabProps {
   uiMode: UIMode;
+  accessPoints: AccessPoint[];
   onToggleUIMode: (mode: UIMode) => void;
   onLoadLabScenario: (scenario: TrainingLabScenario) => void;
 }
 
 export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
   uiMode,
+  accessPoints,
   onToggleUIMode,
   onLoadLabScenario
 }) => {
@@ -36,6 +38,8 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
   const policies = policyEngine.getPolicies();
   const currentPolicy = policyEngine.getActivePolicy();
   const selectedScenario = TRAINING_SCENARIOS.find(s => s.id === selectedLabId) || TRAINING_SCENARIOS[0];
+  const policyResults = policyEngine.evaluateAll(accessPoints);
+  const policyFailures = [...policyResults.values()].filter(result => result.status !== 'Compliant').length;
 
   const handlePolicyChange = (id: string) => {
     setActivePolicyId(id);
@@ -188,6 +192,28 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-bold text-slate-100">Current Policy Results</h2>
+          <span className="text-xs text-slate-400">{accessPoints.length} observations · {currentPolicy.name}</span>
+        </div>
+        {accessPoints.length === 0 ? (
+          <p className="text-xs text-slate-400">No observations loaded. Connect the Windows bridge, import a capture, or load a Training Lab scenario to evaluate this policy.</p>
+        ) : (
+          <>
+            <p className="text-xs text-slate-300">{policyResults.size - policyFailures} compliant · {policyFailures} require review</p>
+            <div className="max-h-72 overflow-y-auto divide-y divide-slate-800">
+              {[...policyResults.values()].map(result => (
+                <div key={result.apBssid} className="py-2 text-xs">
+                  <div className="flex justify-between gap-3"><span className="font-mono text-slate-200">{result.apBssid}</span><span className={result.status === 'Compliant' ? 'text-emerald-400' : result.status === 'Warning' ? 'text-amber-400' : 'text-rose-400'}>{result.status}</span></div>
+                  <div className="text-slate-400 mt-1">{result.failedRules.length ? result.failedRules.join(' · ') : 'No policy violations found.'}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Section 3: Offline Training & Lab Workbench */}

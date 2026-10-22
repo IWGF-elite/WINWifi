@@ -206,7 +206,7 @@ export interface SecurityChange {
 }
 
 export interface IncidentRecord {
-  id: string; // e.g. "INC-00042"
+  id: string;
   title: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   confidence: number; // 0-100%
@@ -223,7 +223,7 @@ export interface IncidentRecord {
 }
 
 export interface EvidenceItem {
-  id: string; // e.g. "EVD-8812"
+  id: string;
   timestamp: string;
   type: 'packet' | 'observation' | 'timeline' | 'pcap' | 'note' | 'handshake';
   title: string;

@@ -1,4 +1,4 @@
-import { AccessPoint, AnalystClassification, AuditProject, AuditLog, HandshakeInfo, IncidentRecord } from '../types';
+import { AccessPoint, AnalystClassification, AuditProject, AuditLog, EvidenceItem, HandshakeInfo, IncidentRecord } from '../types';
 
 const DB_PREFIX = 'winwifi_sqlite_';
 
@@ -68,6 +68,11 @@ export class SqliteDatabaseService {
     localStorage.setItem(`${DB_PREFIX}current_proj_id`, id);
   }
 
+  public deleteProjectData(projectId: string): void {
+    localStorage.removeItem(`${DB_PREFIX}access_points_${projectId}`);
+    localStorage.removeItem(`${DB_PREFIX}analyst_overrides_${projectId}`);
+  }
+
   public getIncidents(): IncidentRecord[] | null {
     const raw = localStorage.getItem(`${DB_PREFIX}incidents`);
     if (raw === null) return null;
@@ -80,6 +85,15 @@ export class SqliteDatabaseService {
 
   public saveIncidents(incidents: IncidentRecord[]): void {
     localStorage.setItem(`${DB_PREFIX}incidents`, JSON.stringify(incidents));
+  }
+
+  public getEvidenceItems(): EvidenceItem[] {
+    try { return JSON.parse(localStorage.getItem(`${DB_PREFIX}evidence`) || '[]') as EvidenceItem[]; }
+    catch { return []; }
+  }
+
+  public saveEvidenceItems(items: EvidenceItem[]): void {
+    localStorage.setItem(`${DB_PREFIX}evidence`, JSON.stringify(items));
   }
 
   public getAccessPoints(projectId: string): AccessPoint[] {

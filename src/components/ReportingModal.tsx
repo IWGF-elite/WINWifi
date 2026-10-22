@@ -1,3 +1,4 @@
+import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
 import { AccessPoint, AuditProject } from '../types';
 import { 
@@ -113,12 +114,7 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
 </html>`;
 
     const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `WiFi_Audit_Report_${project.name.replace(/\s+/g, '_')}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `WiFi_Audit_Report_${project.name.replace(/\s+/g, '_')}.html`);
   };
 
   return (

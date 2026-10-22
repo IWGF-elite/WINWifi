@@ -92,6 +92,9 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
       setDiagnostics(d);
     } catch (e: any) {
       console.warn('Failed to fetch health/diag in modal', e);
+      const message = e?.message || 'Unable to load bridge diagnostics.';
+      setLastError(message);
+      setTestResult(`Connected, but diagnostics could not be loaded: ${message}`);
     }
   };
 
@@ -121,7 +124,9 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
         setTestResult(`Connection failed: ${bridge.getLastError() || 'Bridge not reachable'}`);
       }
     } catch (err: any) {
-      setTestResult(`Connection failed: ${err.message}`);
+      const message = err?.message || 'Unknown connection error.';
+      setLastError(message);
+      setTestResult(`Connection failed: ${message}`);
     } finally {
       setIsTesting(false);
     }
@@ -156,9 +161,14 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
   };
 
   const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedCmd(id);
-    setTimeout(() => setCopiedCmd(null), 2000);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedCmd(id);
+      setTimeout(() => setCopiedCmd(null), 2000);
+    }).catch(error => {
+      const message = error instanceof Error ? error.message : 'Clipboard access was denied.';
+      setLastError(message);
+      setTestResult(`Could not copy command: ${message}`);
+    });
   };
 
   const isLocal = (url: string) => {
@@ -302,13 +312,6 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
                   className="px-2.5 py-1.5 rounded border border-slate-700 hover:bg-slate-700/50 text-[11px] font-mono text-slate-300"
                 >
                   :38989
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfig({ ...config, baseUrl: 'http://127.0.0.1:5005' })}
-                  className="px-2.5 py-1.5 rounded border border-slate-700 hover:bg-slate-700/50 text-[11px] font-mono text-slate-300"
-                >
-                  :5005
                 </button>
               </div>
 

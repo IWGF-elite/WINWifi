@@ -13,19 +13,25 @@ import {
   Search,
   Filter
 } from 'lucide-react';
-import { IncidentRecord, UIMode } from '../types';
+import { AccessPoint, EvidenceItem, IncidentRecord, UIMode } from '../types';
 import { ThreatEngine } from '../services/threatEngine';
 
 interface IncidentCenterProps {
   incidents: IncidentRecord[];
+  evidenceItems: EvidenceItem[];
+  accessPoints: AccessPoint[];
   uiMode: UIMode;
   onRefreshIncidents: () => void;
+  onAddEvidence: (incidentId: string, evidence: EvidenceItem) => void;
 }
 
 export const IncidentCenter: React.FC<IncidentCenterProps> = ({
   incidents = [],
+  evidenceItems = [],
+  accessPoints = [],
   uiMode,
-  onRefreshIncidents
+  onRefreshIncidents,
+  onAddEvidence
 }) => {
   const threatEngine = ThreatEngine.getInstance();
   const [selectedIncidentId, setSelectedIncidentId] = useState<string>(incidents[0]?.id || '');
@@ -34,8 +40,43 @@ export const IncidentCenter: React.FC<IncidentCenterProps> = ({
   const [isResolving, setIsResolving] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [showEvidenceForm, setShowEvidenceForm] = useState(false);
+  const [evidenceTitle, setEvidenceTitle] = useState('');
+  const [evidenceDescription, setEvidenceDescription] = useState('');
+  const [evidenceType, setEvidenceType] = useState<EvidenceItem['type']>('note');
 
   const selectedIncident = incidents.find(i => i.id === selectedIncidentId) || incidents[0];
+  const targetAccessPoint = selectedIncident?.bssidTarget
+    ? accessPoints.find(ap => ap.bssid.toUpperCase() === selectedIncident.bssidTarget?.toUpperCase())
+    : undefined;
+
+  const handleAddEvidence = () => {
+    if (!selectedIncident || !evidenceTitle.trim() || !evidenceDescription.trim()) return;
+    onAddEvidence(selectedIncident.id, {
+      id: `EVD-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: evidenceType,
+      title: evidenceTitle.trim(),
+      source: selectedIncident.bssidTarget || selectedIncident.id,
+      description: evidenceDescription.trim()
+    });
+    setEvidenceTitle('');
+    setEvidenceDescription('');
+    setShowEvidenceForm(false);
+  };
+
+  const handleAttachTargetSnapshot = () => {
+    if (!selectedIncident || !targetAccessPoint) return;
+    onAddEvidence(selectedIncident.id, {
+      id: `EVD-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: 'observation',
+      title: `Observed AP snapshot: ${targetAccessPoint.ssid || targetAccessPoint.bssid}`,
+      source: targetAccessPoint.dataSourceOrigin || 'Saved observation',
+      description: `SSID ${targetAccessPoint.ssid || '[Hidden SSID]'}, BSSID ${targetAccessPoint.bssid}, channel ${targetAccessPoint.channel} (${targetAccessPoint.band}), ${targetAccessPoint.security}, ${targetAccessPoint.rssi} dBm.`,
+      rawData: JSON.stringify(targetAccessPoint, null, 2)
+    });
+  };
 
   const handleAddNote = () => {
     if (!noteText.trim() || !selectedIncident) return;
@@ -214,22 +255,33 @@ export const IncidentCenter: React.FC<IncidentCenterProps> = ({
                 </div>
               </div>
 
-              {/* Linked Evidence Files */}
+              {/* Linked evidence records */}
               <div className="space-y-2">
-                <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider text-[10px]">
-                  Traceable Forensic Evidence Records
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider text-[10px]">Case Evidence Records</div>
+                  <div className="flex gap-2">
+                    <button disabled={!targetAccessPoint} onClick={handleAttachTargetSnapshot} title={targetAccessPoint ? 'Attach the currently loaded target AP observation' : 'Load an observation for this incident target first'} className="rounded border border-slate-700 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40">Attach target snapshot</button>
+                    <button onClick={() => setShowEvidenceForm(value => !value)} className="rounded bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-blue-500">Add evidence</button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  {(selectedIncident.evidenceIds || []).map(evId => (
-                    <div key={evId} className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <FileText className="w-3.5 h-3.5 text-blue-400" />
-                        <span className="font-mono font-medium text-slate-200">{evId}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-400">Captured Frame Record</span>
-                    </div>
-                  ))}
+                  {(selectedIncident.evidenceIds || []).map(evId => {
+                    const evidence = evidenceItems.find(item => item.id === evId);
+                    return <div key={evId} className="rounded-lg border border-slate-700/60 bg-slate-800/60 p-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-2"><FileText className="h-3.5 w-3.5 text-blue-400" /><span className="font-mono text-slate-200">{evId}</span></span><span className="text-[10px] uppercase text-slate-400">{evidence?.type || 'unresolved'}</span></div>
+                      <div className="mt-1 font-medium text-slate-200">{evidence?.title || 'Legacy evidence reference'}</div>
+                      <p className="mt-1 text-slate-400">{evidence?.description || 'No stored evidence details are available for this reference.'}</p>
+                      {evidence?.rawData && <details className="mt-2"><summary className="cursor-pointer text-blue-300">View captured observation</summary><pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[10px] text-slate-300">{evidence.rawData}</pre></details>}
+                    </div>;
+                  })}
+                  {selectedIncident.evidenceIds?.length === 0 && <p className="text-[11px] text-slate-500">No evidence has been attached to this case.</p>}
                 </div>
+                {showEvidenceForm && <form onSubmit={event => { event.preventDefault(); handleAddEvidence(); }} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-700 bg-slate-900/70 p-3 sm:grid-cols-2">
+                  <input required value={evidenceTitle} onChange={event => setEvidenceTitle(event.target.value)} placeholder="Evidence title" className="rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100" />
+                  <select value={evidenceType} onChange={event => setEvidenceType(event.target.value as EvidenceItem['type'])} className="rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"><option value="note">Analyst note</option><option value="observation">Observation</option><option value="pcap">PCAP reference</option><option value="packet">Packet reference</option><option value="handshake">Handshake reference</option><option value="timeline">Timeline record</option></select>
+                  <textarea required value={evidenceDescription} onChange={event => setEvidenceDescription(event.target.value)} placeholder="Describe the evidence and how it was collected" className="min-h-16 rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100 sm:col-span-2" />
+                  <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" onClick={() => setShowEvidenceForm(false)} className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300">Cancel</button><button type="submit" className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">Save evidence</button></div>
+                </form>}
               </div>
 
               {/* Auditor Notes & Timeline */}

@@ -13,6 +13,7 @@ import {
   BridgeHealthStatus,
   UIMode,
   IncidentRecord,
+  EvidenceItem,
   SecurityChange,
   TrainingLabScenario,
   AnalystClassification
@@ -21,7 +22,6 @@ import { WifiEngine } from './services/wifiEngine';
 import { SqliteDatabaseService } from './services/storage';
 import { PcapService, PcapParseResult } from './services/pcapParser';
 import { ThreatEngine } from './services/threatEngine';
-import { PolicyEngine } from './services/policyEngine';
 import { NativeBridgeClient } from './services/bridgeClient';
 
 // Components
@@ -40,7 +40,6 @@ import { SpectrumVisualizer } from './components/SpectrumVisualizer';
 import { NetworkDetailPanel } from './components/NetworkDetailPanel';
 import { PacketAnalyzer } from './components/PacketAnalyzer';
 import { HandshakeManager } from './components/HandshakeManager';
-import { DatabaseManager } from './components/DatabaseManager';
 import { ReportingModal } from './components/ReportingModal';
 import { SelfTestModal } from './components/SelfTestModal';
 import { ArchitectureModal } from './components/ArchitectureModal';
@@ -90,7 +89,6 @@ export default function App() {
   const engine = WifiEngine.getInstance();
   const db = SqliteDatabaseService.getInstance();
   const threatEngine = ThreatEngine.getInstance();
-  const policyEngine = PolicyEngine.getInstance();
 
   // Settings & Theme
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -138,6 +136,7 @@ export default function App() {
     const saved = db.getIncidents();
     return (saved ?? []).filter(incident => !['INC-00042', 'INC-00038'].includes(incident.id)).map(incident => ({ ...incident, notes: [...(incident.notes || [])], evidenceIds: [...(incident.evidenceIds || [])] }));
   });
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(() => db.getEvidenceItems());
   const [securityChanges, setSecurityChanges] = useState<SecurityChange[]>(() => threatEngine.getSecurityChanges());
 
   // Projects & Logs
@@ -613,6 +612,50 @@ export default function App() {
     setLogs((prev) => [log, ...prev]);
   };
 
+  const handleRenameProject = (projectId: string, name: string) => {
+    const updated = projects.map(project => project.id === projectId
+      ? { ...project, name, updatedAt: new Date().toISOString() }
+      : project);
+    setProjects(updated);
+    db.saveProjects(updated);
+  };
+
+  const handleDeleteProject = (projectId: string) => {
+    if (projects.length <= 1) return;
+    const updated = projects.filter(project => project.id !== projectId);
+    if (updated.length === projects.length) return;
+    db.deleteProjectData(projectId);
+    db.saveProjects(updated);
+    setProjects(updated);
+    if (currentProjectId === projectId) {
+      const next = updated[0];
+      db.setCurrentProjectId(next.id);
+      setCurrentProjectId(next.id);
+      const nextAps = applyAnalystOverrides(db.getAccessPoints(next.id).filter(ap => ap.dataSourceOrigin !== 'TRAINING'), db.getAnalystOverrides(next.id));
+      setAccessPoints(nextAps);
+      setPackets([]);
+      setSelectedBssid(null);
+      setDataSourceProfile('OFFLINE');
+      setActiveSourceLabel(nextAps.length ? `Saved snapshot (${nextAps.length} access points)` : 'No saved network data in this project');
+    }
+    const log = db.appendLog({ level: 'INFO', source: 'PROJECT_MGR', message: `Deleted project "${projects.find(project => project.id === projectId)?.name || projectId}" and its saved network observations.` });
+    setLogs(previous => [log, ...previous]);
+  };
+
+  const handleAddEvidence = (incidentId: string, evidence: EvidenceItem) => {
+    const nextEvidence = [evidence, ...db.getEvidenceItems()];
+    db.saveEvidenceItems(nextEvidence);
+    setEvidenceItems(nextEvidence);
+    const nextIncidents = threatEngine.getIncidents().map(incident => incident.id === incidentId
+      ? { ...incident, evidenceIds: [...new Set([...(incident.evidenceIds || []), evidence.id])], updatedAt: new Date().toISOString() }
+      : { ...incident, notes: [...(incident.notes || [])], evidenceIds: [...(incident.evidenceIds || [])] });
+    threatEngine.setIncidents(nextIncidents);
+    db.saveIncidents(nextIncidents);
+    setIncidents(nextIncidents);
+    const log = db.appendLog({ level: 'INFO', source: 'EVIDENCE', message: `Added evidence ${evidence.id} to incident ${incidentId}.` });
+    setLogs(previous => [log, ...previous]);
+  };
+
   return (
     <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
       isDarkMode ? 'bg-[#0b0d11] text-slate-100' : 'bg-[#eef0f6] text-slate-900'
@@ -1030,8 +1073,11 @@ export default function App() {
         {activeTab === 'investigations' && (
           <IncidentCenter
             incidents={incidents}
+            evidenceItems={evidenceItems}
+            accessPoints={accessPoints}
             uiMode={uiMode}
             onRefreshIncidents={refreshIncidents}
+            onAddEvidence={handleAddEvidence}
           />
         )}
 
@@ -1075,6 +1121,8 @@ export default function App() {
               setActiveSourceLabel(projectAps.length > 0 ? `Saved snapshot (${projectAps.length} access points)` : 'No saved network data in this project');
             }}
             onCreateProject={handleCreateProject}
+            onRenameProject={handleRenameProject}
+            onDeleteProject={handleDeleteProject}
           />
         )}
 
@@ -1105,6 +1153,7 @@ export default function App() {
         {activeTab === 'settings' && (
           <SettingsAndLab
             uiMode={uiMode}
+            accessPoints={accessPoints}
             onToggleUIMode={handleToggleUIMode}
             onLoadLabScenario={handleLoadLabScenario}
           />

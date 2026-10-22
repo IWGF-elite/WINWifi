@@ -1,3 +1,4 @@
+import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
 import { SqliteDatabaseService, SqlQueryResult } from '../services/storage';
 import { AccessPoint, AuditProject } from '../types';
@@ -46,12 +47,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({
   const handleExportSql = () => {
     const dump = db.exportSqlDump(accessPoints);
     const blob = new Blob([dump], { type: 'text/sql' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `winwifi_audit_session_${new Date().toISOString().slice(0, 10)}.sql`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `winwifi_audit_session_${new Date().toISOString().slice(0, 10)}.sql`);
 
     setIsExported(true);
     setTimeout(() => setIsExported(false), 2500);

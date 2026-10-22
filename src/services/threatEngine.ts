@@ -209,7 +209,7 @@ export class ThreatEngine {
       summary: params.summary,
       bssidTarget: params.bssid,
       ssidTarget: params.ssid,
-      evidenceIds: [`EVD-${Math.floor(Math.random() * 8000 + 1000)}`],
+      evidenceIds: [],
       notes: [
         { timestamp: new Date().toLocaleTimeString(), author: 'ThreatEngine', text: params.summary }
       ]

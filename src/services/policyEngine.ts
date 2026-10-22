@@ -54,7 +54,10 @@ export const DEFAULT_POLICIES: SecurityPolicy[] = [
 export class PolicyEngine {
   private static instance: PolicyEngine;
   private policies: SecurityPolicy[] = DEFAULT_POLICIES;
-  private activePolicyId: string = 'corp-policy';
+  private activePolicyId: string = (() => {
+    try { return localStorage.getItem('winwifi_active_policy') || 'corp-policy'; }
+    catch { return 'corp-policy'; }
+  })();
 
   public static getInstance(): PolicyEngine {
     if (!PolicyEngine.instance) {
@@ -74,6 +77,7 @@ export class PolicyEngine {
   public setActivePolicy(policyId: string): void {
     if (this.policies.some(p => p.id === policyId)) {
       this.activePolicyId = policyId;
+      try { localStorage.setItem('winwifi_active_policy', policyId); } catch { /* Storage may be unavailable in private mode. */ }
     }
   }
 

@@ -1,3 +1,4 @@
+import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
 import { PcapPacket } from '../types';
 import { PcapService } from '../services/pcapParser';
@@ -48,12 +49,7 @@ export const PacketAnalyzer: React.FC<PacketAnalyzerProps> = ({
   const handleExportPcap = () => {
     const binaryBytes = PcapService.getInstance().exportBinaryPcap(packets);
     const blob = new Blob([binaryBytes.buffer], { type: 'application/vnd.tcpdump.pcap' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `winwifi_capture_${new Date().toISOString().slice(0, 10)}.pcap`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `winwifi_capture_${new Date().toISOString().slice(0, 10)}.pcap`);
 
     setIsExported(true);
     setTimeout(() => setIsExported(false), 2500);

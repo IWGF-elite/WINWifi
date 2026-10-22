@@ -1,3 +1,4 @@
+import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
 import { 
   Building2, 
@@ -12,9 +13,12 @@ import {
   Plus,
   RefreshCw,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import { AuditProject, AccessPoint, EnterpriseScope, DataSourceProfile } from '../types';
+import { SqlQueryResult, SqliteDatabaseService } from '../services/storage';
 
 interface EnterpriseProjectManagerProps {
   currentProject: AuditProject;
@@ -23,6 +27,8 @@ interface EnterpriseProjectManagerProps {
   dataSourceProfile: DataSourceProfile;
   onSwitchProject: (proj: AuditProject) => void;
   onCreateProject: (proj: AuditProject) => void;
+  onRenameProject: (projectId: string, name: string) => void;
+  onDeleteProject: (projectId: string) => void;
 }
 
 export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> = ({
@@ -31,7 +37,9 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
   accessPoints = [],
   dataSourceProfile,
   onSwitchProject,
-  onCreateProject
+  onCreateProject,
+  onRenameProject,
+  onDeleteProject
 }) => {
   const [showNewModal, setShowNewModal] = useState(false);
   const [orgName, setOrgName] = useState('');
@@ -41,27 +49,36 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
   const [assessmentName, setAssessmentName] = useState('');
   const [auditorName, setAuditorName] = useState('');
   const [sqlQuery, setSqlQuery] = useState('SELECT bssid, ssid, channel, security, security_score FROM access_points ORDER BY security_score ASC LIMIT 10;');
-  const [queryResult, setQueryResult] = useState<any[] | null>(null);
+  const [queryResult, setQueryResult] = useState<SqlQueryResult | null>(null);
+  const [queryError, setQueryError] = useState('');
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState('');
+  const [projectToDelete, setProjectToDelete] = useState<AuditProject | null>(null);
   const approvedCount = accessPoints.filter(ap => ap.approvedStatus === 'Approved').length;
   const reviewCount = accessPoints.filter(ap => ap.approvedStatus !== 'Approved').length;
 
   const handleCreateNew = () => {
+    if (!siteName.trim() || !assessmentName.trim()) return;
+    const site = siteName.trim();
+    const building = buildingName.trim();
+    const assessment = assessmentName.trim();
+    const scopeParts = [orgName, site, building, areaName].map(value => value.trim()).filter(Boolean);
     const newProj: AuditProject = {
       id: `proj_${Date.now()}`,
-      name: `${siteName} - ${assessmentName}`,
+      name: `${site} - ${assessment}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      location: `${siteName}, ${buildingName}`,
-      auditorName,
-      notes: `Target audit scope: ${orgName} > ${siteName} > ${buildingName} > ${areaName}`,
+      location: [site, building].filter(Boolean).join(', '),
+      auditorName: auditorName.trim() || 'Not assigned',
+      notes: `Target audit scope: ${scopeParts.join(' > ')}`,
       savedNetworksCount: accessPoints.length,
       capturedHandshakesCount: 0,
       scope: {
-        organization: orgName,
-        site: siteName,
-        building: buildingName,
-        area: areaName,
-        assessmentId: assessmentName
+        organization: orgName.trim(),
+        site,
+        building,
+        area: areaName.trim(),
+        assessmentId: assessment
       }
     };
     onCreateProject(newProj);
@@ -69,16 +86,13 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
   };
 
   const handleRunSql = () => {
-    // Deterministic in-memory SQL execution over access points
-    const rows = accessPoints.map(ap => ({
-      bssid: ap.bssid,
-      ssid: ap.ssid,
-      channel: ap.channel,
-      security: ap.security,
-      security_score: ap.securityScore,
-      is_rogue: ap.isRogueCandidate ? 1 : 0
-    })).sort((a, b) => a.security_score - b.security_score).slice(0, 10);
-    setQueryResult(rows);
+    try {
+      setQueryError('');
+      setQueryResult(SqliteDatabaseService.getInstance().executeQuery(sqlQuery, accessPoints));
+    } catch (error) {
+      setQueryResult(null);
+      setQueryError(error instanceof Error ? error.message : 'Query could not be run.');
+    }
   };
 
   const handleExportSqlDump = () => {
@@ -93,12 +107,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
     });
 
     const blob = new Blob([sql], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${currentProject.name.replace(/\s+/g, '_')}_dump.sql`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${currentProject.name.replace(/\s+/g, '_')}_dump.sql`);
   };
 
   return (
@@ -113,12 +122,12 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
             <div>
               <div className="text-xs text-slate-500 font-mono">MULTI-SITE ENTERPRISE SCOPE</div>
               <h1 className="text-lg font-bold text-slate-100 mt-0.5">
-                {currentProject.scope?.organization || 'Global Enterprise'}
+                {currentProject.scope?.organization || 'Organization not specified'}
               </h1>
               <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
-                <span>Site: <strong className="text-slate-200">{currentProject.scope?.site || 'HQ Campus'}</strong></span>
+                <span>Site: <strong className="text-slate-200">{currentProject.scope?.site || 'Not specified'}</strong></span>
                 <span>•</span>
-                <span>Building: <strong className="text-slate-200">{currentProject.scope?.building || 'Building A'}</strong></span>
+                <span>Building: <strong className="text-slate-200">{currentProject.scope?.building || 'Not specified'}</strong></span>
                 <span>•</span>
                 <span>Assessment: <strong className="text-blue-400">{currentProject.name}</strong></span>
               </div>
@@ -165,12 +174,18 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-100">{proj.name}</span>
-                    {isCurrent && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold">
-                        ACTIVE
-                      </span>
-                    )}
+                    {editingProjectId === proj.id ? (
+                      <div className="flex flex-1 items-center gap-1" onClick={event => event.stopPropagation()}>
+                        <input autoFocus value={editingProjectName} onChange={event => setEditingProjectName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { const name = editingProjectName.trim(); if (name) onRenameProject(proj.id, name); setEditingProjectId(null); } if (event.key === 'Escape') setEditingProjectId(null); }} className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-900 px-2 py-1 text-slate-100" aria-label="Project name" />
+                        <button onClick={() => { const name = editingProjectName.trim(); if (name) onRenameProject(proj.id, name); setEditingProjectId(null); }} className="rounded px-1.5 py-1 text-emerald-400 hover:bg-slate-700" title="Save project name"><Check className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => setEditingProjectId(null)} className="rounded px-1.5 py-1 text-slate-400 hover:bg-slate-700" title="Cancel rename">×</button>
+                      </div>
+                    ) : <span className="font-semibold text-slate-100">{proj.name}</span>}
+                    <div className="flex items-center gap-1" onClick={event => event.stopPropagation()}>
+                      {isCurrent && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold">ACTIVE</span>}
+                      <button onClick={() => { setEditingProjectId(proj.id); setEditingProjectName(proj.name); }} title="Rename project" aria-label={`Rename ${proj.name}`} className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-100"><Pencil className="h-3 w-3" /></button>
+                      <button disabled={projects.length <= 1} onClick={() => setProjectToDelete(proj)} title={projects.length <= 1 ? 'Keep at least one project' : 'Delete project and its saved network data'} aria-label={`Delete ${proj.name}`} className="rounded p-1 text-slate-400 hover:bg-rose-500/10 hover:text-rose-400 disabled:cursor-not-allowed disabled:opacity-30"><Trash2 className="h-3 w-3" /></button>
+                    </div>
                   </div>
                   <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-2">
                     <MapPin className="w-3 h-3 text-slate-500" />
@@ -240,29 +255,24 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
               />
             </div>
 
+            {queryError && <p role="alert" className="mt-3 rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{queryError}</p>}
             {/* Query Results Table */}
             {queryResult && (
               <div className="mt-3 overflow-x-auto border border-slate-800 rounded-lg">
+                <div className="border-b border-slate-800 px-2 py-1.5 text-[10px] text-slate-400">{queryResult.rowCount} rows · {queryResult.executionTimeMs} ms{queryResult.tableName ? ` · ${queryResult.tableName}` : ''}</div>
                 <table className="w-full text-left text-xs font-mono">
                   <thead className="bg-slate-800/60 text-slate-400 text-[10px]">
                     <tr>
-                      <th className="p-2">BSSID</th>
-                      <th className="p-2">SSID</th>
-                      <th className="p-2">Ch</th>
-                      <th className="p-2">Security</th>
-                      <th className="p-2 text-right">Score</th>
+                      {queryResult.columns.map(column => <th key={column} className="p-2">{column}</th>)}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/40 text-slate-300">
-                    {queryResult.map((row, idx) => (
+                    {queryResult.rows.map((row, idx) => (
                       <tr key={idx} className="hover:bg-slate-800/30">
-                        <td className="p-2 text-slate-400">{row.bssid}</td>
-                        <td className="p-2 text-slate-100">{row.ssid}</td>
-                        <td className="p-2">{row.channel}</td>
-                        <td className="p-2">{row.security}</td>
-                        <td className="p-2 text-right font-bold text-emerald-400">{row.security_score}</td>
+                        {row.map((value, columnIndex) => <td key={columnIndex} className="p-2">{value === null ? 'NULL' : String(value)}</td>)}
                       </tr>
                     ))}
+                    {queryResult.rows.length === 0 && <tr><td colSpan={Math.max(queryResult.columns.length, 1)} className="p-4 text-center text-slate-500">No rows returned.</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -280,7 +290,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
               Create Multi-Site Enterprise Assessment Scope
             </h3>
 
-            <div className="space-y-3 text-xs">
+            <form onSubmit={event => { event.preventDefault(); handleCreateNew(); }} className="space-y-3 text-xs">
               <div>
                 <label className="text-slate-400 font-medium block mb-1">Organization</label>
                 <input
@@ -296,6 +306,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
                   <label className="text-slate-400 font-medium block mb-1">Site</label>
                   <input
                     type="text"
+                    required
                     value={siteName}
                     onChange={(e) => setSiteName(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-slate-200"
@@ -326,6 +337,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
                 <label className="text-slate-400 font-medium block mb-1">Assessment Name</label>
                 <input
                   type="text"
+                    required
                   value={assessmentName}
                   onChange={(e) => setAssessmentName(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-slate-200"
@@ -341,21 +353,34 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-slate-200"
                 />
               </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-800 text-xs font-medium">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800 text-xs font-medium">
               <button
+                type="button"
                 onClick={() => setShowNewModal(false)}
                 className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
               >
                 Cancel
               </button>
               <button
-                onClick={handleCreateNew}
+                type="submit"
                 className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1.5"
               >
                 <Check className="w-3.5 h-3.5" /> Initialize Assessment
               </button>
+            </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {projectToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl">
+            <h3 className="text-sm font-bold">Delete “{projectToDelete.name}”?</h3>
+            <p className="mt-2 text-xs leading-relaxed text-slate-400">This removes the project and its saved network observations and analyst overrides. Shared incident records and handshakes remain available.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setProjectToDelete(null)} className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">Cancel</button>
+              <button onClick={() => { onDeleteProject(projectToDelete.id); setProjectToDelete(null); }} className="rounded bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-500">Delete project</button>
             </div>
           </div>
         </div>
