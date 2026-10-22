@@ -680,6 +680,20 @@ SSID 2 : Guest-Open
             }));
 #endif
 
+            results.Add(RunTest("T17-LOCAL-BRIDGE-ORIGINS", "Local Bridge Origin and Private-Network Contract", () =>
+            {
+                var defaults = HttpBridgeServer.ParseAllowedBrowserOrigins(null);
+                if (!defaults.Contains("http://localhost:5173")) throw new Exception("Vite development origin is missing from defaults.");
+                var configured = HttpBridgeServer.ParseAllowedBrowserOrigins("http://localhost:4173;https://127.0.0.1:4443;https://example.com;http://localhost:4173/path");
+                if (configured.Count != 2 || !configured.Contains("http://localhost:4173") || !configured.Contains("https://127.0.0.1:4443"))
+                    throw new Exception("Configured origins must accept loopback origins only and reject paths and remote hosts.");
+                if (!HttpBridgeServer.IsAllowedBrowserOrigin("http://localhost:4173", configured) || HttpBridgeServer.IsAllowedBrowserOrigin("http://localhost:9999", configured))
+                    throw new Exception("Origin allowlist matching failed.");
+                if (!HttpBridgeServer.RequestsPrivateNetworkAccess("true") || HttpBridgeServer.RequestsPrivateNetworkAccess("false"))
+                    throw new Exception("Private-network preflight header detection failed.");
+                return "Validated configurable loopback origins, remote/path rejection, allowlist matching, and private-network preflight detection.";
+            }));
+
             return results;
         }
 

@@ -59,6 +59,13 @@ The desktop app starts the local-only HTTP bridge on `127.0.0.1:38989` and
 begins passive WLAN-cache observation when it finds an adapter. The web
 dashboard can connect from **Settings → Native Bridge**. The bridge only
 accepts loopback traffic and the dashboard's known localhost origins.
+The default development origins are `localhost`/`127.0.0.1` on ports 3000 and
+5173. To override them, set `WINWIFI_ALLOWED_ORIGINS` before launching the app
+to a semicolon-separated list of loopback origins, for example
+`http://localhost:4173;http://127.0.0.1:4173`. Remote origins and origin URLs
+with paths are always rejected. Chromium private-network preflights are
+answered explicitly; if SSE cannot stay connected, the dashboard polls and
+retries the event stream every 10 seconds.
 
 For headless/CLI use:
 

@@ -28,6 +28,7 @@ export class NativeBridgeClient {
   private eventSource: EventSource | null = null;
   private pollTimer: any = null;
   private reconnectTimer: any = null;
+  private sseRetryTimer: any = null;
   private reconnectAttempts = 0;
   private maxReconnectDelayMs = 15000;
 
@@ -174,7 +175,13 @@ export class NativeBridgeClient {
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => response.statusText);
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+        let detail = errorText || response.statusText;
+        try {
+          const payload = JSON.parse(errorText);
+          detail = payload?.error?.message || payload?.message || payload?.error || detail;
+          if (typeof detail !== 'string') detail = errorText;
+        } catch { /* Keep non-JSON response text for diagnostics. */ }
+        throw new Error(`HTTP ${response.status}: ${detail}`);
       }
 
       return await response.json() as T;
@@ -274,6 +281,8 @@ export class NativeBridgeClient {
 
     this.setState('CONNECTING');
     this.stopPolling();
+    if (this.sseRetryTimer) clearTimeout(this.sseRetryTimer);
+    this.sseRetryTimer = null;
     this.closeEventSource();
 
     try {
@@ -307,6 +316,10 @@ export class NativeBridgeClient {
       this.reconnectTimer = null;
     }
     this.stopPolling();
+    if (this.sseRetryTimer) {
+      clearTimeout(this.sseRetryTimer);
+      this.sseRetryTimer = null;
+    }
     this.closeEventSource();
     this.setState('DISCONNECTED');
   }
@@ -364,12 +377,20 @@ export class NativeBridgeClient {
 
       this.eventSource.onopen = () => {
         console.log('[BridgeClient] SSE stream connection established.');
+        if (this.sseRetryTimer) clearTimeout(this.sseRetryTimer);
+        this.sseRetryTimer = null;
+        this.stopPolling();
       };
 
       this.eventSource.onerror = (e) => {
         console.warn('[BridgeClient] SSE stream error. Falling back to HTTP polling.', e);
         this.closeEventSource();
         this.startPolling();
+        if (this.sseRetryTimer) clearTimeout(this.sseRetryTimer);
+        this.sseRetryTimer = setTimeout(() => {
+          this.sseRetryTimer = null;
+          if (this.state === 'CONNECTED') this.initEventSource();
+        }, 10_000);
       };
     } catch (e) {
       console.warn('[BridgeClient] Failed to initialize EventSource. Falling back to HTTP polling.', e);

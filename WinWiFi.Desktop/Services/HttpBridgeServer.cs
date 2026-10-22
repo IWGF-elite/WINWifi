@@ -29,13 +29,29 @@ namespace WinWiFi.Services
         private CancellationTokenSource? _cts;
         private Task? _listenerTask;
         private readonly ConcurrentDictionary<string, StreamWriter> _sseClients = new();
-        private static readonly HashSet<string> AllowedBrowserOrigins = new(StringComparer.OrdinalIgnoreCase)
+        private readonly HashSet<string> _allowedBrowserOrigins;
+
+        internal static HashSet<string> ParseAllowedBrowserOrigins(string? configuredOrigins)
         {
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173"
-        };
+            var defaults = new[] { "http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173" };
+            var origins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var candidates = string.IsNullOrWhiteSpace(configuredOrigins) ? defaults : configuredOrigins.Split(';');
+            foreach (var candidate in candidates)
+            {
+                var value = candidate.Trim().TrimEnd('/');
+                if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) continue;
+                if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) continue;
+                if (!uri.IsLoopback || uri.UserInfo.Length > 0 || uri.AbsolutePath != "/" || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment)) continue;
+                origins.Add(uri.GetLeftPart(UriPartial.Authority));
+            }
+            return origins;
+        }
+
+        internal static bool IsAllowedBrowserOrigin(string? origin, IEnumerable<string> allowedOrigins) =>
+            !string.IsNullOrWhiteSpace(origin) && allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
+
+        internal static bool RequestsPrivateNetworkAccess(string? requestHeader) =>
+            string.Equals(requestHeader, "true", StringComparison.OrdinalIgnoreCase);
 
         private List<AccessPoint> _latestAccessPoints = new();
         private List<ThreatFinding> _latestIncidents = new();
@@ -52,12 +68,16 @@ namespace WinWiFi.Services
             PcapDissector? pcapDissector = null,
             ReportGenerator? reportGenerator = null,
             SqliteStorageService? storage = null,
-            WifiBackgroundScanner? scanner = null)
+            WifiBackgroundScanner? scanner = null,
+            IEnumerable<string>? allowedBrowserOrigins = null)
         {
             _port = port;
             _listener = new HttpListener();
             _listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
             _listener.Prefixes.Add($"http://localhost:{_port}/");
+            _allowedBrowserOrigins = allowedBrowserOrigins is null
+                ? ParseAllowedBrowserOrigins(Environment.GetEnvironmentVariable("WINWIFI_ALLOWED_ORIGINS"))
+                : new HashSet<string>(allowedBrowserOrigins.Where(origin => ParseAllowedBrowserOrigins(origin).Contains(origin.TrimEnd('/'))), StringComparer.OrdinalIgnoreCase);
 
             _securityAnalyzer = securityAnalyzer ?? new SecurityAnalyzer();
             _wifiService = wifiService ?? new NativeWifiService(_securityAnalyzer);
@@ -204,7 +224,7 @@ namespace WinWiFi.Services
             if (!request.IsLocal)
             {
                 response.StatusCode = (int)HttpStatusCode.Forbidden;
-                await WriteJsonAsync(response, new { error = "Forbidden: WinWiFi HTTP Bridge only accepts loopback (localhost) connections." });
+                await WriteJsonErrorAsync(response, HttpStatusCode.Forbidden, "loopback_required", "WinWiFi HTTP Bridge only accepts loopback (localhost) connections.");
                 return;
             }
 
@@ -212,10 +232,10 @@ namespace WinWiFi.Services
             string? origin = request.Headers["Origin"];
             if (!string.IsNullOrEmpty(origin))
             {
-                if (!AllowedBrowserOrigins.Contains(origin))
+                if (!IsAllowedBrowserOrigin(origin, _allowedBrowserOrigins))
                 {
                     response.StatusCode = (int)HttpStatusCode.Forbidden;
-                    await WriteJsonAsync(response, new { error = "This browser origin is not allowed to access the local WinWiFi bridge." });
+                    await WriteJsonErrorAsync(response, HttpStatusCode.Forbidden, "origin_not_allowed", "This browser origin is not allowed to access the local WinWiFi bridge.");
                     return;
                 }
 
@@ -224,6 +244,8 @@ namespace WinWiFi.Services
                 response.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                 response.AddHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
                 response.AddHeader("Access-Control-Max-Age", "86400");
+                if (RequestsPrivateNetworkAccess(request.Headers["Access-Control-Request-Private-Network"]))
+                    response.AddHeader("Access-Control-Allow-Private-Network", "true");
             }
 
             if (request.HttpMethod.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
@@ -328,14 +350,14 @@ namespace WinWiFi.Services
 
                     default:
                         response.StatusCode = (int)HttpStatusCode.NotFound;
-                        await WriteJsonAsync(response, new { error = $"Endpoint '{path}' not found." });
+                        await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "endpoint_not_found", $"Endpoint '{path}' not found.");
                         break;
                 }
             }
             catch (Exception ex)
             {
                 response.StatusCode = (int)HttpStatusCode.InternalServerError;
-                await WriteJsonAsync(response, new { error = ex.Message, stack = ex.StackTrace });
+                await WriteJsonErrorAsync(response, HttpStatusCode.InternalServerError, "bridge_error", ex.Message);
             }
             finally
             {
@@ -714,6 +736,12 @@ namespace WinWiFi.Services
             byte[] buffer = Encoding.UTF8.GetBytes(json);
             response.ContentLength64 = buffer.Length;
             await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+        }
+
+        private static Task WriteJsonErrorAsync(HttpListenerResponse response, HttpStatusCode status, string code, string message)
+        {
+            response.StatusCode = (int)status;
+            return WriteJsonAsync(response, new { error = new { code, message } });
         }
     }
 }

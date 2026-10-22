@@ -319,4 +319,41 @@ runTest('T12: Bridge Serialization & Property Naming Contract', () => {
   if (apPascal.channel !== 6 || apPascal.band !== '2.4 GHz') throw new Error('Legacy PascalCase channel/band failure');
 });
 
+runTest('T13: SSE Failure Falls Back and Reconnects', () => {
+  const NativeEventSource = globalThis.EventSource;
+  const nativeSetTimeout = globalThis.setTimeout;
+  const retryCallbacks: Array<{ callback: (...args: any[]) => void; delay: number }> = [];
+  class FakeEventSource {
+    static instances: FakeEventSource[] = [];
+    onopen: (() => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    closed = false;
+    constructor(_url: string) { FakeEventSource.instances.push(this); }
+    addEventListener(_event: string, _listener: EventListenerOrEventListenerObject) {}
+    close() { this.closed = true; }
+  }
+
+  const client = new (NativeBridgeClient as any)();
+  try {
+    (globalThis as any).EventSource = FakeEventSource;
+    (globalThis as any).setTimeout = (callback: (...args: any[]) => void, delay = 0) => {
+      retryCallbacks.push({ callback, delay });
+      return 123 as any;
+    };
+    client.state = 'CONNECTED';
+    client.initEventSource();
+    FakeEventSource.instances[0].onerror?.(new Event('error'));
+    if (!FakeEventSource.instances[0].closed || !client.pollTimer) throw new Error('SSE failure did not close the stream and start polling fallback');
+    const retry = retryCallbacks.find(item => item.delay === 10_000);
+    if (!retry) throw new Error('SSE retry was not scheduled for 10 seconds');
+    retry.callback();
+    if (FakeEventSource.instances.length !== 2) throw new Error('SSE retry did not create a replacement event stream');
+    client.disconnect();
+  } finally {
+    client.disconnect();
+    (globalThis as any).EventSource = NativeEventSource;
+    globalThis.setTimeout = nativeSetTimeout;
+  }
+});
+
 console.log(`\nResults: ${passedCount}/${totalCount} tests passed.\n`);
