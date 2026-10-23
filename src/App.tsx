@@ -380,6 +380,19 @@ export default function App() {
     })), db.getAnalystOverrides(currentProjectId));
     setAccessPoints(taggedAps);
     setPackets(result.packets);
+    const captureEvidence: EvidenceItem = {
+      id: `PCAP-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: 'pcap',
+      title: `Imported capture: ${filename}`,
+      source: 'Local PCAP/PCAPNG file',
+      description: `${result.summary.totalPackets} decoded frames, ${result.summary.apCount} access points, ${result.summary.eapolCount} EAPOL frames. Evidence is derived from the imported file.`
+    };
+    setEvidenceItems(previous => {
+      const next = [captureEvidence, ...previous];
+      db.saveEvidenceItems(next);
+      return next;
+    });
     db.saveAccessPoints(currentProjectId, taggedAps);
     setDataSourceProfile('REAL_PCAP');
     setActiveSourceLabel(`${filename} (${result.packets.length} pkts)`);
