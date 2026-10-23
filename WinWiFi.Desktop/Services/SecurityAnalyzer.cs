@@ -85,7 +85,7 @@ namespace WinWiFi.Services
             }
 
             // 5. Missing Protected Management Frames (802.11w / PMF)
-            if (!ap.PmfRequired && (secUpper.Contains("WPA2") || secUpper.Contains("ENTERPRISE")))
+            if (ap.PmfInformationAvailable && !ap.PmfRequired && (secUpper.Contains("WPA2") || secUpper.Contains("ENTERPRISE")))
             {
                 score -= 10;
                 ap.SecurityIssues.Add(new SecurityIssue
@@ -102,14 +102,13 @@ namespace WinWiFi.Services
             // 6. Locally Administered (LAA) / Randomized MAC Address on AP
             if (WinWiFi.Services.OuiLookupService.IsLocallyAdministered(ap.Bssid))
             {
-                score -= 15;
                 ap.SecurityIssues.Add(new SecurityIssue
                 {
                     Id = "WARN-LAA-BSSID",
                     Title = "Locally Administered / Randomized AP BSSID",
-                    Severity = "MEDIUM",
-                    Description = "The BSSID uses a locally administered MAC address (bit 1 of first octet is 1). Hardware APs use globally unique vendor OUIs; LAA is common in software APs (hostapd, airbase-ng, mobile hotspots).",
-                    Remediation = "Investigate device origin. Verify whether this is an authorized temporary hotspot or an unauthorized rogue device.",
+                    Severity = "INFO",
+                    Description = "The BSSID uses a locally administered MAC address. This is common for mobile hotspots and privacy-preserving devices and is not a vulnerability by itself.",
+                    Remediation = "Confirm ownership if this network is expected to be part of the authorized scope.",
                     StandardReference = "NIST SP 800-153 §5.1"
                 });
             }

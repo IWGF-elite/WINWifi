@@ -27,6 +27,7 @@ namespace WinWiFi.Models
         // PMF (802.11w) Status
         public bool PmfRequired { get; set; }
         public bool PmfCapable { get; set; }
+        public bool PmfInformationAvailable { get; set; }
         public string PmfStatus => PmfRequired ? "Required" : (PmfCapable ? "Capable" : "Unknown / Not Exposed / Unsupported");
 
         // WPS 1.0 / 2.0 Details

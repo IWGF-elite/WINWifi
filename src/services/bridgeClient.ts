@@ -472,6 +472,7 @@ export class NativeBridgeClient {
       standard: ap.standard || ap.phyType || ap.PhyType || '802.11ax (Wi-Fi 6)',
       phyType: ap.phyType || ap.PhyType || '802.11ax',
       channelWidth: ap.channelWidth ?? ap.ChannelWidth ?? 20,
+      channelWidthMhz: ap.channelWidthMhz ?? ap.ChannelWidthMhz ?? ap.channelWidth ?? ap.ChannelWidth ?? 20,
       vendor: ap.vendor || ap.Vendor || 'Unknown',
       beaconCount: ap.beaconCount ?? ap.BeaconCount ?? 1,
       dataPacketCount: ap.dataPacketCount ?? ap.DataPacketCount ?? 0,

@@ -770,6 +770,7 @@ namespace WinWiFi.Services
             {
                 ushort rsnCaps = BitConverter.ToUInt16(data, curr);
                 // Bit 6: MFPC (PMF Capable), Bit 7: MFPR (PMF Required)
+                ap.PmfInformationAvailable = true;
                 ap.PmfCapable = (rsnCaps & 0x0040) != 0;
                 ap.PmfRequired = (rsnCaps & 0x0080) != 0;
             }

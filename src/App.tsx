@@ -556,78 +556,12 @@ export default function App() {
       return;
     }
 
-    const clientMac = ap.clients[0]?.macAddress || '74:D4:35:E1:90:7A';
-    const anonce = Array.from({ length: 32 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('').toUpperCase();
-    const snonce = Array.from({ length: 32 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('').toUpperCase();
-    const mic = Array.from({ length: 16 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('').toUpperCase();
-
-    const cleanSsidHex = Array.from(ap.ssid).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
-    const hashcatString = `WPA*02*${mic.toLowerCase()}*${ap.bssid.replace(/:/g, '').toLowerCase()}*${clientMac.replace(/:/g, '').toLowerCase()}*${cleanSsidHex}*${anonce.toLowerCase()}*0103005f02030a00000000000000000001`;
-
-    const newHandshake: HandshakeInfo = {
-      apBssid: ap.bssid,
-      clientMac,
-      ssid: ap.ssid,
-      type: ap.security.includes('WPA3') ? 'WPA3 SAE (Commit/Confirm)' : 'WPA2 4-Way (EAPOL)',
-      capturedSteps: ['M1', 'M2', 'M3', 'M4'],
-      isComplete: true,
-      replayCounterMatch: true,
-      micVerified: true,
-      capturedAt: new Date().toLocaleTimeString(),
-      anonce,
-      snonce,
-      micHex: mic,
-      hashcatFormat: hashcatString,
-      qualityScore: 98,
-      validationStatus: 'VALID',
-      origin: 'TRAINING',
-      isSimulated: true,
-    };
-
-    setAccessPoints((prev) =>
-      prev.map((a) => (a.bssid === ap.bssid ? { ...a, handshake: newHandshake } : a))
-    );
-
-    db.saveHandshake(newHandshake);
-
     const log = db.appendLog({
-      level: 'INFO',
+      level: 'WARN',
       source: 'HANDSHAKE_VALIDATOR',
-      message: `[TRAINING LAB] Generated synthetic EAPOL handshake model for educational audit of "${ap.ssid}".`,
+      message: `Handshake capture is unavailable without an imported monitor-mode capture. No synthetic handshake was created for "${ap.ssid}".`,
     });
     setLogs((prev) => [log, ...prev]);
-
-    setPackets((prev) => [
-      {
-        id: Date.now() + 1,
-        timestamp: new Date().toLocaleTimeString() + '.102',
-        frameNumber: prev.length + 1,
-        frameType: 'EAPOL Key',
-        sourceMac: ap.bssid,
-        destMac: clientMac,
-        bssid: ap.bssid,
-        channel: ap.channel,
-        rssi: ap.rssi,
-        lengthBytes: 121,
-        info: `[TRAINING] EAPOL 4-Way Handshake [Message 1/4] ANonce: ${anonce.slice(0, 16)}...`,
-        hexPreview: '01 03 00 5f 02 03 0a 00 00 00 00 00 00 00 00 00 01'
-      },
-      {
-        id: Date.now() + 2,
-        timestamp: new Date().toLocaleTimeString() + '.124',
-        frameNumber: prev.length + 2,
-        frameType: 'EAPOL Key',
-        sourceMac: clientMac,
-        destMac: ap.bssid,
-        bssid: ap.bssid,
-        channel: ap.channel,
-        rssi: ap.rssi - 4,
-        lengthBytes: 121,
-        info: `[TRAINING] EAPOL 4-Way Handshake [Message 2/4] SNonce: ${snonce.slice(0, 16)}... MIC: ${mic}`,
-        hexPreview: '01 03 00 5f 02 01 0a 00 00 00 00 00 00 00 00 00 02'
-      },
-      ...prev,
-    ]);
   }, [dataSourceProfile, db]);
 
   // Update Access Point Metadata
