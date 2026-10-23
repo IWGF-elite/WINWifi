@@ -8,6 +8,8 @@ import {
   Sun, 
   Moon, 
   Maximize2,
+  Minus,
+  X,
   CheckCircle2, 
   FileText,
   FlaskConical,
@@ -67,6 +69,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onSelectAdapter,
   onToggleFullscreen,
 }) => {
+  const nativeWindow = (action: 'minimize' | 'maximize' | 'close' | 'drag') => {
+    (window as any).chrome?.webview?.postMessage?.(`window:${action}`);
+  };
   const getOriginBadge = () => {
     switch (dataSourceProfile) {
       case 'LIVE_WINDOWS':
@@ -115,7 +120,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         : 'bg-[#f3f4f8] border-[#e2e4ea] text-slate-800'
     }`}>
       {/* Top Windows Chrome Bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 text-xs">
+      <div className="flex items-center justify-between px-3 py-1.5 text-xs" onDoubleClick={() => nativeWindow('maximize')} onMouseDown={(event) => {
+        if (event.button === 0 && !(event.target as HTMLElement).closest('button,select,input')) nativeWindow('drag');
+      }}>
         <div className="flex items-center gap-2">
           <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600 text-white shadow-sm">
             <ShieldCheck className="w-3.5 h-3.5" />
@@ -150,6 +157,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           <button onClick={onToggleFullscreen} className="p-1.5 rounded hover:bg-slate-700/20 text-slate-400 hover:text-slate-200" title="Toggle full screen" aria-label="Toggle full screen">
             <Maximize2 className="w-3 h-3" />
           </button>
+          <button onClick={() => nativeWindow('minimize')} className="p-1.5 hover:bg-slate-700/20" title="Minimize"><Minus className="w-3.5 h-3.5" /></button>
+          <button onClick={() => nativeWindow('maximize')} className="p-1.5 hover:bg-slate-700/20" title="Maximize"><Maximize2 className="w-3.5 h-3.5" /></button>
+          <button onClick={() => nativeWindow('close')} className="p-1.5 hover:bg-rose-600 hover:text-white" title="Close"><X className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 

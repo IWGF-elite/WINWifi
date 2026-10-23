@@ -92,7 +92,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
         matchesSecurity = ap.security.includes('WPA3');
       }
 
-      const matchesVuln = !onlyVulnerable || ap.securityScore < 70 || ap.isRogueCandidate;
+      const matchesVuln = !onlyVulnerable || (ap.riskScore ?? (100 - ap.securityScore)) >= 40 || ap.isRogueCandidate;
 
       return matchesSearch && matchesBand && matchesSecurity && matchesVuln;
     });
@@ -105,7 +105,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
       if (sortField === 'rssi') diff = a.rssi - b.rssi;
       else if (sortField === 'ssid') diff = a.ssid.localeCompare(b.ssid);
       else if (sortField === 'channel') diff = a.channel - b.channel;
-      else if (sortField === 'securityScore') diff = a.securityScore - b.securityScore;
+      else if (sortField === 'securityScore') diff = (a.riskScore ?? 100 - a.securityScore) - (b.riskScore ?? 100 - b.securityScore);
       else if (sortField === 'clients') diff = (a.clients?.length || 0) - (b.clients?.length || 0);
       else if (sortField === 'dataPacketCount') diff = a.dataPacketCount - b.dataPacketCount;
       return sortAsc ? diff : -diff;
@@ -189,25 +189,24 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
     );
   };
 
-  const getScoreBadge = (score: number) => {
-    if (score >= 85) {
+  const getScoreBadge = (risk: number) => {
+    if (risk >= 75) {
       return (
-        <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          {score}/100 High
+        <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+          {risk}/100 Critical
         </span>
       );
     }
-    if (score >= 55) {
+    if (risk >= 40) {
       return (
         <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-          {score}/100 Med
+          {risk}/100 High
         </span>
       );
     }
     return (
-      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 flex items-center gap-1">
-        <AlertTriangle className="w-2.5 h-2.5" />
-        {score}/100 At Risk
+      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+        {risk}/100 {risk >= 15 ? 'Medium' : 'Low'}
       </span>
     );
   };
@@ -610,7 +609,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
 
                     {/* Score */}
                     <td className="py-3 px-3">
-                      {getScoreBadge(ap.securityScore)}
+                      {getScoreBadge(ap.riskScore ?? (100 - ap.securityScore))}
                     </td>
 
                     {/* Actions */}
