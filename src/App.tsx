@@ -438,6 +438,39 @@ export default function App() {
     setLogs((prev) => [log, ...prev]);
   };
 
+  const handleImportPcapFile = async (file: File) => {
+    if (bridgeClient.getState() !== 'CONNECTED') {
+      handleImportPcap(PcapService.getInstance().parseBinaryPcap(await file.arrayBuffer()), file.name);
+      return;
+    }
+    const native = await bridgeClient.importPcap(file);
+    const parsed: PcapParseResult = {
+      packets: native.packets || [],
+      accessPoints: (native.accessPoints || []).map((ap: any) => ({
+        ...ap,
+        channelWidthMhz: ap.channelWidthMhz ?? ap.channelWidth ?? 20,
+        clients: ap.clients || [],
+        issues: ap.securityIssues || ap.issues || [],
+        dataSourceOrigin: 'IMPORTED' as DataOrigin
+      })),
+      handshakes: native.handshakes || [],
+      summary: {
+        totalPackets: native.totalFramesCount || 0,
+        beaconCount: (native.packets || []).filter((p: any) => p.subtype === 'Beacon').length,
+        eapolCount: (native.packets || []).filter((p: any) => String(p.subtype || p.frameType).includes('EAPOL')).length,
+        apCount: (native.accessPoints || []).length,
+        clientCount: (native.clients || []).length,
+        linkType: native.linkTypeName || 'Native PCAP dissector',
+        fileSize: file.size
+      }
+    };
+    parsed.handshakes.forEach(handshake => {
+      const ap = parsed.accessPoints.find(a => a.bssid?.toLowerCase() === handshake.apBssid?.toLowerCase());
+      if (ap) ap.handshake = { ...handshake, origin: 'IMPORTED', isSimulated: false };
+    });
+    handleImportPcap(parsed, file.name);
+  };
+
   // Ingestion: Real Windows Netsh CLI Ingest
   const handleImportNetsh = (aps: AccessPoint[], logMsg: string) => {
     const taggedAps = applyAnalystOverrides(aps.map((a) => ({
@@ -1214,6 +1247,7 @@ export default function App() {
         <ImportModal
           onClose={() => setShowImportModal(false)}
           onImportPcap={handleImportPcap}
+          onImportPcapFile={handleImportPcapFile}
           onImportNetsh={handleImportNetsh}
           onLoadBenchmark={handleLoadBenchmark}
           currentProfile={dataSourceProfile}

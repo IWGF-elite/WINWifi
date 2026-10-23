@@ -1,7 +1,5 @@
-import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
-import { HandshakeInfo, AccessPoint, PcapPacket, DataSourceProfile } from '../types';
-import { PcapService } from '../services/pcapParser';
+import { HandshakeInfo, AccessPoint, DataSourceProfile } from '../types';
 import { 
   KeyRound, 
   Copy, 
@@ -45,60 +43,10 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
     setTimeout(() => setCopiedIndex(null), 2000);
   };
 
-  const handleDownloadCap = (h: HandshakeInfo) => {
+  const handleDownloadCap = (_h: HandshakeInfo) => {
     // Generate standard Libpcap 2.4 binary buffer containing Beacon and real/dissected EAPOL Key packets
-    const ap = accessPoints.find(a => a.bssid.toLowerCase() === h.apBssid.toLowerCase());
-    const channel = ap?.channel || 6;
-    const rssi = ap?.rssi || -55;
-
-    const packets: PcapPacket[] = [
-      {
-        id: 1,
-        timestamp: h.capturedAt + '.001',
-        frameNumber: 1,
-        frameType: 'Beacon',
-        sourceMac: h.apBssid,
-        destMac: 'ff:ff:ff:ff:ff:ff',
-        bssid: h.apBssid,
-        channel,
-        rssi,
-        lengthBytes: 128,
-        info: `Beacon Frame SSID: "${h.ssid}"`,
-        hexPreview: '80 00 00 00 ff ff ff ff ff ff'
-      },
-      {
-        id: 2,
-        timestamp: h.capturedAt + '.012',
-        frameNumber: 2,
-        frameType: 'EAPOL Key',
-        sourceMac: h.apBssid,
-        destMac: h.clientMac,
-        bssid: h.apBssid,
-        channel,
-        rssi,
-        lengthBytes: 121,
-        info: `EAPOL Key M1 ANonce=${h.anonce.slice(0, 16)}...`,
-        hexPreview: '01 03 00 5f 02 03 0a 00'
-      },
-      {
-        id: 3,
-        timestamp: h.capturedAt + '.024',
-        frameNumber: 3,
-        frameType: 'EAPOL Key',
-        sourceMac: h.clientMac,
-        destMac: h.apBssid,
-        bssid: h.apBssid,
-        channel,
-        rssi: rssi - 4,
-        lengthBytes: 121,
-        info: `EAPOL Key M2 SNonce=${h.snonce.slice(0, 16)}... MIC=${h.micHex}`,
-        hexPreview: '01 03 00 5f 02 01 0a 00'
-      }
-    ];
-
-    const binaryBytes = PcapService.getInstance().exportBinaryPcap(packets);
-    const blob = new Blob([binaryBytes.buffer], { type: 'application/vnd.tcpdump.pcap' });
-    downloadBlob(blob, `${h.ssid.replace(/\s+/g, '_')}_${h.apBssid.replace(/:/g, '')}.pcap`);
+    // The original capture is evidence. Reconstructing a new PCAP from parsed
+    // fields would fabricate frames, so this control deliberately performs no export.
   };
 
   const isLive = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
@@ -231,13 +179,25 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
 
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => handleDownloadCap(h)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
+                      onClick={() => handleDownloadCap(h)} disabled
+                      title="WinWiFi never reconstructs packet captures. Retain the original imported capture."
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
                     >
                       <Download className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Export .PCAP</span>
+                      <span>Original Capture Required</span>
                     </button>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 text-[10px] font-mono">
+                  {(['M1', 'M2', 'M3', 'M4'] as const).map(step => (
+                    <span key={step} className={`rounded border px-2 py-1 ${h.capturedSteps.includes(step) ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-500'}`}>
+                      {step}: {h.capturedSteps.includes(step) ? 'observed' : 'missing'}
+                    </span>
+                  ))}
+                  <span className={`rounded border px-2 py-1 ${h.isComplete ? 'border-emerald-500/40 text-emerald-300' : 'border-amber-500/40 text-amber-300'}`}>
+                    {h.isComplete ? 'complete' : 'partial'}
+                  </span>
                 </div>
 
                 {/* Handshake Nonce & MIC Parameters */}

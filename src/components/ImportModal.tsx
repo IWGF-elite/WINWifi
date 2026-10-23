@@ -18,6 +18,7 @@ import { WifiEngine } from '../services/wifiEngine';
 interface ImportModalProps {
   onClose: () => void;
   onImportPcap: (result: PcapParseResult, filename: string) => void;
+  onImportPcapFile?: (file: File) => Promise<void>;
   onImportNetsh: (aps: AccessPoint[], logMsg: string) => void;
   onLoadBenchmark: () => void;
   currentProfile: DataSourceProfile;
@@ -27,6 +28,7 @@ interface ImportModalProps {
 export const ImportModal: React.FC<ImportModalProps> = ({
   onClose,
   onImportPcap,
+  onImportPcapFile,
   onImportNetsh,
   onLoadBenchmark,
   currentProfile,
@@ -48,9 +50,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setIsProcessing(true);
 
     try {
-      const buffer = await file.arrayBuffer();
-      const result = pcapService.parseBinaryPcap(buffer);
-      onImportPcap(result, file.name);
+      if (onImportPcapFile) {
+        await onImportPcapFile(file);
+      } else {
+        const buffer = await file.arrayBuffer();
+        const result = pcapService.parseBinaryPcap(buffer);
+        onImportPcap(result, file.name);
+      }
       onClose();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to parse PCAP file.');

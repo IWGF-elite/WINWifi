@@ -66,7 +66,8 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   };
 
   return (
-    <div className={`border rounded-xl shadow-xl flex flex-col transition-all overflow-hidden ${
+    <div className="fixed inset-0 z-[100] flex justify-end bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Network inspection">
+    <div className={`h-full w-full max-w-3xl overflow-y-auto border-l shadow-2xl flex flex-col transition-all ${
       isDarkMode ? 'bg-[#181a20] border-[#2c303b]' : 'bg-white border-slate-200'
     }`}>
       {/* Header */}
@@ -452,7 +453,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </div></div>
   );
 };
 

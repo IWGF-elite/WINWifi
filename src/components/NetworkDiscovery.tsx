@@ -599,13 +599,13 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-1.5 text-slate-300">
                         <Users className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="font-mono">{ap.clients?.length || 0}</span>
+                        <span className="font-mono">{dataSourceProfile === 'LIVE_WINDOWS' ? 'N/A (needs capture)' : (ap.clients?.length || 0)}</span>
                       </div>
                     </td>
 
                     {/* Packets */}
                     <td className="py-3 px-3">
-                      <span className="font-mono text-slate-400">{ap.dataPacketCount.toLocaleString()}</span>
+                      <span className="font-mono text-slate-400">{dataSourceProfile === 'LIVE_WINDOWS' ? 'N/A (needs capture)' : ap.dataPacketCount.toLocaleString()}</span>
                     </td>
 
                     {/* Score */}

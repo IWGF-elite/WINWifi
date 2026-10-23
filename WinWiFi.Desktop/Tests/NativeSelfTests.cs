@@ -41,6 +41,16 @@ namespace WinWiFi.Tests
                 return $"Verified DOT11_BSS_ENTRY ({bssEntrySize} bytes), WLAN_INTERFACE_INFO ({ifaceInfoSize} bytes)";
             }));
 
+            results.Add(RunTest("T1A-SSID-DECODE", "SSID UTF-8 / Windows-1252 / Escaped Hex Decoding", () =>
+            {
+                var utf8 = new DOT11_SSID { uSSIDLength = 5, ucSSID = Encoding.UTF8.GetBytes("Café").Concat(new byte[27]).ToArray() };
+                var cp1252 = new DOT11_SSID { uSSIDLength = 4, ucSSID = new byte[] { 0x43, 0x61, 0x66, 0xE9 }.Concat(new byte[28]).ToArray() };
+                var binary = new DOT11_SSID { uSSIDLength = 2, ucSSID = new byte[] { 0x01, 0xFF }.Concat(new byte[30]).ToArray() };
+                if (utf8.GetSsidString() != "Café" || cp1252.GetSsidString() != "Café" || binary.GetSsidString() != "\\x01\\xFF")
+                    throw new Exception("SSID decoder did not preserve UTF-8, CP-1252, and binary values.");
+                return "Strict UTF-8, CP-1252 fallback, and escaped-byte fallback validated.";
+            }));
+
             // Test 2: Frequency to Channel Matrix
             results.Add(RunTest("T2-FREQ-MATH", "IEEE 802.11 Channel & Frequency Math", () =>
             {

@@ -76,17 +76,20 @@ namespace WinWiFi.Interop
         {
             if (uSSIDLength == 0 || ucSSID == null) return string.Empty;
             int len = (int)Math.Min(uSSIDLength, (uint)Math.Min(32, ucSSID.Length));
-            // Try UTF-8 first
+            byte[] value = ucSSID.Take(len).ToArray();
             try
             {
-                string s = System.Text.Encoding.UTF8.GetString(ucSSID, 0, len);
-                // If contains control characters, fall back to ASCII or hex
-                return s.Replace("\0", "").Trim();
+                string utf8 = new System.Text.UTF8Encoding(false, true).GetString(value);
+                if (utf8.All(ch => !char.IsControl(ch))) return utf8;
             }
-            catch
+            catch (System.Text.DecoderFallbackException)
             {
-                return System.Text.Encoding.ASCII.GetString(ucSSID, 0, len).Replace("\0", "").Trim();
+                // Non-UTF8 SSIDs occur in legacy Windows deployments. CP-1252
+                // is an explicit, deterministic fallback rather than mojibake.
             }
+            string cp1252 = System.Text.Encoding.GetEncoding(1252).GetString(value);
+            if (cp1252.All(ch => !char.IsControl(ch))) return cp1252;
+            return string.Concat(value.Select(b => $"\\x{b:X2}"));
         }
     }
 

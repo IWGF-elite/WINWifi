@@ -239,6 +239,19 @@ export class NativeBridgeClient {
     return await this.request<any[]>('/api/clients');
   }
 
+  /** Submit a local capture to the native dissector. The bytes never leave localhost. */
+  public async importPcap(file: File): Promise<any> {
+    const url = `${this.config.baseUrl.replace(/\/$/, '')}/api/import/pcap`;
+    const response = await fetch(url, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/vnd.tcpdump.pcap' },
+      body: await file.arrayBuffer()
+    });
+    if (!response.ok) throw new Error(`PCAP import failed: ${await response.text()}`);
+    return await response.json();
+  }
+
   /**
    * Trigger continuous scanning in background service
    */
