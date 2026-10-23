@@ -286,8 +286,9 @@ export default function App() {
     const applyNativeIncidents = (findings: any[]) => {
       const native = mapNativeFindingsToIncidents(findings);
       setIncidents(previous => {
+        const liveApIssues = previous.filter(incident => incident.id.startsWith('NATIVE-AP-'));
         const analyst = previous.filter(incident => !incident.id.startsWith('NATIVE-'));
-        const merged = [...native, ...analyst];
+        const merged = [...native, ...liveApIssues, ...analyst];
         threatEngine.setIncidents(merged);
         db.saveIncidents(merged);
         return merged;
