@@ -14,4 +14,12 @@ internal static class WindowLayoutSizing
 
         return (Math.Floor(width * WorkAreaFraction), Math.Floor(height * WorkAreaFraction));
     }
+
+    internal static (double Width, double Height) FullWorkArea(double width, double height)
+    {
+        if (width <= 0 || height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width), "The Windows work area must have positive dimensions.");
+
+        return (width, height);
+    }
 }

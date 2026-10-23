@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 
@@ -9,11 +10,12 @@ namespace WinWiFi;
 public partial class MainWindow : Window
 {
     private static readonly Uri DashboardUri = new("http://127.0.0.1:38989/");
+    private bool _isFittedToWorkArea;
 
     public MainWindow()
     {
         InitializeComponent();
-        SizeToWorkingArea();
+        ApplyWorkingAreaSize(fillWorkArea: false);
         Loaded += OnLoaded;
     }
 
@@ -23,17 +25,34 @@ public partial class MainWindow : Window
     /// WPF device independent pixels and excludes the taskbar at the active
     /// Windows DPI scale.
     /// </summary>
-    private void SizeToWorkingArea()
+    private void ApplyWorkingAreaSize(bool fillWorkArea)
     {
         Rect workArea = SystemParameters.WorkArea;
-        var size = WindowLayoutSizing.FromWorkArea(workArea.Width, workArea.Height);
+        var size = fillWorkArea
+            ? WindowLayoutSizing.FullWorkArea(workArea.Width, workArea.Height)
+            : WindowLayoutSizing.FromWorkArea(workArea.Width, workArea.Height);
         Width = size.Width;
         Height = size.Height;
+        Left = workArea.Left + (workArea.Width - Width) / 2;
+        Top = workArea.Top + (workArea.Height - Height) / 2;
+        _isFittedToWorkArea = fillWorkArea;
 
         // Prevent a future programmatic size change from extending behind the
         // taskbar while preserving ResizeMode="NoResize" for the user.
         MaxWidth = workArea.Width;
         MaxHeight = workArea.Height;
+    }
+
+    internal void BeginNativeDrag()
+    {
+        if (Dispatcher.CheckAccess()) DragMove();
+        else Dispatcher.Invoke(DragMove);
+    }
+
+    private void ToggleWorkAreaFit()
+    {
+        WindowState = WindowState.Normal;
+        ApplyWorkingAreaSize(!_isFittedToWorkArea);
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -46,6 +65,7 @@ public partial class MainWindow : Window
             Directory.CreateDirectory(userDataFolder);
             var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
             await Dashboard.EnsureCoreWebView2Async(environment);
+            Dashboard.CoreWebView2.AddHostObjectToScript("winWifiWindow", new WindowHostObject(this));
             Dashboard.ZoomFactor = 0.9;
             Dashboard.CoreWebView2.Settings.AreDevToolsEnabled = false;
             Dashboard.CoreWebView2.Settings.IsStatusBarEnabled = false;
@@ -54,15 +74,8 @@ public partial class MainWindow : Window
                 switch (args.TryGetWebMessageAsString())
                 {
                     case "window:minimize": WindowState = WindowState.Minimized; break;
-                    // The desktop shell has a managed size. The title-bar
-                    // control recalculates that size instead of allowing an
-                    // arbitrary maximized layout that can break panel flow.
-                    case "window:maximize":
-                        WindowState = WindowState.Normal;
-                        SizeToWorkingArea();
-                        break;
+                    case "window:fit": ToggleWorkAreaFit(); break;
                     case "window:close": Close(); break;
-                    case "window:drag": DragMove(); break;
                 }
             };
             Dashboard.CoreWebView2.DownloadStarting += (_, args) =>
@@ -113,4 +126,14 @@ public partial class MainWindow : Window
             MessageBox.Show(ex.Message, "WebView2 Runtime installer", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+}
+
+/// <summary>Synchronous, same-origin WebView2 bridge for native title-bar dragging.</summary>
+[ComVisible(true)]
+[ClassInterface(ClassInterfaceType.AutoDual)]
+public sealed class WindowHostObject
+{
+    private readonly MainWindow _window;
+    public WindowHostObject(MainWindow window) => _window = window;
+    public void BeginDrag() => _window.BeginNativeDrag();
 }

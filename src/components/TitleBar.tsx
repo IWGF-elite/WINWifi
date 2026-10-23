@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Radio, 
   ShieldCheck, 
@@ -8,6 +8,7 @@ import {
   Sun, 
   Moon, 
   Maximize2,
+  Minimize2,
   Minus,
   X,
   CheckCircle2, 
@@ -69,8 +70,20 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onSelectAdapter,
   onToggleFullscreen,
 }) => {
-  const nativeWindow = (action: 'minimize' | 'maximize' | 'close' | 'drag') => {
+  const [isFittedToScreen, setIsFittedToScreen] = useState(false);
+  const nativeWindow = (action: 'minimize' | 'fit' | 'close') => {
     (window as any).chrome?.webview?.postMessage?.(`window:${action}`);
+  };
+
+  const beginNativeDrag = () => {
+    // This is synchronous during the actual DOM mouse-down. postMessage is
+    // intentionally not used because it reaches WPF after the gesture ends.
+    (window as any).chrome?.webview?.hostObjects?.sync?.winWifiWindow?.BeginDrag?.();
+  };
+
+  const toggleWorkAreaFit = () => {
+    nativeWindow('fit');
+    setIsFittedToScreen(current => !current);
   };
   const getOriginBadge = () => {
     switch (dataSourceProfile) {
@@ -120,8 +133,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         : 'bg-[#f3f4f8] border-[#e2e4ea] text-slate-800'
     }`}>
       {/* Top Windows Chrome Bar */}
-      <div className="winwifi-window-chrome flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-1.5 text-xs" onDoubleClick={() => nativeWindow('maximize')} onMouseDown={(event) => {
-        if (event.button === 0 && !(event.target as HTMLElement).closest('button,select,input')) nativeWindow('drag');
+      <div className="winwifi-window-chrome flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-1.5 text-xs" onDoubleClick={toggleWorkAreaFit} onMouseDown={(event) => {
+        if (event.button === 0 && !(event.target as HTMLElement).closest('button,select,input')) beginNativeDrag();
       }}>
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600 text-white shadow-sm">
@@ -158,7 +171,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             <Maximize2 className="w-3 h-3" />
           </button>
           <button onClick={() => nativeWindow('minimize')} className="p-1.5 hover:bg-slate-700/20" title="Minimize"><Minus className="w-3.5 h-3.5" /></button>
-          <button onClick={() => nativeWindow('maximize')} className="p-1.5 hover:bg-slate-700/20" title="Fit window to screen"><Maximize2 className="w-3.5 h-3.5" /></button>
+          <button onClick={toggleWorkAreaFit} className="p-1.5 hover:bg-slate-700/20" title={isFittedToScreen ? "Restore managed window size" : "Fit window to screen"} aria-label={isFittedToScreen ? "Restore managed window size" : "Fit window to screen"}>
+            {isFittedToScreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
           <button onClick={() => nativeWindow('close')} className="p-1.5 hover:bg-rose-600 hover:text-white" title="Close"><X className="w-3.5 h-3.5" /></button>
         </div>
       </div>

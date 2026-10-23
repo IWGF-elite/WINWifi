@@ -716,7 +716,8 @@ SSID 2 : Guest-Open
                 // the taskbar is removed.
                 var small = WindowLayoutSizing.FromWorkArea(1366, 728);
                 var large = WindowLayoutSizing.FromWorkArea(1920, 1040);
-                if (small != (1229, 655) || large != (1728, 936))
+                var full = WindowLayoutSizing.FullWorkArea(1920, 1040);
+                if (small != (1229, 655) || large != (1728, 936) || full != (1920, 1040))
                     throw new Exception($"Unexpected window sizes: 1366x728 => {small}; 1920x1040 => {large}.");
                 return "1366x768 and 1920x1080 work-area sizing remains centered and below each usable monitor bound.";
             }));
