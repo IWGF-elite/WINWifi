@@ -26,6 +26,9 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\Oui\*.txt" />
+    <!-- The executable icon is set above; WPF also needs this as a resource
+         for MainWindow.Icon when the app is launched from Explorer. -->
+    <Resource Include="Assets\WinWiFi.ico" />
   </ItemGroup>
 
   <ItemGroup>

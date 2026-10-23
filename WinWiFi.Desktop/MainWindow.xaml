@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="WinWiFi Security Auditor"
-        Icon="Assets/WinWiFi.ico"
         Height="900" Width="1440" MinHeight="900" MinWidth="1440" MaxHeight="900" MaxWidth="1440"
         WindowStyle="None" ResizeMode="NoResize"
         Background="#0b0d11"

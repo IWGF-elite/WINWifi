@@ -1,4 +1,6 @@
 using System;
+using System.Net;
+using System.Net.Http;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
@@ -36,6 +38,20 @@ public partial class App : Application
         {
             await _bridgeServer.StartAsync();
         }
+        catch (HttpListenerException ex)
+        {
+            // A second desktop window can safely use the already-running local
+            // bridge. This happens when the user launches the app again from
+            // Explorer, or when a prior instance is still running.
+            if (!await IsExistingWinWiFiBridgeAsync())
+            {
+                MessageBox.Show(
+                    $"WinWiFi could not start its local dashboard bridge.\n\n{ex.Message}",
+                    "WinWiFi local bridge",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
         catch (Exception ex)
         {
             Trace.TraceError($"Unable to start the localhost dashboard bridge: {ex}");
@@ -48,6 +64,21 @@ public partial class App : Application
 
         var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
         mainWindow.Show();
+    }
+
+    private static async Task<bool> IsExistingWinWiFiBridgeAsync()
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            string status = await client.GetStringAsync("http://127.0.0.1:38989/api/health");
+            return status.Contains("\"status\":\"online\"", StringComparison.OrdinalIgnoreCase) &&
+                   status.Contains("WinWiFi Native 802.11 Core", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
