@@ -152,6 +152,19 @@ namespace WinWiFi.Services
                     _activeAdapterId = adapters[0].Id;
                     _scanner.SetActiveAdapter(_activeAdapterId);
                     _scanner.SetScanningState(true);
+
+                    // Populate the dashboard before WebView2 asks for /api/networks.
+                    // Otherwise a fresh launch can briefly display an empty state
+                    // while the Windows WLAN service is still filling its cache.
+                    await _wifiService.TriggerHardwareScanAsync(_activeAdapterId, _cts.Token);
+                    await Task.Delay(TimeSpan.FromSeconds(2), _cts.Token);
+                    var initialAps = await _wifiService.ScanNetworksAsync(_activeAdapterId, _cts.Token);
+                    if (initialAps.Count > 0)
+                    {
+                        _latestAccessPoints = initialAps;
+                        var initialThreats = _securityAnalyzer.AnalyzeThreatsAndDrift(initialAps, null);
+                        _latestIncidents = initialThreats.Findings;
+                    }
                 }
             }
             catch (Exception ex)
@@ -159,7 +172,7 @@ namespace WinWiFi.Services
                 Console.WriteLine($"[HttpBridgeServer] Adapter discovery failed: {ex.Message}");
             }
 
-            // Begin passive WLAN-cache observation when Windows exposes an adapter.
+            // Continue bounded Windows WLAN discovery after the startup scan.
             _ = _scanner.StartAsync(_cts.Token);
 
             _listenerTask = Task.Run(() => ListenLoopAsync(_cts.Token));

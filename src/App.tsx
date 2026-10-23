@@ -112,11 +112,6 @@ export default function App() {
   useEffect(() => { dataSourceProfileRef.current = dataSourceProfile; }, [dataSourceProfile]);
   const [activeSourceLabel, setActiveSourceLabel] = useState<string>('Waiting for the local Windows bridge');
   const [lastLiveDataAt, setLastLiveDataAt] = useState<number | null>(null);
-  const [clockNow, setClockNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(Date.now()), 5_000);
-    return () => window.clearInterval(timer);
-  }, []);
   // Adapters & Scan State
   const [adapters, setAdapters] = useState<WifiAdapter[]>([]);
   const [selectedAdapterId, setSelectedAdapterId] = useState<string>('');
@@ -208,18 +203,18 @@ export default function App() {
       if (Array.isArray(liveAps)) {
         const projectId = currentProjectIdRef.current;
         const resolvedAps = applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId));
-        setAccessPoints(resolvedAps);
         if (resolvedAps.length > 0) {
+          setAccessPoints(resolvedAps);
           db.saveAccessPoints(projectId, resolvedAps);
           setDataSourceProfile('LIVE_WINDOWS');
           setLastLiveDataAt(Date.now());
           setActiveSourceLabel(`Windows WLAN bridge (${resolvedAps.length} access points)`);
-        } else if (dataSourceProfileRef.current === 'LIVE_WINDOWS') {
-          setDataSourceProfile('OFFLINE');
-          setLastLiveDataAt(null);
-          setActiveSourceLabel('Windows bridge connected; no WLAN observations returned');
         }
-        setSelectedBssid((current) => resolvedAps.some(ap => ap.bssid === current) ? current : resolvedAps[0]?.bssid ?? null);
+        // Keep the last successful result visible when Windows temporarily
+        // returns an empty cache during a radio refresh.
+        if (resolvedAps.length > 0) {
+          setSelectedBssid((current) => resolvedAps.some(ap => ap.bssid === current) ? current : resolvedAps[0]?.bssid ?? null);
+        }
         const count = resolvedAps.length;
         const log = db.appendLog({
           level: count > 0 ? 'SUCCESS' : 'INFO',
@@ -661,7 +656,7 @@ export default function App() {
         isDarkMode={isDarkMode}
         onToggleDarkMode={handleToggleDarkMode}
         dataSourceProfile={dataSourceProfile}
-        hasFreshLiveData={bridgeState === 'CONNECTED' && dataSourceProfile === 'LIVE_WINDOWS' && lastLiveDataAt !== null && clockNow - lastLiveDataAt < 30_000}
+        hasFreshLiveData={bridgeState === 'CONNECTED' && dataSourceProfile === 'LIVE_WINDOWS' && lastLiveDataAt !== null}
         activeSourceLabel={activeSourceLabel}
         isScanning={isScanning}
         onToggleScan={handleToggleScan}
