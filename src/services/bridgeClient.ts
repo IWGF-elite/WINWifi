@@ -35,6 +35,8 @@ export class NativeBridgeClient {
   // Event Listeners
   private stateListeners: Set<BridgeEventCallback<BridgeConnectionState>> = new Set();
   private networkListeners: Set<BridgeEventCallback<AccessPoint[]>> = new Set();
+  private incidentListeners: Set<BridgeEventCallback<any[]>> = new Set();
+  private clientListeners: Set<BridgeEventCallback<any[]>> = new Set();
   private diagnosticListeners: Set<BridgeEventCallback<BridgeDiagnostics>> = new Set();
   private errorListeners: Set<BridgeEventCallback<string>> = new Set();
 
@@ -131,6 +133,16 @@ export class NativeBridgeClient {
     return () => this.networkListeners.delete(cb);
   }
 
+  public onIncidents(cb: BridgeEventCallback<any[]>): () => void {
+    this.incidentListeners.add(cb);
+    return () => this.incidentListeners.delete(cb);
+  }
+
+  public onClients(cb: BridgeEventCallback<any[]>): () => void {
+    this.clientListeners.add(cb);
+    return () => this.clientListeners.delete(cb);
+  }
+
   public onDiagnostics(cb: BridgeEventCallback<BridgeDiagnostics>): () => void {
     this.diagnosticListeners.add(cb);
     return () => this.diagnosticListeners.delete(cb);
@@ -219,6 +231,14 @@ export class NativeBridgeClient {
     return this.tagOrigin(raw, 'LIVE_WINDOWS');
   }
 
+  public async getIncidents(): Promise<any[]> {
+    return await this.request<any[]>('/api/incidents');
+  }
+
+  public async getClients(): Promise<any[]> {
+    return await this.request<any[]>('/api/clients');
+  }
+
   /**
    * Trigger continuous scanning in background service
    */
@@ -297,6 +317,10 @@ export class NativeBridgeClient {
       // Initial network fetch
       const networks = await this.getNetworks();
       this.networkListeners.forEach(cb => cb(networks));
+      const incidents = await this.getIncidents();
+      this.incidentListeners.forEach(cb => cb(Array.isArray(incidents) ? incidents : []));
+      const clients = await this.getClients();
+      this.clientListeners.forEach(cb => cb(Array.isArray(clients) ? clients : []));
 
       return true;
     } catch (err: any) {
@@ -352,6 +376,8 @@ export class NativeBridgeClient {
             const tagged = this.tagOrigin(payload.accessPoints, 'LIVE_WINDOWS');
             this.networkListeners.forEach(cb => cb(tagged));
           }
+          if (Array.isArray(payload.incidents)) this.incidentListeners.forEach(cb => cb(payload.incidents));
+          if (Array.isArray(payload.clients)) this.clientListeners.forEach(cb => cb(payload.clients));
         } catch (e) {
           console.error('[BridgeClient] Failed to parse SSE scan_result payload', e);
         }

@@ -65,6 +65,33 @@ const applyAnalystOverrides = (
   };
 });
 
+// Convert findings produced by the native SecurityAnalyzer into the UI's
+// investigation records. These records remain tied to a real BSSID and are
+// refreshed on every Windows scan; no placeholder incidents are fabricated.
+const mapNativeFindingsToIncidents = (findings: any[]): IncidentRecord[] => findings
+  .filter(f => f && f.id && f.title)
+  .map(f => {
+    const severity = (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].includes(String(f.severity).toUpperCase())
+      ? String(f.severity).toUpperCase() : 'MEDIUM') as IncidentRecord['severity'];
+    const timestamp = f.detectedAt || new Date().toISOString();
+    return {
+      id: `NATIVE-${f.id}`,
+      title: f.title,
+      severity,
+      confidence: Number(f.confidence) || 0,
+      status: f.status === 'Resolved' ? 'Resolved' : f.status === 'False Positive' ? 'False Positive' : 'Open',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      assignedTo: 'Windows WLAN Security Analyzer',
+      summary: f.explanation || f.evidence || 'Finding reported by the native Windows WLAN security analyzer.',
+      bssidTarget: f.relatedBssid || undefined,
+      ssidTarget: f.relatedSsid || undefined,
+      evidenceIds: [],
+      notes: [{ timestamp, author: 'Native Security Analyzer', text: f.evidence || f.explanation || f.title }],
+      resolution: f.remediation || undefined
+    };
+  });
+
 // Icons
 import { 
   LayoutDashboard, 
@@ -227,12 +254,25 @@ export default function App() {
       }
     });
 
+    const applyNativeIncidents = (findings: any[]) => {
+      const native = mapNativeFindingsToIncidents(findings);
+      setIncidents(previous => {
+        const analyst = previous.filter(incident => !incident.id.startsWith('NATIVE-'));
+        const merged = [...native, ...analyst];
+        threatEngine.setIncidents(merged);
+        db.saveIncidents(merged);
+        return merged;
+      });
+    };
+    const unsubIncidents = bridgeClient.onIncidents(applyNativeIncidents);
+
     // Establish the connection and start event/polling updates on mount.
     void bridgeClient.connect();
 
     return () => {
       unsubStatus();
       unsubNetworks();
+      unsubIncidents();
       bridgeClient.disconnect();
     };
   }, [bridgeClient, db, threatEngine]);
