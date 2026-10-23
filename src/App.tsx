@@ -92,6 +92,29 @@ const mapNativeFindingsToIncidents = (findings: any[]): IncidentRecord[] => find
     };
   });
 
+const mapAccessPointIssuesToIncidents = (aps: AccessPoint[]): IncidentRecord[] => aps.flatMap(ap =>
+  (ap.issues || []).filter(issue => issue && issue.id && issue.title).map(issue => {
+    const timestamp = ap.lastSeen || new Date().toISOString();
+    const severity = (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].includes(issue.severity) ? issue.severity : 'MEDIUM') as IncidentRecord['severity'];
+    return {
+      id: `NATIVE-AP-${ap.bssid.replace(/[^A-Z0-9]/gi, '')}-${issue.id}`,
+      title: issue.title,
+      severity,
+      confidence: 100,
+      status: 'Open',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      assignedTo: 'Windows WLAN Security Analyzer',
+      summary: issue.description,
+      bssidTarget: ap.bssid,
+      ssidTarget: ap.ssid,
+      evidenceIds: [],
+      notes: [{ timestamp, author: 'Windows WLAN Security Analyzer', text: issue.description }],
+      resolution: issue.recommendation
+    };
+  })
+);
+
 // Icons
 import { 
   LayoutDashboard, 
@@ -232,6 +255,12 @@ export default function App() {
         const resolvedAps = applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId));
         if (resolvedAps.length > 0) {
           setAccessPoints(resolvedAps);
+          setIncidents(previous => {
+            const live = [...mapAccessPointIssuesToIncidents(resolvedAps), ...previous.filter(i => !i.id.startsWith('NATIVE-AP-'))];
+            threatEngine.setIncidents(live);
+            db.saveIncidents(live);
+            return live;
+          });
           db.saveAccessPoints(projectId, resolvedAps);
           setDataSourceProfile('LIVE_WINDOWS');
           setLastLiveDataAt(Date.now());
