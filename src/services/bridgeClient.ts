@@ -490,6 +490,8 @@ export class NativeBridgeClient {
       beaconCount: ap.beaconCount ?? ap.BeaconCount ?? 1,
       dataPacketCount: ap.dataPacketCount ?? ap.DataPacketCount ?? 0,
       securityScore: ap.securityScore ?? ap.SecurityScore ?? 100,
+      riskScore: ap.riskScore ?? ap.RiskScore ?? 0,
+      riskFactors: ap.riskFactors ?? ap.RiskFactors ?? [],
       isRogue: ap.isRogue ?? ap.IsRogue ?? false,
       firstSeen: ap.firstSeen || ap.FirstSeen || '',
       lastSeen: ap.lastSeen || ap.LastSeen || '',

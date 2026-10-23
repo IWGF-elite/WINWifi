@@ -21,6 +21,8 @@ namespace WinWiFi.Models
         public int BeaconCount { get; set; } = 1;
         public int DataPacketCount { get; set; }
         public int SecurityScore { get; set; } = 100; // 0 to 100
+        public int RiskScore { get; set; } // 0 (low) to 100 (critical)
+        public List<RiskFactor> RiskFactors { get; set; } = new();
         public bool IsRogue { get; set; }
         public bool IsHidden { get; set; }
 
@@ -98,5 +100,12 @@ namespace WinWiFi.Models
         public string Description { get; set; } = string.Empty;
         public string Remediation { get; set; } = string.Empty;
         public string StandardReference { get; set; } = "NIST SP 800-153";
+    }
+
+    public class RiskFactor
+    {
+        public string Name { get; set; } = string.Empty;
+        public int Points { get; set; }
+        public string Evidence { get; set; } = string.Empty;
     }
 }

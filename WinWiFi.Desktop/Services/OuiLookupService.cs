@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace WinWiFi.Services
 {
     public static class OuiLookupService
     {
+        private static readonly Lazy<Dictionary<string, string>> IeeePrefixes = new(LoadIeeePrefixes);
         // Offline Embedded IEEE OUI Lookup Dictionary (Top Wireless AP & Station Vendors)
         private static readonly Dictionary<string, string> OuiDatabase = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -323,15 +327,16 @@ namespace WinWiFi.Services
                 return "Unknown";
             }
 
-            // Standardize format to AA:BB:CC
-            string clean = macAddress.Replace("-", ":").Trim();
-            if (clean.Length >= 8)
+            string clean = Regex.Replace(macAddress, "[^0-9A-Fa-f]", string.Empty).ToUpperInvariant();
+            if (clean.Length >= 6)
             {
-                string prefix = clean.Substring(0, 8).ToUpperInvariant();
-                if (OuiDatabase.TryGetValue(prefix, out string? vendor))
+                // IEEE registrations have 36, 28, and 24-bit prefixes. Longest
+                // prefix wins so MA-S and MA-M correctly override MA-L.
+                foreach (int length in new[] { 9, 7, 6 })
                 {
-                    return vendor;
+                    if (clean.Length >= length && IeeePrefixes.Value.TryGetValue(clean[..length], out string? vendor)) return vendor;
                 }
+                if (clean.Length >= 6 && OuiDatabase.TryGetValue($"{clean[..2]}:{clean.Substring(2, 2)}:{clean.Substring(4, 2)}", out string? fallback)) return fallback;
             }
 
             // Check if locally administered address (LAA / randomized MAC)
@@ -351,6 +356,40 @@ namespace WinWiFi.Services
             }
 
             return "Unknown";
+        }
+
+        private static Dictionary<string, string> LoadIeeePrefixes()
+        {
+            var prefixes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var assembly = Assembly.GetExecutingAssembly();
+            foreach (var resource in assembly.GetManifestResourceNames().Where(n => n.Contains("Resources.Oui.", StringComparison.OrdinalIgnoreCase)))
+            {
+                using var stream = assembly.GetManifestResourceStream(resource);
+                if (stream == null) continue;
+                using var reader = new StreamReader(stream);
+                string? line;
+                string? basePrefix = null;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    var hex = Regex.Match(line, @"^\s*([0-9A-F]{2}(?:-[0-9A-F]{2}){2})\s+\(hex\)\s+(.+)$", RegexOptions.IgnoreCase);
+                    if (hex.Success)
+                    {
+                        basePrefix = hex.Groups[1].Value.Replace("-", "");
+                        prefixes.TryAdd(basePrefix, hex.Groups[2].Value.Trim());
+                        continue;
+                    }
+                    if (basePrefix == null) continue;
+                    var range = Regex.Match(line, @"^\s*([0-9A-F]+)-[0-9A-F]+\s+\(base 16\)\s+(.+)$", RegexOptions.IgnoreCase);
+                    if (!range.Success) continue;
+                    string suffix = range.Groups[1].Value.Trim();
+                    string vendor = range.Groups[2].Value.Trim();
+                    // MA-M ranges contribute the next nibble; MA-S ranges contribute three nibbles.
+                    int append = suffix.Length == 6 && resource.Contains("mam", StringComparison.OrdinalIgnoreCase) ? 1
+                        : suffix.Length == 6 && resource.Contains("mas", StringComparison.OrdinalIgnoreCase) ? 3 : 0;
+                    if (append > 0) prefixes[basePrefix + suffix[..append]] = vendor;
+                }
+            }
+            return prefixes;
         }
 
         public static bool IsLocallyAdministered(string macAddress)

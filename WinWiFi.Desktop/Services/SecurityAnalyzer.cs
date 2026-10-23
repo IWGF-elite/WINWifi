@@ -20,6 +20,7 @@ namespace WinWiFi.Services
         public void EvaluateSecurityPosture(AccessPoint ap)
         {
             ap.SecurityIssues.Clear();
+            ap.RiskFactors.Clear();
             int score = 100;
 
             string secUpper = ap.Security.ToUpperInvariant();
@@ -114,6 +115,20 @@ namespace WinWiFi.Services
             }
 
             ap.SecurityScore = Math.Max(0, Math.Min(100, score));
+            ap.RiskScore = 100 - ap.SecurityScore;
+            foreach (var issue in ap.SecurityIssues)
+            {
+                int points = issue.Id switch
+                {
+                    "VULN-WEP-BROKEN" => 65,
+                    "VULN-OPEN-UNENCRYPTED" => 45,
+                    "VULN-WPA-TKIP" => 30,
+                    "VULN-WPS-PIN" => 25,
+                    "WARN-PMF-DISABLED" => 10,
+                    _ => 0
+                };
+                ap.RiskFactors.Add(new RiskFactor { Name = issue.Title, Points = points, Evidence = issue.Description });
+            }
         }
 
         public void DetectRogueAccessPoints(List<AccessPoint> accessPoints)

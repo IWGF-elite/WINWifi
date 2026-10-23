@@ -258,6 +258,7 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
                     <th className="p-2.5">Security Suite</th>
                     <th className="p-2.5">PMF</th>
                     <th className="p-2.5">WPS</th>
+                    <th className="p-2.5">Risk contributors</th>
                     <th className="p-2.5 text-right">Score</th>
                   </tr>
                 </thead>
@@ -270,6 +271,7 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
                       <td className="p-2.5">{ap.security}</td>
                       <td className="p-2.5">{ap.pmfRequired ? 'Required' : 'Disabled'}</td>
                       <td className="p-2.5">{ap.wpsEnabled ? 'Active' : 'Off'}</td>
+                      <td className="p-2.5 font-sans text-[10px] max-w-xs">{(ap.riskFactors || []).length ? (ap.riskFactors || []).map(f => `+${f.points} ${f.name}`).join('; ') : 'None observed'}</td>
                       <td className="p-2.5 text-right font-bold text-emerald-400">{ap.securityScore}</td>
                     </tr>
                   ))}

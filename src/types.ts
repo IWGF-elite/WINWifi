@@ -122,6 +122,8 @@ export interface SecurityIssue {
   plainEnglishExplanation?: string;
 }
 
+export interface RiskFactor { name: string; points: number; evidence: string; }
+
 export interface AccessPoint {
   bssid: string;
   ssid: string;
@@ -145,6 +147,8 @@ export interface AccessPoint {
   clients: ClientDevice[];
   handshake?: HandshakeInfo;
   securityScore: number; // 0 (terrible) to 100 (excellent)
+  riskScore?: number;
+  riskFactors?: RiskFactor[];
   issues: SecurityIssue[];
   isRogueCandidate?: boolean;
   rogueConfidence?: number; // 0-100%

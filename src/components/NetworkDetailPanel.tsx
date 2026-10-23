@@ -199,6 +199,14 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
           </div>
         </div>
 
+        <div className={`p-3 rounded-xl border ${isDarkMode ? 'bg-[#14161d] border-[#252934]' : 'bg-slate-50 border-slate-200'}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-200">Weighted Risk Factors</span>
+            <span className="text-xs font-mono text-amber-300">Risk {ap.riskScore ?? (100 - ap.securityScore)} / 100</span>
+          </div>
+          {(ap.riskFactors || []).length ? <div className="space-y-2">{(ap.riskFactors || []).map((factor, index) => <div key={`${factor.name}-${index}`} className="border-l-2 border-amber-500/50 pl-2 text-[11px]"><span className="font-semibold text-slate-200">+{factor.points} {factor.name}</span><p className="mt-0.5 text-slate-400">{factor.evidence}</p></div>)}</div> : <p className="text-[11px] text-slate-500">No weighted risk factors were observed in the current data.</p>}
+        </div>
+
         {/* Security Vulnerabilities & Findings */}
         <div>
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 mb-2.5 flex items-center gap-1.5">

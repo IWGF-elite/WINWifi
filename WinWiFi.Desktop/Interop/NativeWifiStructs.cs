@@ -74,6 +74,7 @@ namespace WinWiFi.Interop
 
         public string GetSsidString()
         {
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
             if (uSSIDLength == 0 || ucSSID == null) return string.Empty;
             int len = (int)Math.Min(uSSIDLength, (uint)Math.Min(32, ucSSID.Length));
             byte[] value = ucSSID.Take(len).ToArray();
