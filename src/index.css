@@ -9,3 +9,34 @@
 .winwifi-nav::-webkit-scrollbar {
   display: none;
 }
+
+/* The native window uses 90% of the usable monitor area. These rules keep the
+   custom title bar compact when Windows DPI scaling gives the dashboard a
+   narrow CSS viewport. The navigation ribbon remains horizontally scrollable
+   by design, while page panels use their existing responsive grid breakpoints. */
+@media (max-width: 900px) {
+  .winwifi-window-chrome {
+    padding-inline: 0.5rem;
+  }
+
+  .winwifi-project-separator,
+  .winwifi-project-name {
+    display: none;
+  }
+
+  .winwifi-adapter-select {
+    max-width: 9rem;
+  }
+}
+
+@media (max-width: 680px) {
+  .winwifi-edition,
+  .winwifi-window-controls > button[title="Toggle full screen"],
+  .winwifi-window-controls > div {
+    display: none;
+  }
+
+  .winwifi-adapter-select {
+    max-width: 7rem;
+  }
+}

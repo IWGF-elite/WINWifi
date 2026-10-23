@@ -13,7 +13,27 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SizeToWorkingArea();
         Loaded += OnLoaded;
+    }
+
+    /// <summary>
+    /// The shell owns its size so browser content cannot be manually stretched
+    /// into a broken layout. SystemParameters.WorkArea is already expressed in
+    /// WPF device independent pixels and excludes the taskbar at the active
+    /// Windows DPI scale.
+    /// </summary>
+    private void SizeToWorkingArea()
+    {
+        Rect workArea = SystemParameters.WorkArea;
+        var size = WindowLayoutSizing.FromWorkArea(workArea.Width, workArea.Height);
+        Width = size.Width;
+        Height = size.Height;
+
+        // Prevent a future programmatic size change from extending behind the
+        // taskbar while preserving ResizeMode="NoResize" for the user.
+        MaxWidth = workArea.Width;
+        MaxHeight = workArea.Height;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -34,7 +54,13 @@ public partial class MainWindow : Window
                 switch (args.TryGetWebMessageAsString())
                 {
                     case "window:minimize": WindowState = WindowState.Minimized; break;
-                    case "window:maximize": WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized; break;
+                    // The desktop shell has a managed size. The title-bar
+                    // control recalculates that size instead of allowing an
+                    // arbitrary maximized layout that can break panel flow.
+                    case "window:maximize":
+                        WindowState = WindowState.Normal;
+                        SizeToWorkingArea();
+                        break;
                     case "window:close": Close(); break;
                     case "window:drag": DragMove(); break;
                 }

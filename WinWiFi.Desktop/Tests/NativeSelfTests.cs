@@ -368,7 +368,11 @@ namespace WinWiFi.Tests
                 string laa = OuiLookupService.ResolveVendor("02:00:00:00:00:00");
 
                 if (!cisco.Contains("Cisco")) throw new Exception($"Cisco OUI failed: {cisco}");
-                if (!aruba.Contains("Aruba")) throw new Exception($"Aruba OUI failed: {aruba}");
+                // IEEE currently assigns this prefix to Hewlett Packard
+                // Enterprise. Accept the authoritative name rather than an
+                // older Aruba branding label.
+                if (!aruba.Contains("Hewlett Packard", StringComparison.OrdinalIgnoreCase) && !aruba.Contains("Aruba", StringComparison.OrdinalIgnoreCase))
+                    throw new Exception($"HPE/Aruba OUI failed: {aruba}");
                 if (!ubiquiti.Contains("Ubiquiti")) throw new Exception($"Ubiquiti OUI failed: {ubiquiti}");
                 if (!apple.Contains("Apple")) throw new Exception($"Apple OUI failed: {apple}");
                 if (!laa.Contains("Randomized")) throw new Exception($"LAA detection failed: {laa}");
@@ -703,6 +707,20 @@ SSID 2 : Guest-Open
                     throw new Exception("Private-network preflight header detection failed.");
                 return "Validated configurable loopback origins, remote/path rejection, allowlist matching, and private-network preflight detection.";
             }));
+
+#if WINDOWS_DESKTOP
+            results.Add(RunTest("T18-WINDOW-WORKAREA", "Responsive Desktop Work-Area Sizing", () =>
+            {
+                // Windows supplies SystemParameters.WorkArea in DPI-independent
+                // WPF units, so these cover the two common usable areas after
+                // the taskbar is removed.
+                var small = WindowLayoutSizing.FromWorkArea(1366, 728);
+                var large = WindowLayoutSizing.FromWorkArea(1920, 1040);
+                if (small != (1229, 655) || large != (1728, 936))
+                    throw new Exception($"Unexpected window sizes: 1366x728 => {small}; 1920x1040 => {large}.");
+                return "1366x768 and 1920x1080 work-area sizing remains centered and below each usable monitor bound.";
+            }));
+#endif
 
             return results;
         }

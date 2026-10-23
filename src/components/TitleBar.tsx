@@ -120,21 +120,21 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         : 'bg-[#f3f4f8] border-[#e2e4ea] text-slate-800'
     }`}>
       {/* Top Windows Chrome Bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 text-xs" onDoubleClick={() => nativeWindow('maximize')} onMouseDown={(event) => {
+      <div className="winwifi-window-chrome flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-1.5 text-xs" onDoubleClick={() => nativeWindow('maximize')} onMouseDown={(event) => {
         if (event.button === 0 && !(event.target as HTMLElement).closest('button,select,input')) nativeWindow('drag');
       }}>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600 text-white shadow-sm">
             <ShieldCheck className="w-3.5 h-3.5" />
           </div>
           <span className="font-semibold tracking-wide text-xs">WinWiFi Security Auditor</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-mono">Enterprise v3.0</span>
-          <span className="text-slate-500">|</span>
-          <span className="text-slate-400 font-medium truncate max-w-[200px]">{projectName}</span>
+          <span className="winwifi-edition text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-mono">Enterprise v3.0</span>
+          <span className="winwifi-project-separator text-slate-500">|</span>
+          <span className="winwifi-project-name text-slate-400 font-medium truncate max-w-[200px]">{projectName}</span>
         </div>
 
         {/* Windows Window Controls */}
-        <div className="flex items-center gap-1">
+        <div className="winwifi-window-controls flex shrink-0 items-center gap-1">
           <button 
             onClick={onToggleDarkMode} 
             title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
@@ -147,7 +147,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             value={selectedAdapterId}
             onChange={(event) => onSelectAdapter(event.target.value)}
             disabled={bridgeState !== 'CONNECTED' || adapters.length === 0 || isScanning}
-            className="max-w-[220px] rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+            className="winwifi-adapter-select max-w-[220px] rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
             title="Select the Windows Wi-Fi adapter used for telemetry"
           >
             <option value="">{adapters.length ? 'Select adapter' : 'No Windows adapter detected'}</option>
@@ -158,7 +158,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             <Maximize2 className="w-3 h-3" />
           </button>
           <button onClick={() => nativeWindow('minimize')} className="p-1.5 hover:bg-slate-700/20" title="Minimize"><Minus className="w-3.5 h-3.5" /></button>
-          <button onClick={() => nativeWindow('maximize')} className="p-1.5 hover:bg-slate-700/20" title="Maximize"><Maximize2 className="w-3.5 h-3.5" /></button>
+          <button onClick={() => nativeWindow('maximize')} className="p-1.5 hover:bg-slate-700/20" title="Fit window to screen"><Maximize2 className="w-3.5 h-3.5" /></button>
           <button onClick={() => nativeWindow('close')} className="p-1.5 hover:bg-rose-600 hover:text-white" title="Close"><X className="w-3.5 h-3.5" /></button>
         </div>
       </div>
