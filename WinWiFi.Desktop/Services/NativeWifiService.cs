@@ -416,18 +416,20 @@ namespace WinWiFi.Services
                     Debug.WriteLine($"[NativeWifiService] ScanNetworksAsync WlanApi error: {ex.Message}");
                 }
 
-                // If native BSS list yielded nothing or failed, fall back to netsh CLI
-                if (!nativeScanSucceeded || accessPoints.Count == 0)
+                // Some Windows drivers expose only a partial BSS list through
+                // WlanGetNetworkBssList even after WlanScan has completed. Netsh
+                // asks the same Windows WLAN service for its full visible-network
+                // result, so reconcile it on every scan rather than using it only
+                // when the native call returns zero rows. This preserves all BSSIDs
+                // reported by Windows and avoids an artificial partial view.
+                cancellationToken.ThrowIfCancellationRequested();
+                var netshAps = await ScanViaNetshCliAsync(cancellationToken);
+                if (netshAps.Count > 0)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var netshAps = await ScanViaNetshCliAsync(cancellationToken);
-                    if (netshAps.Count > 0)
+                    accessPoints = MergeWindowsScanResults(accessPoints, netshAps);
+                    lock (_diagnostics)
                     {
-                        accessPoints = netshAps;
-                        lock (_diagnostics)
-                        {
-                            _diagnostics.NetshFallbackUsed = true;
-                        }
+                        _diagnostics.NetshFallbackUsed = !nativeScanSucceeded || netshAps.Count > accessPoints.Count;
                     }
                 }
 
@@ -470,6 +472,42 @@ namespace WinWiFi.Services
                 _scanLock.Release();
             }
         }
+
+        /// <summary>
+        /// Produces one record per BSSID without imposing a result cap. Netsh is
+        /// the authoritative source for the visible-network list. Native records
+        /// only enrich matching entries because some drivers return malformed or
+        /// stale rows from WlanGetNetworkBssList.
+        /// </summary>
+        private static List<AccessPoint> MergeWindowsScanResults(
+            List<AccessPoint> nativeAccessPoints,
+            List<AccessPoint> netshAccessPoints)
+        {
+            var merged = new Dictionary<string, AccessPoint>(StringComparer.OrdinalIgnoreCase);
+            foreach (var ap in netshAccessPoints)
+            {
+                if (!string.IsNullOrWhiteSpace(ap.Bssid))
+                {
+                    merged[ap.Bssid] = ap;
+                }
+            }
+
+            // Netsh may be unavailable on a stripped-down Windows image. In that
+            // case retain native output, but only with a valid hardware address.
+            if (merged.Count == 0)
+            {
+                foreach (var ap in nativeAccessPoints.Where(ap => IsValidBssid(ap.Bssid)))
+                    merged[ap.Bssid] = ap;
+            }
+
+            var result = new List<AccessPoint>(merged.Values);
+            result.Sort((left, right) => right.SignalQuality.CompareTo(left.SignalQuality));
+            return result;
+        }
+
+        private static bool IsValidBssid(string? bssid) =>
+            !string.IsNullOrWhiteSpace(bssid) &&
+            Regex.IsMatch(bssid, "^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$");
 
         public async Task<Dictionary<string, ScanBatchResult>> ScanAllAdaptersAsync(CancellationToken cancellationToken = default)
         {
@@ -918,14 +956,17 @@ namespace WinWiFi.Services
 
             output = output.Replace("\\r\\n", "\n").Replace("\\n", "\n").Replace("\r\n", "\n").Replace('\r', '\n');
 
-            var networkBlocks = Regex.Split(output, @"\bSSID\s+\d+\s*:\s*");
+            // Keep the SSID value in a capture group instead of splitting on the
+            // label. A hidden network has an empty value after "SSID n :"; split
+            // based parsing then accidentally used "Network type" as its name.
+            var networkBlocks = Regex.Matches(
+                output,
+                @"(?ms)^[ \t]*SSID[ \t]+\d+[ \t]*:[ \t]*(?<ssid>[^\r\n]*)(?<body>.*?)(?=^[ \t]*SSID[ \t]+\d+[ \t]*:|\z)");
 
-            foreach (var block in networkBlocks)
+            foreach (Match networkBlock in networkBlocks)
             {
-                if (string.IsNullOrWhiteSpace(block)) continue;
-
-                var lines = block.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-                string ssid = lines[0].Trim();
+                string block = networkBlock.Groups["body"].Value;
+                string ssid = networkBlock.Groups["ssid"].Value.Trim();
                 bool isHidden = string.IsNullOrEmpty(ssid);
                 if (isHidden) ssid = "[Hidden SSID]";
 

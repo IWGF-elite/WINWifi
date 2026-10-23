@@ -162,15 +162,10 @@ export default function App() {
   const [networkViewMode, setNetworkViewMode] = useState<'inventory' | 'discovery'>('inventory');
   const [bridgeNotice, setBridgeNotice] = useState('');
 
-  useEffect(() => {
-    if (bridgeState !== 'CONNECTED' || dataSourceProfile !== 'LIVE_WINDOWS' || lastLiveDataAt === null) return;
-    const remaining = Math.max(0, 30_000 - (Date.now() - lastLiveDataAt));
-    const timer = window.setTimeout(() => {
-      setDataSourceProfile(current => current === 'LIVE_WINDOWS' ? 'OFFLINE' : current);
-      setActiveSourceLabel('Last Windows WLAN observation is older than 30 seconds');
-    }, remaining);
-    return () => window.clearTimeout(timer);
-  }, [bridgeState, dataSourceProfile, lastLiveDataAt]);
+  // A Windows WLAN scan is periodic, not a continuous frame stream. Keep the
+  // source labelled as live while the local bridge is connected; freshness is
+  // shown separately by the toolbar badge. Previously this changed live data
+  // to "OFFLINE" after 30 seconds even though the scanner was still running.
 
   const bridgeClient = NativeBridgeClient.getInstance();
 
@@ -322,12 +317,13 @@ export default function App() {
     }
     try {
       const result = await bridgeClient.refreshScan(selectedAdapterId || undefined);
-      setAccessPoints(result.accessPoints);
-      setDataSourceProfile(result.accessPoints.length ? 'LIVE_WINDOWS' : 'OFFLINE');
+      const resolvedAps = applyAnalystOverrides(result.accessPoints, db.getAnalystOverrides(currentProjectId));
+      setAccessPoints(resolvedAps);
+      setDataSourceProfile(resolvedAps.length ? 'LIVE_WINDOWS' : 'OFFLINE');
       setLastLiveDataAt(result.accessPoints.length ? Date.now() : null);
-      setActiveSourceLabel(result.accessPoints.length ? `Windows WLAN bridge (${result.accessPoints.length} access points)` : 'Windows bridge connected; no WLAN observations returned');
-      if (result.accessPoints.length) db.saveAccessPoints(currentProjectId, result.accessPoints);
-      setSelectedBssid(result.accessPoints[0]?.bssid ?? null);
+      setActiveSourceLabel(resolvedAps.length ? `Windows WLAN bridge (${resolvedAps.length} access points)` : 'Windows bridge connected; no WLAN observations returned');
+      if (resolvedAps.length) db.saveAccessPoints(currentProjectId, resolvedAps);
+      setSelectedBssid(resolvedAps[0]?.bssid ?? null);
       const log = db.appendLog({
         level: result.count > 0 ? 'SUCCESS' : 'INFO', source: 'BRIDGE_REFRESH',
         message: `Windows WLAN refresh completed (${result.count} access points returned).`,
@@ -694,10 +690,10 @@ export default function App() {
       )}
 
       {/* Navigation Ribbon Bar */}
-      <nav className={`px-4 pt-1.5 border-b flex items-center justify-between overflow-x-auto text-xs select-none ${
+      <nav className={`winwifi-nav px-3 pt-1 border-b flex items-center justify-between overflow-x-auto text-xs select-none ${
         isDarkMode ? 'bg-[#12141a] border-[#1e222d]' : 'bg-[#f4f5fa] border-slate-200'
       }`}>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 min-w-max">
           {/* TAB 1: Command Center Dashboard */}
           <button
             onClick={() => handleNavigate('dashboard')}
@@ -907,7 +903,7 @@ export default function App() {
       </nav>
 
       {/* Main Content View */}
-      <main className="flex-1 p-4 max-w-[1600px] w-full mx-auto space-y-4">
+      <main className="flex-1 p-3 lg:p-4 max-w-[1440px] w-full mx-auto space-y-4">
         {/* TAB 1: Command Center Dashboard */}
         {activeTab === 'dashboard' && (
           <CommandCenterDashboard

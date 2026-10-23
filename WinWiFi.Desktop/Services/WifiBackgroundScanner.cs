@@ -10,7 +10,7 @@ using WinWiFi.Models;
 
 namespace WinWiFi.Services;
 
-/// <summary>Reads the Windows WLAN BSS cache at a bounded cadence. It does not call WlanScan, use monitor mode, capture frames, hop channels, or inject packets.</summary>
+/// <summary>Requests a normal Windows WLAN scan and then reads the BSS list at a bounded cadence. It does not use monitor mode, capture frames, hop channels, or inject packets.</summary>
 public sealed class WifiBackgroundScanner : BackgroundService
 {
     public const int MinimumIntervalSeconds = 30;
@@ -95,6 +95,11 @@ public sealed class WifiBackgroundScanner : BackgroundService
                 SetState(ScanTelemetryState.Scanning);
                 LastError = null;
                 var timer = Stopwatch.StartNew();
+                // WlanGetNetworkBssList only returns Windows' last cache. Ask the
+                // OS to update that cache first so nearby networks are not hidden
+                // until another application happens to scan.
+                await _wifiService.TriggerHardwareScanAsync(_activeAdapterId, stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 var batch = await _wifiService.ScanNetworksExAsync(_activeAdapterId, stoppingToken);
                 timer.Stop();
                 var networks = batch.AccessPoints;
@@ -142,7 +147,7 @@ public sealed class ScanCycleStats
     public int CycleNumber { get; set; }
     public int NetworksDiscoveredCount { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-    public string ModeDescription { get; set; } = "Bounded Windows WLAN BSS-cache observation";
+    public string ModeDescription { get; set; } = "Bounded Windows WLAN discovery";
     public int DurationMs { get; set; }
     public ScanTelemetryState State { get; set; } = ScanTelemetryState.Idle;
 }

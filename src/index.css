@@ -1,1 +1,11 @@
 @import "tailwindcss";
+
+/* The desktop app keeps every navigation destination reachable without
+   showing a browser-style horizontal scrollbar below the ribbon. */
+.winwifi-nav {
+  scrollbar-width: none;
+}
+
+.winwifi-nav::-webkit-scrollbar {
+  display: none;
+}

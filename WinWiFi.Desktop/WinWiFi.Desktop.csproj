@@ -40,4 +40,13 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>
 
+  <!-- Keep the React dashboard beside every desktop build, not just the
+       published release. The local bridge serves this folder to WebView2. -->
+  <ItemGroup Condition="Exists('..\\dist\\index.html')">
+    <Content Include="..\\dist\\**\\*">
+      <Link>dashboard\\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

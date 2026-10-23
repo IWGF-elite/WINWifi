@@ -60,7 +60,7 @@ namespace WinWiFi.Services
         private string? _activeAdapterId;
         private int _scanCycleCount = 0;
         private DateTime _lastRefreshUtc = DateTime.MinValue;
-        private static readonly TimeSpan MinimumRefreshInterval = TimeSpan.FromSeconds(WifiBackgroundScanner.MinimumIntervalSeconds);
+        private static readonly TimeSpan MinimumRefreshInterval = TimeSpan.FromSeconds(10);
 
         public HttpBridgeServer(
             int port = 38989,
@@ -394,7 +394,7 @@ namespace WinWiFi.Services
                 activeAdapterId = _activeAdapterId,
                 activeAdapterName = _wifiService.GetDiagnostics().ActiveAdapterName,
                 minimumRefreshIntervalSeconds = (int)MinimumRefreshInterval.TotalSeconds,
-                telemetryMode = "Windows WLAN BSS-cache observation; no monitor-mode capture or packet injection",
+                telemetryMode = "Windows WLAN discovery; no monitor-mode capture or packet injection",
                 scanCyclesCompleted = _scanCycleCount,
                 accessPointsCount = _latestAccessPoints.Count,
                 incidentsCount = _latestIncidents.Count,
@@ -515,7 +515,11 @@ namespace WinWiFi.Services
                 await WriteJsonAsync(response, new { error = "Choose a Wi-Fi adapter before requesting telemetry." });
                 return;
             }
-            // WlanGetNetworkBssList only reads the OS BSS cache. Do not trigger WlanScan here.
+            // Ask Windows to refresh its WLAN cache before reading it. WlanScan is
+            // asynchronous, so give the service a short bounded interval to return
+            // current nearby BSS entries.
+            await _wifiService.TriggerHardwareScanAsync(_activeAdapterId);
+            await Task.Delay(TimeSpan.FromSeconds(2));
             List<AccessPoint> aps = await _wifiService.ScanNetworksAsync(_activeAdapterId);
             _lastRefreshUtc = DateTime.UtcNow;
 
@@ -572,7 +576,7 @@ namespace WinWiFi.Services
                 status = "scanning",
                 isScanning = true,
                 activeAdapterId = _activeAdapterId,
-                message = $"Bounded BSS-cache telemetry started ({WifiBackgroundScanner.MinimumIntervalSeconds}s minimum interval)"
+                message = $"Windows WLAN discovery started ({WifiBackgroundScanner.MinimumIntervalSeconds}s minimum interval)"
             });
         }
 

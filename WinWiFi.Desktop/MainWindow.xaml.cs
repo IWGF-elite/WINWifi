@@ -20,12 +20,22 @@ public partial class MainWindow : Window
     {
         try
         {
+            // Fit the initial WPF window into the user's actual work area. The
+            // old fixed 1440x900 size was taller and wider than many 1366x768
+            // Windows displays, which made the dashboard look cropped.
+            var workArea = SystemParameters.WorkArea;
+            Width = Math.Min(1440, workArea.Width * 0.96);
+            Height = Math.Min(900, workArea.Height * 0.96);
+            Left = workArea.Left + (workArea.Width - Width) / 2;
+            Top = workArea.Top + (workArea.Height - Height) / 2;
+
             string userDataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WinWiFi", "WebView2");
             Directory.CreateDirectory(userDataFolder);
             var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
             await Dashboard.EnsureCoreWebView2Async(environment);
+            Dashboard.ZoomFactor = 0.9;
             Dashboard.CoreWebView2.Settings.AreDevToolsEnabled = false;
             Dashboard.CoreWebView2.Settings.IsStatusBarEnabled = false;
             Dashboard.CoreWebView2.DownloadStarting += (_, args) =>

@@ -165,7 +165,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
               </div>
               <div className="text-slate-200 font-bold mt-0.5">
                 {dataSourceProfile === 'LIVE_WINDOWS' 
-                  ? (isScanning ? 'Multi-Channel BSS Sweep' : 'Scan Paused')
+                  ? (isScanning ? 'Windows WLAN Discovery' : 'Scan Paused')
                   : dataSourceProfile === 'REAL_PCAP'
                     ? 'Static Capture Ingested'
                   : dataSourceProfile === 'TRAINING' || dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB'
