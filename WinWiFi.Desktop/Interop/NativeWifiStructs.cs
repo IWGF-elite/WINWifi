@@ -171,4 +171,57 @@ namespace WinWiFi.Interop
         public uint dwDataSize;
         public byte[] DataBytes;
     }
+
+    public enum WLAN_CONNECTION_MODE
+    {
+        wlan_connection_mode_profile = 0,
+        wlan_connection_mode_temporary_profile = 1,
+        wlan_connection_mode_discovery_secure = 2,
+        wlan_connection_mode_discovery_unsecure = 3,
+        wlan_connection_mode_auto = 4,
+        wlan_connection_mode_invalid = 5
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct WLAN_CONNECTION_PARAMETERS
+    {
+        public WLAN_CONNECTION_MODE wlanConnectionMode;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? strProfile;
+        public IntPtr pDot11Ssid;
+        public IntPtr pDesiredBssidList;
+        public DOT11_BSS_TYPE dot11BssType;
+        public uint dwFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct WLAN_CONNECTION_ATTRIBUTES
+    {
+        public WLAN_INTERFACE_STATE isState;
+        public WLAN_CONNECTION_MODE wlanConnectionMode;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string strProfileName;
+        public WLAN_ASSOCIATION_ATTRIBUTES wlanAssociationAttributes;
+        public WLAN_SECURITY_ATTRIBUTES wlanSecurityAttributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WLAN_ASSOCIATION_ATTRIBUTES
+    {
+        public DOT11_SSID dot11Ssid;
+        public DOT11_BSS_TYPE dot11BssType;
+        public DOT11_MAC_ADDRESS dot11Bssid;
+        public DOT11_PHY_TYPE dot11PhyType;
+        public uint uDot11PhyIndex;
+        public uint wlanSignalQuality;
+        public uint ulRxRate;
+        public uint ulTxRate;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WLAN_SECURITY_ATTRIBUTES
+    {
+        [MarshalAs(UnmanagedType.Bool)] public bool bSecurityEnabled;
+        [MarshalAs(UnmanagedType.Bool)] public bool bOneXEnabled;
+        public DOT11_AUTH_ALGORITHM dot11AuthAlgorithm;
+        public DOT11_CIPHER_ALGORITHM dot11CipherAlgorithm;
+    }
 }

@@ -14,6 +14,20 @@ namespace WinWiFi.Interop
         public const uint ERROR_ACCESS_DENIED = 5;
         public const uint ERROR_INVALID_PARAMETER = 87;
         public const uint ERROR_NOT_SUPPORTED = 50;
+        public const uint WLAN_INTF_OPCODE_CURRENT_CONNECTION = 7;
+
+        [DllImport(WLAN_API_DLL, CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern uint WlanSetProfile(IntPtr hClientHandle, [In] ref Guid pInterfaceGuid,
+            uint dwFlags, string strProfileXml, string? strAllUserProfileSecurity,
+            bool bOverwrite, IntPtr pReserved, out uint pdwReasonCode);
+
+        [DllImport(WLAN_API_DLL, CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern uint WlanConnect(IntPtr hClientHandle, [In] ref Guid pInterfaceGuid,
+            [In] ref WLAN_CONNECTION_PARAMETERS pConnectionParameters, IntPtr pReserved);
+
+        [DllImport(WLAN_API_DLL, SetLastError = true)]
+        public static extern uint WlanQueryInterface(IntPtr hClientHandle, [In] ref Guid pInterfaceGuid,
+            uint OpCode, IntPtr pReserved, out uint pdwDataSize, out IntPtr ppData, out uint pWlanOpcodeValueType);
 
         [DllImport(WLAN_API_DLL, SetLastError = true)]
         public static extern uint WlanOpenHandle(

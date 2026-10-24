@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AccessPoint, HandshakeInfo, SecurityIssue, DataSourceProfile } from '../types';
 import { 
   ShieldAlert, 
@@ -21,6 +21,7 @@ import {
   Settings
 } from 'lucide-react';
 import { AIAdvisor } from '../services/aiAdvisor';
+import { NativeBridgeClient } from '../services/bridgeClient';
 
 interface NetworkDetailPanelProps {
   ap: AccessPoint | null;
@@ -30,6 +31,7 @@ interface NetworkDetailPanelProps {
   dataSourceProfile?: DataSourceProfile;
   onOpenCaptureGuide?: () => void;
   onOpenImport?: () => void;
+  onConnect?: (ap: AccessPoint, password: string, confirmed: boolean) => Promise<string>;
 }
 
 export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
@@ -40,11 +42,23 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   dataSourceProfile = 'BENCHMARK',
   onOpenCaptureGuide,
   onOpenImport,
+  onConnect,
 }) => {
   const [copiedHashcat, setCopiedHashcat] = useState(false);
   const [copiedBssid, setCopiedBssid] = useState(false);
   const [showPlainEnglishAdvisor, setShowPlainEnglishAdvisor] = useState(false);
   const [expandedIssueId, setExpandedIssueId] = useState<string | null>(null);
+  const [password, setPassword] = useState('');
+  const [authorizationConfirmed, setAuthorizationConfirmed] = useState(false);
+  const [connectionMessage, setConnectionMessage] = useState('');
+  const [history, setHistory] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (dataSourceProfile !== 'LIVE_WINDOWS' || !ap?.bssid) return;
+    void NativeBridgeClient.getInstance().getObservations(ap.bssid)
+      .then(result => setHistory(result.records || []))
+      .catch(() => setHistory([]));
+  }, [ap?.bssid, dataSourceProfile]);
 
   if (!ap) return null;
 
@@ -63,6 +77,13 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
     navigator.clipboard.writeText(ap.bssid);
     setCopiedBssid(true);
     setTimeout(() => setCopiedBssid(false), 2000);
+  };
+
+  const handleConnect = async () => {
+    if (!onConnect) return;
+    setConnectionMessage('Requesting Windows connection…');
+    try { setConnectionMessage(await onConnect(ap, password, authorizationConfirmed)); }
+    catch (error: any) { setConnectionMessage(error?.message || 'Connection request failed.'); }
   };
 
   return (
@@ -162,6 +183,15 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
       {/* Content Grid */}
       <div className="p-4 space-y-5 overflow-y-auto max-h-[580px] text-xs">
+        {dataSourceProfile === 'LIVE_WINDOWS' && onConnect && (
+          <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`}>
+            <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-100">Connect on Windows</h3><p className="mt-1 text-[11px] text-slate-400">Uses the Windows WLAN profile store. WinWiFi does not retain the password.</p></div><Radio className="h-4 w-4 text-blue-400" /></div>
+            <input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Password, or leave empty for an existing Windows profile" className="mt-3 w-full rounded border border-slate-700 bg-slate-950 px-2.5 py-2 text-slate-100" />
+            <label className="mt-2 flex items-start gap-2 text-[11px] text-slate-300"><input type="checkbox" checked={authorizationConfirmed} onChange={event => setAuthorizationConfirmed(event.target.checked)} className="mt-0.5" />I own or am authorized to connect to {ap.ssid} ({ap.bssid}) in this audit scope.</label>
+            <button onClick={handleConnect} disabled={!authorizationConfirmed} className="mt-3 rounded bg-blue-600 px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Connect</button>
+            {connectionMessage && <p className="mt-2 text-[11px] text-slate-300" role="status">{connectionMessage}</p>}
+          </section>
+        )}
         {/* Specification Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className={`p-3 rounded-xl border ${isDarkMode ? 'bg-[#14161d] border-[#252934]' : 'bg-slate-50 border-slate-200'}`}>
@@ -206,6 +236,11 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
           </div>
           {(ap.riskFactors || []).length ? <div className="space-y-2">{(ap.riskFactors || []).map((factor, index) => <div key={`${factor.name}-${index}`} className="border-l-2 border-amber-500/50 pl-2 text-[11px]"><span className="font-semibold text-slate-200">+{factor.points} {factor.name}</span><p className="mt-0.5 text-slate-400">{factor.evidence}</p></div>)}</div> : <p className="text-[11px] text-slate-500">No weighted risk factors were observed in the current data.</p>}
         </div>
+
+        {dataSourceProfile === 'LIVE_WINDOWS' && <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`}>
+          <div className="flex items-center justify-between"><h3 className="font-semibold text-slate-200">Observed Configuration Timeline</h3><span className="text-[10px] text-slate-400">{history.length} stored observations</span></div>
+          {history.length ? <div className="mt-2 space-y-1.5">{history.slice(0, 8).map((item, index) => <div key={item.id ?? index} className="flex flex-wrap justify-between gap-x-3 text-[11px] text-slate-300"><span>{item.observedAt || item.ObservedAt}</span><span>CH {item.channel ?? item.Channel} · {item.security ?? item.Security} · {item.cipher ?? item.Cipher} · {item.rssi ?? item.Rssi} dBm</span></div>)}</div> : <p className="mt-2 text-[11px] text-slate-500">No prior persisted observations for this BSSID yet. WinWiFi will record them during live scans.</p>}
+        </section>}
 
         {/* Security Vulnerabilities & Findings */}
         <div>

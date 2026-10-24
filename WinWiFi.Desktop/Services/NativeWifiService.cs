@@ -101,6 +101,73 @@ namespace WinWiFi.Services
             return false;
         }
 
+        public NetworkConnectionStatus GetConnectionStatus(string adapterId)
+        {
+            if (!Guid.TryParse(adapterId, out var adapterGuid))
+                return new NetworkConnectionStatus { State = "Unavailable", Reason = "The selected adapter does not expose a Windows WLAN interface GUID." };
+            IntPtr handle = IntPtr.Zero;
+            IntPtr data = IntPtr.Zero;
+            try
+            {
+                uint version;
+                if (NativeWifi.WlanOpenHandle(NativeWifi.WLAN_CLIENT_VERSION_VISTA, IntPtr.Zero, out version, out handle) != NativeWifi.ERROR_SUCCESS)
+                    return new NetworkConnectionStatus { State = "Unavailable", Reason = "Windows WLAN API could not be opened." };
+                uint size, valueType;
+                uint result = NativeWifi.WlanQueryInterface(handle, ref adapterGuid, NativeWifi.WLAN_INTF_OPCODE_CURRENT_CONNECTION, IntPtr.Zero, out size, out data, out valueType);
+                if (result != NativeWifi.ERROR_SUCCESS || data == IntPtr.Zero)
+                    return new NetworkConnectionStatus { State = "Disconnected", Reason = "No active WLAN connection." };
+                var attributes = Marshal.PtrToStructure<WLAN_CONNECTION_ATTRIBUTES>(data);
+                return new NetworkConnectionStatus
+                {
+                    State = attributes.isState == WLAN_INTERFACE_STATE.wlan_interface_state_connected ? "Connected" : attributes.isState.ToString(),
+                    Ssid = attributes.wlanAssociationAttributes.dot11Ssid.GetSsidString(),
+                    Bssid = attributes.wlanAssociationAttributes.dot11Bssid.ToString(),
+                    ProfileName = attributes.strProfileName ?? string.Empty
+                };
+            }
+            catch (Exception ex) { return new NetworkConnectionStatus { State = "Unavailable", Reason = ex.Message }; }
+            finally
+            {
+                if (data != IntPtr.Zero) NativeWifi.WlanFreeMemory(data);
+                if (handle != IntPtr.Zero) NativeWifi.WlanCloseHandle(handle, IntPtr.Zero);
+            }
+        }
+
+        public NetworkConnectionStatus ConnectToAuthorizedNetwork(string adapterId, string ssid, string? password)
+        {
+            if (!Guid.TryParse(adapterId, out var adapterGuid))
+                return new NetworkConnectionStatus { State = "Failed", Reason = "Selected adapter is not a Windows WLAN interface." };
+            if (string.IsNullOrWhiteSpace(ssid)) return new NetworkConnectionStatus { State = "Failed", Reason = "SSID is required." };
+            IntPtr handle = IntPtr.Zero;
+            try
+            {
+                uint version;
+                uint opened = NativeWifi.WlanOpenHandle(NativeWifi.WLAN_CLIENT_VERSION_VISTA, IntPtr.Zero, out version, out handle);
+                if (opened != NativeWifi.ERROR_SUCCESS) return new NetworkConnectionStatus { State = "Failed", Reason = $"WlanOpenHandle failed ({opened})." };
+                if (!string.IsNullOrEmpty(password))
+                {
+                    uint reason;
+                    string profile = BuildWpaPersonalProfile(ssid, password);
+                    uint set = NativeWifi.WlanSetProfile(handle, ref adapterGuid, 0, profile, null, true, IntPtr.Zero, out reason);
+                    if (set != NativeWifi.ERROR_SUCCESS) return new NetworkConnectionStatus { State = "Failed", Reason = $"Windows rejected the Wi-Fi profile ({set}, reason {reason})." };
+                }
+                var parameters = new WLAN_CONNECTION_PARAMETERS { wlanConnectionMode = WLAN_CONNECTION_MODE.wlan_connection_mode_profile, strProfile = ssid, dot11BssType = DOT11_BSS_TYPE.dot11_BSS_type_infrastructure };
+                uint connect = NativeWifi.WlanConnect(handle, ref adapterGuid, ref parameters, IntPtr.Zero);
+                return connect == NativeWifi.ERROR_SUCCESS
+                    ? new NetworkConnectionStatus { State = "Connecting", Ssid = ssid, ProfileName = ssid, Reason = "Windows accepted the connection request." }
+                    : new NetworkConnectionStatus { State = "Failed", Ssid = ssid, Reason = $"WlanConnect failed ({connect}). Verify the saved profile or password." };
+            }
+            catch (Exception ex) { return new NetworkConnectionStatus { State = "Failed", Ssid = ssid, Reason = ex.Message }; }
+            finally { if (handle != IntPtr.Zero) NativeWifi.WlanCloseHandle(handle, IntPtr.Zero); }
+        }
+
+        private static string BuildWpaPersonalProfile(string ssid, string password)
+        {
+            string escapedSsid = System.Security.SecurityElement.Escape(ssid) ?? string.Empty;
+            string escapedPassword = System.Security.SecurityElement.Escape(password) ?? string.Empty;
+            return $"<?xml version=\"1.0\"?><WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\"><name>{escapedSsid}</name><SSIDConfig><SSID><name>{escapedSsid}</name></SSID></SSIDConfig><connectionType>ESS</connectionType><connectionMode>auto</connectionMode><MSM><security><authEncryption><authentication>WPA2PSK</authentication><encryption>AES</encryption><useOneX>false</useOneX></authEncryption><sharedKey><keyType>passPhrase</keyType><protected>false</protected><keyMaterial>{escapedPassword}</keyMaterial></sharedKey></security></MSM></WLANProfile>";
+        }
+
         public async Task<List<WifiAdapter>> GetAdaptersAsync()
         {
             var adapters = new List<WifiAdapter>();

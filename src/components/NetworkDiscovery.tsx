@@ -45,6 +45,7 @@ interface NetworkDiscoveryProps {
   onRefreshScan?: () => void;
   onOpenBridgeConfig?: () => void;
   isDarkMode: boolean;
+  connectedBssid?: string;
 }
 
 type SortField = 'rssi' | 'ssid' | 'channel' | 'securityScore' | 'clients' | 'dataPacketCount';
@@ -61,6 +62,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   onRefreshScan,
   onOpenBridgeConfig,
   isDarkMode,
+  connectedBssid,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [bandFilter, setBandFilter] = useState<string>('ALL');
@@ -540,6 +542,9 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                               <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                                 4-Way Cap
                               </span>
+                            )}
+                            {connectedBssid?.toUpperCase() === ap.bssid.toUpperCase() && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Connected</span>
                             )}
                           </div>
                           <div className="text-[10px] text-slate-400">

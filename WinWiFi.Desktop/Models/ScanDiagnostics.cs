@@ -3,6 +3,14 @@ using System.Collections.Generic;
 
 namespace WinWiFi.Models
 {
+    public class NetworkConnectionStatus
+    {
+        public string State { get; set; } = "Disconnected";
+        public string Ssid { get; set; } = string.Empty;
+        public string Bssid { get; set; } = string.Empty;
+        public string ProfileName { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+    }
     public enum ScanTelemetryState
     {
         Idle,

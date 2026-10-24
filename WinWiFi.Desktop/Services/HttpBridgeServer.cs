@@ -57,6 +57,7 @@ namespace WinWiFi.Services
         private List<AccessPoint> _latestAccessPoints = new();
         private List<ThreatFinding> _latestIncidents = new();
         private List<StationClientRecord> _latestClients = new();
+        private Dictionary<string, AccessPoint> _previousScanByBssid = new(StringComparer.OrdinalIgnoreCase);
         private string? _activeAdapterId;
         private int _scanCycleCount = 0;
         private DateTime _lastRefreshUtc = DateTime.MinValue;
@@ -117,7 +118,7 @@ namespace WinWiFi.Services
         private void OnNetworksDiscovered(List<AccessPoint> aps)
         {
             _latestAccessPoints = aps;
-            var threats = _securityAnalyzer.AnalyzeThreatsAndDrift(aps, null);
+            var threats = AnalyzeCurrentScan(aps);
             _latestIncidents = threats.Findings;
 
             // Broadcast to SSE clients
@@ -129,6 +130,16 @@ namespace WinWiFi.Services
                 accessPoints = aps,
                 incidents = _latestIncidents
             });
+        }
+
+        private ThreatAnalysisResult AnalyzeCurrentScan(List<AccessPoint> aps)
+        {
+            var baseline = _previousScanByBssid.Count == 0 ? null : _previousScanByBssid;
+            var analysis = _securityAnalyzer.AnalyzeThreatsAndDrift(aps, baseline);
+            _previousScanByBssid = aps
+                .Where(ap => !string.IsNullOrWhiteSpace(ap.Bssid))
+                .ToDictionary(ap => ap.Bssid, ap => ap, StringComparer.OrdinalIgnoreCase);
+            return analysis;
         }
 
         private void OnScanCycleCompleted(ScanCycleStats stats)
@@ -162,7 +173,7 @@ namespace WinWiFi.Services
                     if (initialAps.Count > 0)
                     {
                         _latestAccessPoints = initialAps;
-                        var initialThreats = _securityAnalyzer.AnalyzeThreatsAndDrift(initialAps, null);
+                        var initialThreats = AnalyzeCurrentScan(initialAps);
                         _latestIncidents = initialThreats.Findings;
                     }
                 }
@@ -293,7 +304,7 @@ namespace WinWiFi.Services
                         break;
 
                     case "/api/observations":
-                        await HandleObservationsAsync(response);
+                        await HandleObservationsAsync(request, response);
                         break;
 
                     case "/api/networks":
@@ -334,6 +345,14 @@ namespace WinWiFi.Services
 
                     case "/api/clients":
                         await HandleClientsAsync(response);
+                        break;
+
+                    case "/api/connection/status":
+                        await HandleConnectionStatusAsync(request, response);
+                        break;
+
+                    case "/api/connection/connect":
+                        await HandleConnectAsync(request, response);
                         break;
 
                     case "/api/selftests":
@@ -494,9 +513,10 @@ namespace WinWiFi.Services
             await WriteJsonAsync(response, diag);
         }
 
-        private async Task HandleObservationsAsync(HttpListenerResponse response)
+        private async Task HandleObservationsAsync(HttpListenerRequest request, HttpListenerResponse response)
         {
-            var observations = await _storage.GetScanObservationsAsync("proj-default", null, 200);
+            string? bssid = request.QueryString["bssid"];
+            var observations = await _storage.GetScanObservationsAsync("proj-default", bssid, 200);
             int total = await _storage.GetTotalObservationsCountAsync("proj-default");
             await WriteJsonAsync(response, new { totalObservationsCount = total, records = observations });
         }
@@ -537,7 +557,7 @@ namespace WinWiFi.Services
             _lastRefreshUtc = DateTime.UtcNow;
 
             _latestAccessPoints = aps;
-            var threats = _securityAnalyzer.AnalyzeThreatsAndDrift(aps, null);
+            var threats = AnalyzeCurrentScan(aps);
             _latestIncidents = threats.Findings;
             _scanCycleCount++;
 
@@ -630,6 +650,53 @@ namespace WinWiFi.Services
             await WriteJsonAsync(response, _latestClients);
         }
 
+        private async Task HandleConnectionStatusAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            string adapterId = request.QueryString["adapterId"] ?? _activeAdapterId ?? string.Empty;
+            if (_wifiService is NativeWifiService native)
+                await WriteJsonAsync(response, native.GetConnectionStatus(adapterId));
+            else
+                await WriteJsonAsync(response, new NetworkConnectionStatus { State = "Unavailable", Reason = "Native Windows WLAN service is unavailable." });
+        }
+
+        private sealed class ConnectRequest
+        {
+            public string AdapterId { get; set; } = string.Empty;
+            public string Bssid { get; set; } = string.Empty;
+            public string Ssid { get; set; } = string.Empty;
+            public string? Password { get; set; }
+            public bool AuthorizationConfirmed { get; set; }
+            public List<string> AuthorizedBssids { get; set; } = new();
+        }
+
+        private async Task HandleConnectAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonAsync(response, new { error = "Use POST to request a connection." });
+                return;
+            }
+            var payload = await JsonSerializer.DeserializeAsync<ConnectRequest>(request.InputStream, JsonOptions) ?? new ConnectRequest();
+            bool inLiveScan = _latestAccessPoints.Any(ap => ap.Bssid.Equals(payload.Bssid, StringComparison.OrdinalIgnoreCase) && ap.Ssid.Equals(payload.Ssid, StringComparison.Ordinal));
+            bool authorized = payload.AuthorizationConfirmed && payload.AuthorizedBssids.Any(bssid => bssid.Equals(payload.Bssid, StringComparison.OrdinalIgnoreCase));
+            if (!inLiveScan || !authorized)
+            {
+                response.StatusCode = (int)HttpStatusCode.Forbidden;
+                await WriteJsonAsync(response, new { error = "Connection requires an observed BSSID and explicit Project & Scope authorization confirmation." });
+                return;
+            }
+            if (_wifiService is not NativeWifiService native)
+            {
+                response.StatusCode = (int)HttpStatusCode.NotImplemented;
+                await WriteJsonAsync(response, new { error = "Native Windows WLAN connection service is unavailable." });
+                return;
+            }
+            // Password is deliberately not logged or persisted by WinWiFi.
+            var result = native.ConnectToAuthorizedNetwork(string.IsNullOrWhiteSpace(payload.AdapterId) ? _activeAdapterId ?? string.Empty : payload.AdapterId, payload.Ssid, payload.Password);
+            await WriteJsonAsync(response, result);
+        }
+
         private async Task HandleSelfTestsAsync(HttpListenerResponse response)
         {
             var results = await _selfTests.RunAllTestsAsync();
@@ -654,7 +721,7 @@ namespace WinWiFi.Services
             {
                 var aps = nativeSvc.ParseNetshBssidOutput(netshOutput);
                 _latestAccessPoints = aps;
-                var threats = _securityAnalyzer.AnalyzeThreatsAndDrift(aps, null);
+                var threats = AnalyzeCurrentScan(aps);
                 _latestIncidents = threats.Findings;
                 await WriteJsonAsync(response, new { message = "Netsh output parsed", count = aps.Count, accessPoints = aps, incidents = _latestIncidents });
             }
@@ -694,7 +761,7 @@ namespace WinWiFi.Services
             var result = _pcapDissector.DissectBytes(bytes);
             _latestAccessPoints = result.AccessPoints;
             _latestClients = result.Clients;
-            var threats = _securityAnalyzer.AnalyzeThreatsAndDrift(result.AccessPoints, null);
+            var threats = AnalyzeCurrentScan(result.AccessPoints);
             _latestIncidents = threats.Findings;
 
             await WriteJsonAsync(response, result);

@@ -165,6 +165,7 @@ export default function App() {
   // Adapters & Scan State
   const [adapters, setAdapters] = useState<WifiAdapter[]>([]);
   const [selectedAdapterId, setSelectedAdapterId] = useState<string>('');
+  const [connectedBssid, setConnectedBssid] = useState<string>('');
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [currentChannel, setCurrentChannel] = useState<number>(6);
 
@@ -235,7 +236,10 @@ export default function App() {
           setActiveSourceLabel(`Native Bridge (${health?.activeAdapterName || 'Hardware Adapter'})`);
           const detectedAdapters = await bridgeClient.getAdapters();
           setAdapters(detectedAdapters);
-          setSelectedAdapterId(current => current || detectedAdapters[0]?.id || '');
+          const adapterId = detectedAdapters[0]?.id || '';
+          setSelectedAdapterId(current => current || adapterId);
+          const connection = await bridgeClient.getConnectionStatus(adapterId);
+          setConnectedBssid(connection.state === 'Connected' ? connection.bssid : '');
         } catch {
           setActiveSourceLabel('Native Bridge (Port 38989)');
         }
@@ -400,6 +404,22 @@ export default function App() {
       setBridgeNotice(message);
       db.appendLog({ level: 'ERROR', source: 'BRIDGE_REFRESH', message });
     }
+  };
+
+  const handleAuthorizedConnect = async (ap: AccessPoint, password: string, confirmed: boolean): Promise<string> => {
+    if (bridgeClient.getState() !== 'CONNECTED') throw new Error('Windows bridge is not connected.');
+    const result = await bridgeClient.connectAuthorizedNetwork({
+      adapterId: selectedAdapterId,
+      bssid: ap.bssid,
+      ssid: ap.ssid,
+      password: password || undefined,
+      authorizationConfirmed: confirmed,
+      authorizedBssids: confirmed ? [ap.bssid] : []
+    });
+    if (result.state === 'Connected') setConnectedBssid(result.bssid);
+    const log = db.appendLog({ level: result.state === 'Failed' ? 'ERROR' : 'INFO', source: 'WLAN_CONNECT', message: `${result.state}: ${result.ssid || ap.ssid}. ${result.reason}` });
+    setLogs(previous => [log, ...previous]);
+    return `${result.state}: ${result.reason}`;
   };
 
   // Ingestion: Real PCAP File Import
@@ -1042,6 +1062,7 @@ export default function App() {
                 onRefreshScan={handleRefreshScan}
                 onOpenBridgeConfig={() => setShowBridgeModal(true)}
                 isDarkMode={isDarkMode}
+                connectedBssid={connectedBssid}
               />
             )}
 
@@ -1055,6 +1076,7 @@ export default function App() {
                 dataSourceProfile={dataSourceProfile}
                 onOpenCaptureGuide={() => setShowArchitectureModal(true)}
                 onOpenImport={() => setShowImportModal(true)}
+                onConnect={handleAuthorizedConnect}
               />
             )}
           </div>

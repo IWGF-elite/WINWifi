@@ -303,8 +303,18 @@ export class NativeBridgeClient {
   /**
    * Historical discrete scan observations from SQLite database
    */
-  public async getObservations(): Promise<{ totalObservationsCount: number; records: any[] }> {
-    return await this.request<{ totalObservationsCount: number; records: any[] }>('/api/observations');
+  public async getObservations(bssid?: string): Promise<{ totalObservationsCount: number; records: any[] }> {
+    const query = bssid ? `?bssid=${encodeURIComponent(bssid)}` : '';
+    return await this.request<{ totalObservationsCount: number; records: any[] }>(`/api/observations${query}`);
+  }
+
+  public async getConnectionStatus(adapterId?: string): Promise<{ state: string; ssid: string; bssid: string; reason: string }> {
+    const query = adapterId ? `?adapterId=${encodeURIComponent(adapterId)}` : '';
+    return await this.request(`/api/connection/status${query}`);
+  }
+
+  public async connectAuthorizedNetwork(request: { adapterId: string; bssid: string; ssid: string; password?: string; authorizationConfirmed: boolean; authorizedBssids: string[] }): Promise<{ state: string; ssid: string; bssid: string; reason: string }> {
+    return await this.request('/api/connection/connect', { method: 'POST', body: JSON.stringify(request) });
   }
 
   // ================= Connection Management & Reconnect =================
