@@ -1,266 +1,55 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Binary, Download, Filter, Layers, Radio, Search, Upload } from 'lucide-react';
 import { downloadBlob } from '../services/download';
-import React, { useState } from 'react';
 import { PcapPacket } from '../types';
-import { PcapService } from '../services/pcapParser';
-import { 
-  Terminal, 
-  Download, 
-  Search, 
-  Filter, 
-  Radio, 
-  Cpu, 
-  Binary, 
-  Layers, 
-  FileCode, 
-  Check,
-  Upload
-} from 'lucide-react';
 
-interface PacketAnalyzerProps {
-  packets: PcapPacket[];
-  onOpenImport?: () => void;
-  isDarkMode: boolean;
-}
+interface PacketAnalyzerProps { packets: PcapPacket[]; onOpenImport?: () => void; isDarkMode: boolean; }
+const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+const typeLabel = (packet: PcapPacket) => packet.subtype || packet.frameType || 'Unknown';
 
-export const PacketAnalyzer: React.FC<PacketAnalyzerProps> = ({
-  packets = [],
-  onOpenImport,
-  isDarkMode,
-}) => {
-  const [selectedPacketId, setSelectedPacketId] = useState<number | null>(() => packets[0]?.id || null);
-  const [typeFilter, setTypeFilter] = useState<string>('ALL');
-  const [search, setSearch] = useState<string>('');
-  const [isExported, setIsExported] = useState<boolean>(false);
-
-  const filteredPackets = (packets || []).filter((p) => {
-    const matchesType = typeFilter === 'ALL' || (p.frameType && p.frameType.includes(typeFilter));
-    const searchLower = search.toLowerCase();
-    const matchesSearch = 
-      !search ||
-      (p.sourceMac || '').toLowerCase().includes(searchLower) ||
-      (p.destMac || '').toLowerCase().includes(searchLower) ||
-      (p.info || '').toLowerCase().includes(searchLower);
-    return matchesType && matchesSearch;
-  });
-
-  const selectedPacket = (packets || []).find((p) => p.id === selectedPacketId) || packets[0];
-
-  // Export genuine binary Libpcap 2.4 format
-  const handleExportPcap = () => {
-    const binaryBytes = PcapService.getInstance().exportBinaryPcap(packets);
-    const blob = new Blob([binaryBytes.buffer], { type: 'application/vnd.tcpdump.pcap' });
-    downloadBlob(blob, `winwifi_capture_${new Date().toISOString().slice(0, 10)}.pcap`);
-
-    setIsExported(true);
-    setTimeout(() => setIsExported(false), 2500);
+export const PacketAnalyzer: React.FC<PacketAnalyzerProps> = ({ packets = [], onOpenImport, isDarkMode }) => {
+  const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [subtypeFilter, setSubtypeFilter] = useState('ALL');
+  const [bssidFilter, setBssidFilter] = useState('ALL');
+  const [minSignal, setMinSignal] = useState('');
+  const [maxSignal, setMaxSignal] = useState('');
+  const [selectedPacketId, setSelectedPacketId] = useState<number | null>(null);
+  const bssids = useMemo(() => [...new Set(packets.map(p => p.bssid).filter(Boolean))].sort(), [packets]);
+  const subtypes = useMemo(() => [...new Set(packets.map(typeLabel).filter(Boolean))].sort(), [packets]);
+  const filteredPackets = useMemo(() => {
+    const text = query.trim().toLowerCase(); const min = minSignal === '' ? -Infinity : Number(minSignal); const max = maxSignal === '' ? Infinity : Number(maxSignal);
+    return packets.filter(p => {
+      const haystack = [p.info, p.bssid, p.sourceMac, p.destMac, p.transmitterMac, p.receiverMac, p.subtype, p.frameType, ...Object.values(p.informationElements || {})].join(' ').toLowerCase();
+      return (!text || haystack.includes(text)) && (typeFilter === 'ALL' || p.frameType === typeFilter) && (subtypeFilter === 'ALL' || typeLabel(p) === subtypeFilter) && (bssidFilter === 'ALL' || p.bssid === bssidFilter) && p.rssi >= min && p.rssi <= max;
+    });
+  }, [packets, query, typeFilter, subtypeFilter, bssidFilter, minSignal, maxSignal]);
+  useEffect(() => { if (!selectedPacketId || !filteredPackets.some(p => p.id === selectedPacketId)) setSelectedPacketId(filteredPackets[0]?.id ?? null); }, [filteredPackets, selectedPacketId]);
+  const selectedPacket = filteredPackets.find(p => p.id === selectedPacketId) || filteredPackets[0];
+  const stats = useMemo(() => bssids.map(bssid => {
+    const frames = packets.filter(p => p.bssid === bssid); const count = (predicate: (p: PcapPacket) => boolean) => frames.filter(predicate).length;
+    return { bssid, management: count(p => p.frameType === 'Management'), control: count(p => p.frameType === 'Control'), data: count(p => p.frameType === 'Data'), beacon: count(p => typeLabel(p) === 'Beacon'), probe: count(p => typeLabel(p).startsWith('Probe')), deauth: count(p => typeLabel(p) === 'Deauthentication'), disassoc: count(p => typeLabel(p) === 'Disassociation') };
+  }), [packets, bssids]);
+  const exportCsv = () => {
+    const headings = ['Frame', 'Timestamp', 'BSSID', 'Frame type', 'Subtype', 'Source MAC', 'Destination MAC', 'Channel', 'RSSI dBm', 'Bytes', 'Info'];
+    const rows = filteredPackets.map(p => [p.frameNumber, p.timestamp, p.bssid, p.frameType, typeLabel(p), p.sourceMac, p.destMac, p.channel, p.rssi, p.lengthBytes, p.info]);
+    downloadBlob(new Blob([[headings, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), `winwifi-80211-filtered-${new Date().toISOString().slice(0, 10)}.csv`);
   };
-
-  const getFrameBadge = (type: PcapPacket['frameType']) => {
-    if (type.includes('EAPOL')) {
-      return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold';
-    }
-    if (type.includes('Beacon')) {
-      return 'bg-blue-500/20 text-blue-400 border-blue-500/40';
-    }
-    if (type.includes('Data')) {
-      return 'bg-purple-500/20 text-purple-400 border-purple-500/40';
-    }
-    if (type.includes('Auth') || type.includes('Deauth')) {
-      return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
-    }
-    return 'bg-slate-500/20 text-slate-400 border-slate-500/40';
-  };
-
-  return (
-    <div className={`rounded-lg border shadow-sm flex flex-col transition-colors overflow-hidden ${
-      isDarkMode ? 'bg-[#181a20] border-[#2c303b]' : 'bg-white border-slate-200'
-    }`}>
-      {/* Top Filter Toolbar */}
-      <div className={`p-3 border-b flex flex-wrap items-center justify-between gap-3 text-xs ${
-        isDarkMode ? 'border-[#252934] bg-[#1d2028]' : 'border-slate-200 bg-slate-50'
-      }`}>
-        <div className="flex items-center gap-3 flex-1 max-w-md">
-          <div className="relative w-full">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Filter by MAC, SSID, or Frame protocol..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className={`w-full pl-8 pr-3 py-1.5 rounded border text-xs outline-none ${
-                isDarkMode ? 'bg-[#14161d] border-[#313746] text-slate-200' : 'bg-white border-slate-300'
-              }`}
-            />
-          </div>
-
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className={`px-2.5 py-1.5 rounded border text-xs outline-none cursor-pointer ${
-              isDarkMode ? 'bg-[#14161d] border-[#313746] text-slate-200' : 'bg-white border-slate-300'
-            }`}
-          >
-            <option value="ALL">All Frame Types</option>
-            <option value="EAPOL">EAPOL Key Only (Handshakes)</option>
-            <option value="Beacon">Beacon Frames</option>
-            <option value="Data">Data & QoS</option>
-            <option value="Probe">Probe Requests/Responses</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {onOpenImport && (
-            <button
-              onClick={onOpenImport}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-medium text-xs border transition-colors ${
-                isDarkMode 
-                  ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200' 
-                  : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-700'
-              }`}
-            >
-              <Upload className="w-3.5 h-3.5 text-blue-400" />
-              <span>Import .PCAP / .CAP</span>
-            </button>
-          )}
-
-          <button
-            onClick={handleExportPcap}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-medium text-xs shadow-sm transition-all ${
-              isExported 
-                ? 'bg-emerald-600 text-white' 
-                : 'bg-blue-600 hover:bg-blue-500 text-white'
-            }`}
-          >
-            {isExported ? <Check className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
-            <span>{isExported ? 'PCAP File Exported' : 'Export .PCAP Binary'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Split View: Top Packet List, Bottom Inspector */}
-      <div className="flex flex-col h-[650px]">
-        {/* Packet Table */}
-        <div className="flex-1 overflow-y-auto border-b border-slate-700/30">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead className={`sticky top-0 text-[10px] uppercase font-semibold text-slate-400 select-none ${
-              isDarkMode ? 'bg-[#14161d]' : 'bg-slate-100'
-            }`}>
-              <tr>
-                <th className="py-2 px-3 w-16">No.</th>
-                <th className="py-2 px-3 w-28">Time</th>
-                <th className="py-2 px-3 w-32">Source MAC</th>
-                <th className="py-2 px-3 w-32">Destination MAC</th>
-                <th className="py-2 px-3 w-36">Frame Type</th>
-                <th className="py-2 px-3 w-20">Length</th>
-                <th className="py-2 px-3">Protocol Information</th>
-              </tr>
-            </thead>
-            <tbody className={`divide-y font-mono text-[11px] ${
-              isDarkMode ? 'divide-[#242835]' : 'divide-slate-200'
-            }`}>
-              {filteredPackets.map((p) => {
-                const isSelected = p.id === selectedPacket?.id;
-                return (
-                  <tr
-                    key={p.id}
-                    onClick={() => setSelectedPacketId(p.id)}
-                    className={`cursor-pointer transition-colors ${
-                      isSelected
-                        ? isDarkMode ? 'bg-blue-900/30 text-blue-200' : 'bg-blue-100 text-blue-900'
-                        : isDarkMode ? 'hover:bg-[#1d212b] text-slate-300' : 'hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <td className="py-1.5 px-3 text-slate-500">{p.frameNumber}</td>
-                    <td className="py-1.5 px-3 text-slate-400">{p.timestamp}</td>
-                    <td className="py-1.5 px-3">{p.sourceMac}</td>
-                    <td className="py-1.5 px-3">{p.destMac}</td>
-                    <td className="py-1.5 px-3">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-sans border ${getFrameBadge(p.frameType)}`}>
-                        {p.frameType}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-3">{p.lengthBytes} B</td>
-                    <td className="py-1.5 px-3 font-sans truncate max-w-xs">{p.info}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Bottom Inspector (Wireshark 2-Pane: Decoded Tree + Hex Dump) */}
-        {selectedPacket && (
-          <div className={`h-64 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x ${
-            isDarkMode ? 'divide-[#262a36] bg-[#14161d]' : 'divide-slate-200 bg-slate-50'
-          }`}>
-            {/* Decoded Frame Tree */}
-            <div className="p-3 overflow-y-auto text-xs space-y-2">
-              <div className="flex items-center gap-1.5 font-bold text-slate-300 text-[11px] uppercase tracking-wide">
-                <Layers className="w-3.5 h-3.5 text-blue-400" />
-                IEEE 802.11 Layer Dissector (Frame #{selectedPacket.frameNumber})
-              </div>
-
-              <div className="space-y-1 text-slate-300 text-[11px] font-mono pl-1">
-                <details open className="cursor-pointer">
-                  <summary className="font-semibold text-blue-400 hover:text-blue-300">
-                    &gt; Radiotap Header v0 (Channel {selectedPacket.channel}, {selectedPacket.rssi} dBm)
-                  </summary>
-                  <div className="pl-4 py-1 text-slate-400 space-y-0.5">
-                    <div>Header Length: 26 bytes</div>
-                    <div>Antenna Signal: {selectedPacket.rssi} dBm</div>
-                    <div>Channel Frequency: {selectedPacket.channel <= 14 ? 2412 + (selectedPacket.channel - 1) * 5 : 5180} MHz</div>
-                    <div>RX Flags: None (Frame Valid, FCS Verified)</div>
-                  </div>
-                </details>
-
-                <details open className="cursor-pointer">
-                  <summary className="font-semibold text-indigo-400 hover:text-indigo-300">
-                    &gt; IEEE 802.11 {selectedPacket.frameType} Frame Control
-                  </summary>
-                  <div className="pl-4 py-1 text-slate-400 space-y-0.5">
-                    <div>Type / Subtype: {selectedPacket.frameType}</div>
-                    <div>Transmitter / Source Address: {selectedPacket.sourceMac}</div>
-                    <div>Receiver / Destination Address: {selectedPacket.destMac}</div>
-                    <div>BSSID (AP Hardware Address): {selectedPacket.bssid}</div>
-                    <div>Protected Frame: {selectedPacket.frameType.includes('QoS') ? 'True (CCMP Encrypted)' : 'False (Cleartext)'}</div>
-                  </div>
-                </details>
-
-                {selectedPacket.frameType.includes('EAPOL') && (
-                  <details open className="cursor-pointer">
-                    <summary className="font-semibold text-emerald-400 hover:text-emerald-300">
-                      &gt; 802.1X Authentication & EAPOL Key Exchange
-                    </summary>
-                    <div className="pl-4 py-1 text-emerald-300/80 space-y-0.5">
-                      <div>Protocol Version: 802.1X-2004 (2)</div>
-                      <div>Key Descriptor Type: RSN / WPA2 IEEE 802.11i</div>
-                      <div>Key Information: Pairwise Key, Install=1, ACK=1, MIC=1</div>
-                      <div>Key Length: 16 bytes (AES-128-CMAC)</div>
-                    </div>
-                  </details>
-                )}
-              </div>
-            </div>
-
-            {/* Hex / ASCII Dump */}
-            <div className="p-3 overflow-y-auto text-xs flex flex-col font-mono">
-              <div className="flex items-center gap-1.5 font-bold text-slate-300 text-[11px] uppercase tracking-wide mb-2">
-                <Binary className="w-3.5 h-3.5 text-purple-400" />
-                Raw Frame Byte Dump (Hex & ASCII)
-              </div>
-              <div className={`p-2.5 rounded flex-1 overflow-x-auto text-[11px] leading-relaxed border select-all ${
-                isDarkMode ? 'bg-[#0e1015] border-[#202430] text-emerald-400' : 'bg-white border-slate-300 text-slate-800'
-              }`}>
-                <div>0000  00 00 1a 00 2f 48 00 00 00 00 00 00 00 00 00 00  ..../H..........</div>
-                <div>0010  {selectedPacket.hexPreview}</div>
-                <div>0020  08 00 45 00 00 3c 1c 46 40 00 40 06 23 b0 c0 a8  ..E..&lt;.F@.@.#...</div>
-                <div>0030  01 64 c0 a8 01 01 04 d2 00 50 00 00 00 00 00 00  .d.......P......</div>
-                <div>0040  a0 02 72 10 9f e4 00 00 02 04 05 b4 04 02 08 0a  ..r.............</div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+  const treeFields = selectedPacket ? [
+    ['Frame number', selectedPacket.frameNumber], ['Timestamp', selectedPacket.timestamp], ['Length', `${selectedPacket.lengthBytes} bytes`], ['Radiotap', selectedPacket.radiotapPresent ? 'Present' : 'Not present'], ['Channel', selectedPacket.channel || 'Not exposed'], ['Signal', `${selectedPacket.rssi} dBm`],
+    ['Type / subtype', `${selectedPacket.frameType} / ${typeLabel(selectedPacket)}`], ['Frame control', `type=${selectedPacket.typeNumber ?? 'n/a'}, subtype=${selectedPacket.subtypeNumber ?? 'n/a'}`], ['Receiver', selectedPacket.receiverMac || selectedPacket.destMac], ['Transmitter', selectedPacket.transmitterMac || selectedPacket.sourceMac], ['BSSID', selectedPacket.bssid || 'Not present'], ['Sequence / fragment', `${selectedPacket.sequenceNumber ?? 'n/a'} / ${selectedPacket.fragmentNumber ?? 'n/a'}`], ['Retry / protected', `${selectedPacket.isRetry ? 'yes' : 'no'} / ${selectedPacket.isProtected ? 'yes' : 'no'}`]
+  ] : [];
+  const inputClass = 'rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500';
+  return <div className={`rounded-lg border shadow-sm ${isDarkMode ? 'bg-[#181a20] border-[#2c303b]' : 'bg-white border-slate-200'}`}>
+    <div className={`space-y-3 border-b p-3 ${isDarkMode ? 'border-[#252934] bg-[#1d2028]' : 'border-slate-200 bg-slate-50'}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2 text-xs font-semibold text-slate-300"><Filter className="h-4 w-4 text-blue-400" />Wireshark-style 802.11 display filter <span className="text-slate-500">{filteredPackets.length}/{packets.length} real parsed frames</span></div><div className="flex gap-2">{onOpenImport && <button onClick={onOpenImport} className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"><Upload className="mr-1 inline h-3.5 w-3.5 text-blue-400" />Import capture</button>}<button disabled={!filteredPackets.length} onClick={exportCsv} className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"><Download className="mr-1 inline h-3.5 w-3.5" />Export filtered CSV</button></div></div>
+      <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6"><label className="relative xl:col-span-2"><Search className="absolute left-2 top-2 h-3.5 w-3.5 text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="SSID, BSSID, MAC, frame text" className={`${inputClass} w-full pl-7`} /></label><select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className={inputClass}><option value="ALL">All types</option>{['Management', 'Control', 'Data', 'Extension'].map(v => <option key={v}>{v}</option>)}</select><select value={subtypeFilter} onChange={e => setSubtypeFilter(e.target.value)} className={inputClass}><option value="ALL">All subtypes</option>{subtypes.map(v => <option key={v}>{v}</option>)}</select><select value={bssidFilter} onChange={e => setBssidFilter(e.target.value)} className={inputClass}><option value="ALL">All BSSIDs</option>{bssids.map(v => <option key={v}>{v}</option>)}</select><div className="flex gap-1"><input value={minSignal} onChange={e => setMinSignal(e.target.value)} inputMode="numeric" placeholder="min dBm" aria-label="Minimum signal" className={`${inputClass} min-w-0 w-1/2`} /><input value={maxSignal} onChange={e => setMaxSignal(e.target.value)} inputMode="numeric" placeholder="max dBm" aria-label="Maximum signal" className={`${inputClass} min-w-0 w-1/2`} /></div></div>
     </div>
-  );
+    {packets.length > 0 && <div className="overflow-x-auto border-b border-slate-700/50 p-3"><table className="min-w-full text-left text-[10px]"><thead className="text-slate-400"><tr><th>BSSID</th><th>Mgmt</th><th>Control</th><th>Data</th><th>Beacon</th><th>Probe</th><th>Deauth</th><th>Disassoc</th></tr></thead><tbody className="font-mono text-slate-200">{stats.map(s => <tr key={s.bssid}><td className="py-1 pr-5">{s.bssid}</td><td>{s.management}</td><td>{s.control}</td><td>{s.data}</td><td>{s.beacon}</td><td>{s.probe}</td><td className={s.deauth ? 'text-amber-400' : ''}>{s.deauth}</td><td className={s.disassoc ? 'text-amber-400' : ''}>{s.disassoc}</td></tr>)}</tbody></table></div>}
+    {!packets.length ? <div className="p-14 text-center text-sm text-slate-400"><Radio className="mx-auto mb-3 h-8 w-8 text-blue-400" />No imported 802.11 frames. Import a Wi-Fi PCAP/PCAPNG capture to inspect its real frame bytes.</div> : <div className="grid min-h-[620px] grid-cols-1 divide-y divide-slate-700/50 xl:grid-cols-[1.25fr_1fr_1fr] xl:divide-x xl:divide-y-0">
+      <section className="overflow-auto"><div className="border-b border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300">Filtered frame list</div><div className="max-h-[580px] overflow-auto"><table className="w-full text-left text-[11px]"><thead className="sticky top-0 bg-[#14161d] text-[10px] uppercase text-slate-500"><tr><th className="p-2">#</th><th>Time</th><th>Type</th><th>BSSID</th><th>Source → destination</th><th>RSSI</th></tr></thead><tbody>{filteredPackets.map(p => <tr key={p.id} onClick={() => setSelectedPacketId(p.id)} className={`cursor-pointer border-t border-slate-800 ${p.id === selectedPacket?.id ? 'bg-blue-950/50 text-blue-100' : 'text-slate-300 hover:bg-slate-800/60'}`}><td className="p-2">{p.frameNumber}</td><td>{p.timestamp}</td><td><div>{typeLabel(p)}</div><div className="text-[9px] text-slate-500">{p.frameType}</div></td><td>{p.bssid}</td><td>{p.sourceMac} → {p.destMac}</td><td>{p.rssi} dBm</td></tr>)}</tbody></table></div></section>
+      <section className="overflow-auto p-3"><div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-300"><Layers className="h-4 w-4 text-blue-400" />Parsed 802.11 field tree</div>{selectedPacket && <div className="space-y-2 text-[11px]"><details open><summary className="cursor-pointer font-semibold text-blue-400">Frame and radiotap metadata</summary><div className="ml-3 mt-1 space-y-1 border-l border-slate-700 pl-3 text-slate-300">{treeFields.slice(0, 6).map(([n, v]) => <div key={n}><span className="text-slate-500">{n}: </span>{v}</div>)}</div></details><details open><summary className="cursor-pointer font-semibold text-indigo-400">IEEE 802.11 MAC header</summary><div className="ml-3 mt-1 space-y-1 border-l border-slate-700 pl-3 text-slate-300">{treeFields.slice(6).map(([n, v]) => <div key={n}><span className="text-slate-500">{n}: </span>{v}</div>)}</div></details>{Object.keys(selectedPacket.informationElements || {}).length > 0 && <details open><summary className="cursor-pointer font-semibold text-cyan-400">Information elements</summary><div className="ml-3 mt-1 space-y-1 break-all border-l border-slate-700 pl-3 text-slate-300">{Object.entries(selectedPacket.informationElements || {}).map(([n, v]) => <div key={n}><span className="text-slate-500">{n}: </span>{v}</div>)}</div></details>}{Object.keys(selectedPacket.eapolFields || {}).length > 0 && <details open><summary className="cursor-pointer font-semibold text-emerald-400">EAPOL key fields</summary><div className="ml-3 mt-1 space-y-1 break-all border-l border-slate-700 pl-3 text-emerald-300">{Object.entries(selectedPacket.eapolFields || {}).map(([n, v]) => <div key={n}><span className="text-emerald-500">{n}: </span>{v}</div>)}</div></details>}{selectedPacket.expertInfo && <p className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-amber-300">{selectedPacket.expertInfo}</p>}</div>}</section>
+      <section className="overflow-auto p-3"><div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-300"><Binary className="h-4 w-4 text-purple-400" />Raw 802.11 bytes</div>{selectedPacket?.rawBytesHex ? <pre className="whitespace-pre-wrap break-all rounded bg-black/30 p-2 font-mono text-[10px] leading-relaxed text-emerald-300">{selectedPacket.rawBytesHex}</pre> : <p className="text-xs text-slate-500">Raw bytes were not retained by this parser result.</p>}{selectedPacket?.rawBytesAscii && <pre className="mt-3 whitespace-pre-wrap break-all text-[10px] text-slate-500">{selectedPacket.rawBytesAscii}</pre>}</section>
+    </div>}
+  </div>;
 };

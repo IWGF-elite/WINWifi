@@ -310,6 +310,8 @@ namespace WinWiFi.Services
             string subtypeName = GetSubtypeName(type, subtype);
             string info = $"{subtypeName} [{srcMac} -> {destMac}]";
             string expertInfo = string.Empty;
+            var informationElements = new Dictionary<string, string>();
+            var eapolFields = new Dictionary<string, string>();
 
             // 3. Process Specific Frame Types
 
@@ -320,6 +322,7 @@ namespace WinWiFi.Services
                 int ieOffset = offset + 24 + 12; // 24 bytes MAC header + 12 bytes fixed params (timestamp, beacon interval, cap info)
                 string ssid = ExtractSsidFromIes(rawBytes, ieOffset);
                 channel = ExtractChannelFromIes(rawBytes, ieOffset, channel);
+                informationElements = ExtractInformationElements(rawBytes, ieOffset);
 
                 info = $"{subtypeName}: SSID \"{ssid}\" (Ch {channel}, BSSID {bssid})";
 
@@ -362,6 +365,7 @@ namespace WinWiFi.Services
             {
                 int ieOffset = offset + 24;
                 string probedSsid = ExtractSsidFromIes(rawBytes, ieOffset);
+                informationElements = ExtractInformationElements(rawBytes, ieOffset);
                 info = $"Probe Request from {srcMac} looking for \"{(string.IsNullOrEmpty(probedSsid) ? "Wildcard / Any" : probedSsid)}\"";
 
                 if (srcMac != "FF:FF:FF:FF:FF:FF" && !srcMac.StartsWith("01:00:5E") && !srcMac.StartsWith("33:33"))
@@ -458,6 +462,7 @@ namespace WinWiFi.Services
                 {
                     subtypeName = "EAPOL Key";
                     int eapolOffset = llcOffset + 8;
+                    eapolFields = ExtractEapolFields(rawBytes, eapolOffset);
                     info = DissectEapolFrame(rawBytes, eapolOffset, srcMac, destMac, bssid, timestamp, handshakeTracker, apMap);
                 }
             }
@@ -493,8 +498,66 @@ namespace WinWiFi.Services
                 HexPreview = hexPreview,
                 RawBytesHex = rawHex,
                 RawBytesAscii = rawAscii,
-                ExpertInfo = expertInfo
+                ExpertInfo = expertInfo,
+                InformationElements = informationElements,
+                EapolFields = eapolFields
             };
+        }
+
+        private static Dictionary<string, string> ExtractInformationElements(byte[] bytes, int offset)
+        {
+            var fields = new Dictionary<string, string>();
+            var position = offset;
+            while (position + 2 <= bytes.Length)
+            {
+                var id = bytes[position++];
+                var length = bytes[position++];
+                if (position + length > bytes.Length) break;
+                var value = bytes.Skip(position).Take(length).ToArray();
+                position += length;
+                var name = id switch
+                {
+                    0 => "SSID",
+                    1 => "Supported Rates",
+                    3 => "DS Parameter Set",
+                    5 => "TIM",
+                    45 => "HT Capabilities",
+                    48 => "RSN",
+                    50 => "Extended Supported Rates",
+                    61 => "HT Operation",
+                    191 => "VHT Capabilities",
+                    192 => "VHT Operation",
+                    221 => "Vendor Specific",
+                    _ => $"Information Element {id}"
+                };
+                var key = name;
+                var duplicate = 2;
+                while (fields.ContainsKey(key)) key = $"{name} #{duplicate++}";
+                fields[key] = id == 0
+                    ? (value.Length == 0 ? "<hidden>" : Encoding.UTF8.GetString(value))
+                    : BitConverter.ToString(value).Replace("-", " ");
+            }
+            return fields;
+        }
+
+        private static Dictionary<string, string> ExtractEapolFields(byte[] bytes, int offset)
+        {
+            var fields = new Dictionary<string, string>();
+            if (offset + 4 > bytes.Length) return fields;
+            fields["EAPOL Version"] = bytes[offset].ToString();
+            fields["EAPOL Type"] = bytes[offset + 1].ToString();
+            fields["EAPOL Length"] = ((bytes[offset + 2] << 8) | bytes[offset + 3]).ToString();
+            // The replay counter occupies eight bytes starting at offset + 9.
+            // Do not read partial key headers from a truncated capture record.
+            if (offset + 17 > bytes.Length) return fields;
+            fields["Key Descriptor Type"] = bytes[offset + 4].ToString();
+            var keyInfo = (ushort)((bytes[offset + 5] << 8) | bytes[offset + 6]);
+            fields["Key Information"] = $"0x{keyInfo:X4}";
+            fields["Key Length"] = ((bytes[offset + 7] << 8) | bytes[offset + 8]).ToString();
+            fields["Replay Counter"] = BitConverter.ToUInt64(bytes.Skip(offset + 9).Take(8).Reverse().ToArray(), 0).ToString();
+            if (offset + 49 <= bytes.Length) fields["Nonce"] = BitConverter.ToString(bytes, offset + 17, 32).Replace("-", "");
+            if (offset + 97 <= bytes.Length) fields["MIC"] = BitConverter.ToString(bytes, offset + 81, 16).Replace("-", "");
+            return fields;
         }
 
         private string DissectEapolFrame(

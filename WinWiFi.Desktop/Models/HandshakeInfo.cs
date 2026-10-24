@@ -93,6 +93,10 @@ namespace WinWiFi.Models
         public string RawBytesHex { get; set; } = string.Empty;
         public string RawBytesAscii { get; set; } = string.Empty;
         public string ExpertInfo { get; set; } = string.Empty;
+        // Parsed directly from this frame's management IEs / EAPOL key payload.
+        // Empty dictionaries mean the corresponding bytes were not present.
+        public Dictionary<string, string> InformationElements { get; set; } = new();
+        public Dictionary<string, string> EapolFields { get; set; } = new();
     }
 
     public class WifiAdapter
