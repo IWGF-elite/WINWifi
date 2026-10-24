@@ -311,6 +311,27 @@ export default function App() {
     };
   }, [bridgeClient, db, threatEngine]);
 
+  // Association state is independent from radio scanning. Poll it separately
+  // so a Windows roam or disconnect immediately removes stale Connected badges.
+  useEffect(() => {
+    if (bridgeState !== 'CONNECTED' || !selectedAdapterId) {
+      setConnectedBssid('');
+      return;
+    }
+    let disposed = false;
+    const refreshConnection = async () => {
+      try {
+        const connection = await bridgeClient.getConnectionStatus(selectedAdapterId);
+        if (!disposed) setConnectedBssid(connection.state === 'Connected' ? connection.bssid : '');
+      } catch {
+        if (!disposed) setConnectedBssid('');
+      }
+    };
+    void refreshConnection();
+    const timer = window.setInterval(() => void refreshConnection(), 2500);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [bridgeClient, bridgeState, selectedAdapterId]);
+
   // Handshakes list
   const handshakes: HandshakeInfo[] = accessPoints
     .map((a) => a.handshake)

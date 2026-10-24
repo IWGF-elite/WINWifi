@@ -460,7 +460,7 @@ namespace WinWiFi.Services
                                 }
                                 else if (result == NativeWifi.ERROR_INVALID_PARAMETER)
                                 {
-                                    UpdateTelemetryState(ScanTelemetryState.AdapterUnavailable, $"Adapter {adapterId} not found or disconnected.");
+                                    UpdateTelemetryState(ScanTelemetryState.AdapterUnavailable, $"Adapter {adapterId} is unavailable. A normal Wi-Fi network disconnect does not stop scanning; check that the adapter and its radio are enabled.");
                                 }
                             }
                         }
