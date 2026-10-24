@@ -176,6 +176,10 @@ export default function App() {
   });
   const [packets, setPackets] = useState<PcapPacket[]>([]);
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
+  // A visual row/focus selection is not permission to open the inspection drawer.
+  // The drawer receives its own state and is changed only by NetworkDiscovery's
+  // explicit Inspect button.
+  const [inspectedBssid, setInspectedBssid] = useState<string | null>(null);
 
   // Threats & Incidents
   const [incidents, setIncidents] = useState<IncidentRecord[]>(() => {
@@ -268,11 +272,6 @@ export default function App() {
         setDataSourceProfile('LIVE_WINDOWS');
         setLastLiveDataAt(Date.now());
         setActiveSourceLabel(`Windows WLAN bridge (${resolvedAps.length} access points)`);
-        if (resolvedAps.length > 0) {
-          setSelectedBssid((current) => resolvedAps.some(ap => ap.bssid === current) ? current : resolvedAps[0]?.bssid ?? null);
-        } else {
-          setSelectedBssid(null);
-        }
         const count = resolvedAps.length;
         const log = db.appendLog({
           level: count > 0 ? 'SUCCESS' : 'INFO',
@@ -337,7 +336,15 @@ export default function App() {
 
   // Active Project & Selected AP
   const currentProject = projects.find((p) => p.id === currentProjectId) || projects[0];
-  const selectedAp = accessPoints.find((a) => a.bssid === selectedBssid) || null;
+  const selectedAp = accessPoints.find((a) => a.bssid === inspectedBssid) || null;
+
+  // A background scan may remove an AP. Closing an invalid drawer is safe, but
+  // never retain its BSSID to reopen the drawer if that AP later reappears.
+  useEffect(() => {
+    if (inspectedBssid && !accessPoints.some(ap => ap.bssid === inspectedBssid)) {
+      setInspectedBssid(null);
+    }
+  }, [accessPoints, inspectedBssid]);
 
   // Toggle Dark mode
   const handleToggleDarkMode = () => {
@@ -411,7 +418,6 @@ export default function App() {
       setLastLiveDataAt(result.accessPoints.length ? Date.now() : null);
       setActiveSourceLabel(resolvedAps.length ? `Windows WLAN bridge (${resolvedAps.length} access points)` : 'Windows bridge connected; no WLAN observations returned');
       if (resolvedAps.length) db.saveAccessPoints(currentProjectId, resolvedAps);
-      setSelectedBssid(resolvedAps[0]?.bssid ?? null);
       const log = db.appendLog({
         level: result.count > 0 ? 'SUCCESS' : 'INFO', source: 'BRIDGE_REFRESH',
         message: `Windows WLAN refresh completed (${result.count} access points returned).`,
@@ -465,6 +471,9 @@ export default function App() {
     db.saveAccessPoints(currentProjectId, taggedAps);
     setDataSourceProfile('REAL_PCAP');
     setActiveSourceLabel(`${filename} (${result.packets.length} pkts)`);
+    // Import replaces the data set. It must never carry an open drawer over to
+    // a coincidentally matching BSSID in the new capture.
+    setInspectedBssid(null);
     if (taggedAps.length > 0) {
       setSelectedBssid(taggedAps[0].bssid);
     }
@@ -521,6 +530,7 @@ export default function App() {
     db.saveAccessPoints(currentProjectId, taggedAps);
     setDataSourceProfile('REAL_NETSH');
     setActiveSourceLabel(`Windows Netsh (${taggedAps.length} APs)`);
+    setInspectedBssid(null);
     if (taggedAps.length > 0) {
       setSelectedBssid(taggedAps[0].bssid);
     }
@@ -544,6 +554,7 @@ export default function App() {
     setPackets(engine.generatePackets(benchmarkAps));
     setDataSourceProfile('BENCHMARK');
     setActiveSourceLabel('NIST SP 800-153 Reference (4 APs)');
+    setInspectedBssid(null);
     setSelectedBssid('F8:1A:67:8B:11:02');
 
     const log = db.appendLog({
@@ -565,6 +576,7 @@ export default function App() {
     setPackets(engine.generatePackets(taggedAps));
     setDataSourceProfile('TRAINING');
     setActiveSourceLabel(`Lab: ${scenario.title}`);
+    setInspectedBssid(null);
     setSelectedBssid(taggedAps[0]?.bssid || null);
     handleNavigate('dashboard');
 
@@ -682,6 +694,7 @@ export default function App() {
     setAccessPoints([]);
     setPackets([]);
     setSelectedBssid(null);
+    setInspectedBssid(null);
     setDataSourceProfile('OFFLINE');
 
     const log = db.appendLog({
@@ -715,6 +728,7 @@ export default function App() {
       setAccessPoints(nextAps);
       setPackets([]);
       setSelectedBssid(null);
+      setInspectedBssid(null);
       setDataSourceProfile('OFFLINE');
       setActiveSourceLabel(nextAps.length ? `Saved snapshot (${nextAps.length} access points)` : 'No saved network data in this project');
     }
@@ -1072,7 +1086,11 @@ export default function App() {
               <NetworkDiscovery
                 accessPoints={accessPoints}
                 selectedBssid={selectedBssid}
-                onSelectAp={(bssid) => setSelectedBssid(bssid)}
+                onSelectAp={(bssid) => {
+                  // This callback is invoked only by NetworkDiscovery's Inspect button.
+                  setSelectedBssid(bssid);
+                  setInspectedBssid(bssid);
+                }}
                 onCaptureHandshake={handleCaptureHandshake}
                 dataSourceProfile={dataSourceProfile}
                 activeSourceLabel={activeSourceLabel}
@@ -1089,7 +1107,7 @@ export default function App() {
             {selectedAp && (
               <NetworkDetailPanel
                 ap={selectedAp}
-                onClose={() => setSelectedBssid(null)}
+                onClose={() => setInspectedBssid(null)}
                 onCaptureHandshake={handleCaptureHandshake}
                 isDarkMode={isDarkMode}
                 dataSourceProfile={dataSourceProfile}
@@ -1198,6 +1216,7 @@ export default function App() {
               setAccessPoints(projectAps);
               setPackets([]);
               setSelectedBssid(null);
+              setInspectedBssid(null);
               setDataSourceProfile('OFFLINE');
               setActiveSourceLabel(projectAps.length > 0 ? `Saved snapshot (${projectAps.length} access points)` : 'No saved network data in this project');
             }}
