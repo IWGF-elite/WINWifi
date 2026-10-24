@@ -257,23 +257,21 @@ export default function App() {
       if (Array.isArray(liveAps)) {
         const projectId = currentProjectIdRef.current;
         const resolvedAps = applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId));
-        if (resolvedAps.length > 0) {
-          setAccessPoints(resolvedAps);
-          setIncidents(previous => {
-            const live = [...mapAccessPointIssuesToIncidents(resolvedAps), ...previous.filter(i => !i.id.startsWith('NATIVE-AP-'))];
-            threatEngine.setIncidents(live);
-            db.saveIncidents(live);
-            return live;
-          });
-          db.saveAccessPoints(projectId, resolvedAps);
-          setDataSourceProfile('LIVE_WINDOWS');
-          setLastLiveDataAt(Date.now());
-          setActiveSourceLabel(`Windows WLAN bridge (${resolvedAps.length} access points)`);
-        }
-        // Keep the last successful result visible when Windows temporarily
-        // returns an empty cache during a radio refresh.
+        setAccessPoints(resolvedAps);
+        setIncidents(previous => {
+          const live = [...mapAccessPointIssuesToIncidents(resolvedAps), ...previous.filter(i => !i.id.startsWith('NATIVE-AP-'))];
+          threatEngine.setIncidents(live);
+          db.saveIncidents(live);
+          return live;
+        });
+        db.saveAccessPoints(projectId, resolvedAps);
+        setDataSourceProfile('LIVE_WINDOWS');
+        setLastLiveDataAt(Date.now());
+        setActiveSourceLabel(`Windows WLAN bridge (${resolvedAps.length} access points)`);
         if (resolvedAps.length > 0) {
           setSelectedBssid((current) => resolvedAps.some(ap => ap.bssid === current) ? current : resolvedAps[0]?.bssid ?? null);
+        } else {
+          setSelectedBssid(null);
         }
         const count = resolvedAps.length;
         const log = db.appendLog({
@@ -1110,7 +1108,6 @@ export default function App() {
             uiMode={uiMode}
             dataSourceProfile={dataSourceProfile}
             onOpenImport={() => setShowImportModal(true)}
-            onSwitchToTraining={handleLoadBenchmark}
             onSelectAP={(ap) => {
               setSelectedBssid(ap.bssid);
               handleNavigate('networks');
@@ -1282,6 +1279,7 @@ export default function App() {
         <ArchitectureModal
           onClose={() => setShowArchitectureModal(false)}
           isDarkMode={isDarkMode}
+          bridgeStatus={bridgeStatus}
         />
       )}
 

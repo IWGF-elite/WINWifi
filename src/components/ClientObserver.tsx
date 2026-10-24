@@ -13,7 +13,6 @@ import {
   Lock,
   AlertCircle,
   FileCode,
-  Sparkles,
   Info,
   Download
 } from 'lucide-react';
@@ -25,7 +24,6 @@ interface ClientObserverProps {
   dataSourceProfile?: DataSourceProfile;
   onSelectAP: (ap: AccessPoint) => void;
   onOpenImport?: () => void;
-  onSwitchToTraining?: () => void;
 }
 
 export const ClientObserver: React.FC<ClientObserverProps> = ({
@@ -33,8 +31,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
   uiMode,
   dataSourceProfile = 'BENCHMARK',
   onSelectAP,
-  onOpenImport,
-  onSwitchToTraining
+  onOpenImport
 }) => {
   const [search, setSearch] = useState('');
   const [selectedBssid, setSelectedBssid] = useState<string>('all');
@@ -79,7 +76,6 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
 
   const isLiveMode = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
   const isPcap = dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED';
-  const isTraining = dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB' || dataSourceProfile === 'TRAINING';
 
   return (
     <div className="space-y-5 pb-8">
@@ -110,15 +106,6 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
                     <span>Import PCAP/PCAPNG Forensics</span>
                   </button>
                 )}
-                {onSwitchToTraining && (
-                  <button
-                    onClick={onSwitchToTraining}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-semibold flex items-center gap-1.5 transition-all text-xs"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                    <span>View Offline Training Baseline</span>
-                  </button>
-                )}
               </div>
             </div>
           </div>
@@ -131,16 +118,6 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
           </div>
           <span className="px-2 py-0.5 rounded bg-emerald-500/20 font-mono text-[10px] font-bold">
             VERIFIED FORENSIC DATA
-          </span>
-        </div>
-      ) : isTraining ? (
-        <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 text-xs text-purple-300 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-purple-400" />
-            <span className="font-semibold">Training Mode / Lab Scenario: Displaying synthetic client baseline for offline educational demonstration.</span>
-          </div>
-          <span className="px-2 py-0.5 rounded bg-purple-500/20 font-mono text-[10px] font-bold">
-            TRAINING LAB DATA
           </span>
         </div>
       ) : null}

@@ -191,6 +191,16 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
     );
   };
 
+  const lastSeenLabel = (ap: AccessPoint) => {
+    const raw = ap.lastSeenTime || ap.lastSeen;
+    const timestamp = raw ? Date.parse(raw.replace(' ', 'T') + (raw.includes('Z') ? '' : 'Z')) : NaN;
+    if (Number.isNaN(timestamp)) return ap.lastSeen || 'Last seen unknown';
+    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (seconds < 2) return 'Last seen now';
+    if (seconds < 60) return `Last seen ${seconds}s ago`;
+    return `Last seen ${Math.floor(seconds / 60)}m ago`;
+  };
+
   const getScoreBadge = (risk: number) => {
     if (risk >= 75) {
       return (
@@ -561,7 +571,11 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
 
                     {/* BSSID */}
                     <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
-                      {ap.bssid}
+                      <div>{ap.bssid}</div>
+                      <div className={`mt-0.5 font-sans text-[10px] ${ap.isActiveInCurrentScan === false ? 'text-amber-400' : 'text-slate-500'}`}>
+                        {lastSeenLabel(ap)}
+                        {ap.isActiveInCurrentScan === false ? ` · missed ${ap.disappearedScanCycles || 1}/${3}` : ''}
+                      </div>
                     </td>
 
                     {/* RSSI */}

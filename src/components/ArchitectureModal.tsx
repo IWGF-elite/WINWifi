@@ -12,18 +12,27 @@ import {
   Terminal,
   ExternalLink
 } from 'lucide-react';
-import { WifiEngine, SystemCapabilities } from '../services/wifiEngine';
+import { BridgeHealthStatus } from '../types';
 
 interface ArchitectureModalProps {
   onClose: () => void;
   isDarkMode: boolean;
+  bridgeStatus: BridgeHealthStatus | null;
 }
 
 export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({
   onClose,
   isDarkMode,
+  bridgeStatus,
 }) => {
-  const caps = WifiEngine.getInstance().getSystemCapabilities();
+  const caps = bridgeStatus?.capabilities;
+  const nativeWlanActive = caps?.nativeWlanAvailable === true;
+  const monitorActive = caps?.monitorModeSupported === true;
+  const sqliteActive = caps?.sqliteAvailable === true;
+  const parserActive = caps?.eapolParserAvailable === true;
+  const StatusIcon = ({ active }: { active: boolean }) => active
+    ? <CheckCircle2 className="w-4 h-4" />
+    : <XCircle className="w-4 h-4" />;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
@@ -40,7 +49,7 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-bold">Runtime Architecture &amp; Capability Boundaries</h2>
-              <p className="text-xs text-slate-400">Windows Hardware API vs. Web Container Security Sandbox</p>
+              <p className="text-xs text-slate-400">Measured from the active local C# bridge and selected Wi-Fi adapter</p>
             </div>
           </div>
           <button
@@ -60,11 +69,11 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="font-semibold text-slate-300">Active Execution Environment:</span>
               <span className="px-2 py-0.5 rounded font-mono text-[11px] bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                {caps.environment}
+                {bridgeStatus?.engine || 'Bridge status unavailable'}
               </span>
             </div>
             <p className="text-slate-400 leading-relaxed text-[11px]">
-              The application runs within a sandboxed Chromium DOM environment. Standard web security specifications isolate browser processes from kernel-level Windows drivers and native Win32 dynamic link libraries (<code className="text-blue-400">wlanapi.dll</code>).
+              The dashboard runs in WebView2, while the local .NET bridge performs native WLAN, SQLite, and PCAP work. Statuses below come from a live native capability probe instead of browser-sandbox assumptions.
             </p>
           </div>
 
@@ -76,61 +85,61 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({
             }`}>
               {/* Row 1: Direct wlanapi.dll */}
               <div className="p-3 flex items-start gap-3">
-                <div className="p-1 rounded bg-red-500/10 text-red-400 mt-0.5">
-                  <XCircle className="w-4 h-4" />
+                <div className={`p-1 rounded mt-0.5 ${nativeWlanActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                  <StatusIcon active={nativeWlanActive} />
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center justify-between font-semibold">
+                  <div className={`flex items-center justify-between font-semibold ${nativeWlanActive ? 'text-emerald-300' : ''}`}>
                     <span>Direct Windows WLAN API (wlanapi.dll)</span>
-                    <span className="text-[10px] text-red-400 uppercase font-mono">Isolated / Unavailable</span>
+                    <span className={`text-[10px] uppercase font-mono ${nativeWlanActive ? 'text-emerald-400' : 'text-red-400'}`}>{nativeWlanActive ? 'Active via C# bridge' : 'Unavailable'}</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    {caps.nativeWlanApiReason}
+                    {caps?.nativeWlanReason || 'The local bridge has not reported a native capability result yet.'}
                   </p>
                 </div>
               </div>
 
-              {/* Row 2: NDIS Monitor Mode */}
+              {/* Row 2: passive Npcap monitor mode */}
               <div className="p-3 flex items-start gap-3">
-                <div className="p-1 rounded bg-red-500/10 text-red-400 mt-0.5">
-                  <XCircle className="w-4 h-4" />
+                <div className={`p-1 rounded mt-0.5 ${monitorActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                  <StatusIcon active={monitorActive} />
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center justify-between font-semibold">
-                    <span>Raw NDIS 6.x Monitor Mode &amp; Frame Injection</span>
-                    <span className="text-[10px] text-red-400 uppercase font-mono">Kernel Restricted</span>
+                  <div className={`flex items-center justify-between font-semibold ${monitorActive ? 'text-emerald-300' : ''}`}>
+                    <span>Npcap Passive 802.11 Monitor Mode</span>
+                    <span className={`text-[10px] uppercase font-mono ${monitorActive ? 'text-emerald-400' : 'text-amber-400'}`}>{monitorActive ? 'Available' : caps?.npcapInstalled ? 'Adapter unsupported' : 'Npcap required'}</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    {caps.ndisMonitorModeReason}
+                    {caps?.monitorModeReason || 'The local bridge has not run the Npcap probe yet.'}
                   </p>
                 </div>
               </div>
 
               {/* Row 3: PCAP Parser */}
               <div className="p-3 flex items-start gap-3">
-                <div className="p-1 rounded bg-emerald-500/10 text-emerald-400 mt-0.5">
-                  <CheckCircle2 className="w-4 h-4" />
+                <div className={`p-1 rounded mt-0.5 ${parserActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                  <StatusIcon active={parserActive} />
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center justify-between font-semibold text-emerald-300">
+                  <div className={`flex items-center justify-between font-semibold ${parserActive ? 'text-emerald-300' : ''}`}>
                     <span>Libpcap 2.4 &amp; Radiotap Binary Dissector</span>
-                    <span className="text-[10px] text-emerald-400 uppercase font-mono">Fully Functional</span>
+                    <span className={`text-[10px] uppercase font-mono ${parserActive ? 'text-emerald-400' : 'text-red-400'}`}>{parserActive ? 'Active in C# bridge' : 'Unavailable'}</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Direct binary parsing of raw .pcap and .cap files from Wireshark, Aircrack-ng, or TCPdump. Decodes IEEE 802.11 frames, RSSI, channels, and EAPOL handshakes without third-party dependencies.
+                    {caps?.eapolParserReason || 'Awaiting native bridge capability status.'}
                   </p>
                 </div>
               </div>
 
               {/* Row 4: Netsh CLI Ingest */}
               <div className="p-3 flex items-start gap-3">
-                <div className="p-1 rounded bg-emerald-500/10 text-emerald-400 mt-0.5">
-                  <CheckCircle2 className="w-4 h-4" />
+                <div className={`p-1 rounded mt-0.5 ${sqliteActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                  <StatusIcon active={sqliteActive} />
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center justify-between font-semibold text-emerald-300">
+                  <div className={`flex items-center justify-between font-semibold ${sqliteActive ? 'text-emerald-300' : ''}`}>
                     <span>Windows Netsh CLI Live Importer</span>
-                    <span className="text-[10px] text-emerald-400 uppercase font-mono">Fully Functional</span>
+                    <span className={`text-[10px] uppercase font-mono ${sqliteActive ? 'text-emerald-400' : 'text-red-400'}`}>{sqliteActive ? 'Active in C# bridge' : 'Unavailable'}</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
                     Directly ingests real live wireless data from Windows command prompt (<code className="text-blue-400">netsh wlan show networks mode=bssid</code>) without needing special driver privileges.
@@ -149,7 +158,7 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({
                     <span className="text-[10px] text-emerald-400 uppercase font-mono">Fully Functional</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Full relational schemas for audit projects, discovered access points, EAPOL handshakes, and event logs with real SQL SELECT/WHERE/ORDER query execution and .SQL export.
+                    {caps?.sqliteReason || 'Awaiting native bridge capability status.'}
                   </p>
                 </div>
               </div>

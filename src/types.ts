@@ -145,6 +145,9 @@ export interface AccessPoint {
   dataPacketCount: number;
   firstSeen: string;
   lastSeen: string;
+  lastSeenTime?: string;
+  isActiveInCurrentScan?: boolean;
+  disappearedScanCycles?: number;
   standard: '802.11b/g' | '802.11n (Wi-Fi 4)' | '802.11ac (Wi-Fi 5)' | '802.11ax (Wi-Fi 6)' | '802.11be (Wi-Fi 7)';
   clients: ClientDevice[];
   handshake?: HandshakeInfo;
@@ -382,10 +385,23 @@ export interface BridgeHealthStatus {
   activeAdapterId?: string;
   activeAdapterName?: string;
   isScanning?: boolean;
+  backgroundScanIntervalSeconds?: number;
   scanCyclesCompleted: number;
   accessPointsCount: number;
   incidentsCount: number;
   timestampUtc: string;
+  capabilities?: {
+    nativeWlanAvailable: boolean;
+    nativeWlanReason: string;
+    sqliteAvailable: boolean;
+    sqliteReason: string;
+    eapolParserAvailable: boolean;
+    eapolParserReason: string;
+    npcapInstalled: boolean;
+    monitorModeSupported: boolean;
+    monitorModeReason: string;
+    captureDevice?: string;
+  };
 }
 
 export interface BridgeScanStatus {

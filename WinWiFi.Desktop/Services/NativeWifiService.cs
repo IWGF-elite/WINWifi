@@ -197,6 +197,7 @@ namespace WinWiFi.Services
                                 {
                                     var info = Marshal.PtrToStructure<WLAN_INTERFACE_INFO>(currentPtr);
 
+                                    var monitor = NpcapMonitorCapability.ProbeAdapter(info.strInterfaceDescription);
                                     adapters.Add(new WifiAdapter
                                     {
                                         Id = info.InterfaceGuid.ToString(),
@@ -205,7 +206,7 @@ namespace WinWiFi.Services
                                         Description = $"{info.strInterfaceDescription} (Windows NDIS / WlanApi)",
                                         Status = info.isState.ToString().Replace("wlan_interface_state_", ""),
                                         SupportedBands = new List<string>(),
-                                        MonitorModeSupported = false,
+                                        MonitorModeSupported = monitor.MonitorModeSupported,
                                         PacketInjectionSupported = false,
                                         CurrentChannel = 0,
                                         IsChannelHopping = false,

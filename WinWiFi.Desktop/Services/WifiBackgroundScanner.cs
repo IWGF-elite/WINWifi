@@ -13,7 +13,9 @@ namespace WinWiFi.Services;
 /// <summary>Requests a normal Windows WLAN scan and then reads the BSS list at a bounded cadence. It does not use monitor mode, capture frames, hop channels, or inject packets.</summary>
 public sealed class WifiBackgroundScanner : BackgroundService
 {
-    public const int MinimumIntervalSeconds = 30;
+    // WlanScan is asynchronous. A three-second cadence gives Windows a bounded
+    // chance to refresh the BSS cache while promptly expiring APs that vanish.
+    public const int MinimumIntervalSeconds = 3;
     private readonly INativeWifiService _wifiService;
     private readonly SecurityAnalyzer _securityAnalyzer;
     private readonly SqliteStorageService? _storageService;
@@ -89,27 +91,30 @@ public sealed class WifiBackgroundScanner : BackgroundService
                 await Task.Delay(Interval, stoppingToken);
                 continue;
             }
+            var timer = Stopwatch.StartNew();
             try
             {
                 _scanCycle++;
                 SetState(ScanTelemetryState.Scanning);
                 LastError = null;
-                var timer = Stopwatch.StartNew();
                 // WlanGetNetworkBssList only returns Windows' last cache. Ask the
                 // OS to update that cache first so nearby networks are not hidden
                 // until another application happens to scan.
                 await _wifiService.TriggerHardwareScanAsync(_activeAdapterId, stoppingToken);
-                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
                 var batch = await _wifiService.ScanNetworksExAsync(_activeAdapterId, stoppingToken);
                 timer.Stop();
                 var networks = batch.AccessPoints;
+                // Emit every completed real scan, including an empty BSS list.
+                // The bridge uses this to age out APs that have disappeared.
+                _securityAnalyzer.DetectRogueAccessPoints(networks);
+                NetworksDiscovered?.Invoke(networks);
                 if (networks.Count == 0)
                 {
                     SetState(ScanTelemetryState.NoNetworksFound);
                 }
                 else
                 {
-                    _securityAnalyzer.DetectRogueAccessPoints(networks);
                     if (_storageService is not null)
                     {
                         await _storageService.SaveAccessPointsAsync("proj-default", networks);
@@ -117,7 +122,6 @@ public sealed class WifiBackgroundScanner : BackgroundService
                     }
                     var dominantChannel = networks.GroupBy(network => network.Channel).OrderByDescending(group => group.Count()).FirstOrDefault()?.Key ?? 0;
                     if (dominantChannel > 0) ChannelHopped?.Invoke(dominantChannel);
-                    NetworksDiscovered?.Invoke(networks);
                     SetState(ScanTelemetryState.Idle);
                 }
                 ScanCycleCompleted?.Invoke(new ScanCycleStats { CycleNumber = _scanCycle, NetworksDiscoveredCount = networks.Count, Timestamp = DateTime.UtcNow, DurationMs = (int)timer.ElapsedMilliseconds, State = _state });
@@ -129,7 +133,12 @@ public sealed class WifiBackgroundScanner : BackgroundService
                 Debug.WriteLine($"[WifiBackgroundScanner] telemetry cycle error: {exception.Message}");
                 SetState(ScanTelemetryState.Error);
             }
-            await Task.Delay(Interval, stoppingToken);
+            timer.Stop();
+            // Keep the start of each hardware scan close to the configured cadence
+            // rather than adding a full interval after the scan dwell completes.
+            var remaining = Interval - timer.Elapsed;
+            if (remaining > TimeSpan.Zero)
+                await Task.Delay(remaining, stoppingToken);
         }
         SetState(ScanTelemetryState.Idle);
     }

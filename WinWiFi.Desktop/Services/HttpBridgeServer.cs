@@ -62,6 +62,7 @@ namespace WinWiFi.Services
         private int _scanCycleCount = 0;
         private DateTime _lastRefreshUtc = DateTime.MinValue;
         private static readonly TimeSpan MinimumRefreshInterval = TimeSpan.FromSeconds(10);
+        private const int MissingScanLimit = 3;
 
         public HttpBridgeServer(
             int port = 38989,
@@ -117,8 +118,8 @@ namespace WinWiFi.Services
 
         private void OnNetworksDiscovered(List<AccessPoint> aps)
         {
-            _latestAccessPoints = aps;
-            var threats = AnalyzeCurrentScan(aps);
+            _latestAccessPoints = ReconcileLiveAccessPoints(aps);
+            var threats = AnalyzeCurrentScan(_latestAccessPoints.Where(ap => ap.IsActiveInCurrentScan).ToList());
             _latestIncidents = threats.Findings;
 
             // Broadcast to SSE clients
@@ -126,10 +127,46 @@ namespace WinWiFi.Services
             {
                 cycle = _scanCycleCount,
                 timestamp = DateTime.UtcNow,
-                accessPointsCount = aps.Count,
-                accessPoints = aps,
+                accessPointsCount = _latestAccessPoints.Count,
+                accessPoints = _latestAccessPoints,
                 incidents = _latestIncidents
             });
+        }
+
+        // A BSSID must be present in every fresh WLAN scan. Retain a missed BSSID
+        // for only two cycles so the grid can show its age, then remove it on the
+        // third miss instead of leaving a powered-off AP visible indefinitely.
+        private List<AccessPoint> ReconcileLiveAccessPoints(List<AccessPoint> observed)
+        {
+            var now = DateTime.UtcNow;
+            var prior = _latestAccessPoints.ToDictionary(ap => ap.Bssid, StringComparer.OrdinalIgnoreCase);
+            var next = new List<AccessPoint>(observed.Count + prior.Count);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var ap in observed.Where(ap => !string.IsNullOrWhiteSpace(ap.Bssid)))
+            {
+                seen.Add(ap.Bssid);
+                if (prior.TryGetValue(ap.Bssid, out var previous))
+                {
+                    ap.FirstSeen = string.IsNullOrWhiteSpace(previous.FirstSeen) ? ap.FirstSeen : previous.FirstSeen;
+                    ap.RssiHistory = previous.RssiHistory;
+                    ap.SignalQualityHistory = previous.SignalQualityHistory;
+                }
+                ap.LastSeenTime = now;
+                ap.LastSeen = now.ToString("yyyy-MM-dd HH:mm:ss");
+                ap.IsActiveInCurrentScan = true;
+                ap.DisappearedScanCycles = 0;
+                next.Add(ap);
+            }
+
+            foreach (var previous in _latestAccessPoints.Where(ap => !string.IsNullOrWhiteSpace(ap.Bssid) && !seen.Contains(ap.Bssid)))
+            {
+                previous.IsActiveInCurrentScan = false;
+                previous.DisappearedScanCycles++;
+                if (previous.DisappearedScanCycles < MissingScanLimit)
+                    next.Add(previous);
+            }
+            return next;
         }
 
         private ThreatAnalysisResult AnalyzeCurrentScan(List<AccessPoint> aps)
@@ -172,8 +209,8 @@ namespace WinWiFi.Services
                     var initialAps = await _wifiService.ScanNetworksAsync(_activeAdapterId, _cts.Token);
                     if (initialAps.Count > 0)
                     {
-                        _latestAccessPoints = initialAps;
-                        var initialThreats = AnalyzeCurrentScan(initialAps);
+                        _latestAccessPoints = ReconcileLiveAccessPoints(initialAps);
+                        var initialThreats = AnalyzeCurrentScan(_latestAccessPoints);
                         _latestIncidents = initialThreats.Findings;
                     }
                 }
@@ -413,6 +450,7 @@ namespace WinWiFi.Services
         private async Task HandleStatusAsync(HttpListenerResponse response)
         {
             bool isNativeWlan = _wifiService.IsNativeWifiAvailable();
+            var monitor = NpcapMonitorCapability.ProbeAdapter(_wifiService.GetDiagnostics().ActiveAdapterName ?? string.Empty);
             var status = new
             {
                 status = "online",
@@ -426,7 +464,21 @@ namespace WinWiFi.Services
                 activeAdapterId = _activeAdapterId,
                 activeAdapterName = _wifiService.GetDiagnostics().ActiveAdapterName,
                 minimumRefreshIntervalSeconds = (int)MinimumRefreshInterval.TotalSeconds,
-                telemetryMode = "Windows WLAN discovery; no monitor-mode capture or packet injection",
+                backgroundScanIntervalSeconds = (int)_scanner.Interval.TotalSeconds,
+                telemetryMode = monitor.MonitorModeSupported ? "Windows WLAN discovery with Npcap passive monitor mode available; packet injection is disabled" : "Windows WLAN discovery; passive monitor capture unavailable on the active adapter; packet injection is disabled",
+                capabilities = new
+                {
+                    nativeWlanAvailable = isNativeWlan,
+                    nativeWlanReason = isNativeWlan ? "The C# bridge is using wlanapi.dll for live scans and connection status." : "Windows WLAN API could not be opened.",
+                    sqliteAvailable = true,
+                    sqliteReason = "The C# bridge persists scan observations and audit data through Microsoft.Data.Sqlite.",
+                    eapolParserAvailable = true,
+                    eapolParserReason = "The native PCAP dissector is available for imported PCAP/PCAPNG evidence.",
+                    npcapInstalled = monitor.NpcapInstalled,
+                    monitorModeSupported = monitor.MonitorModeSupported,
+                    monitorModeReason = monitor.Reason,
+                    captureDevice = monitor.DeviceName
+                },
                 scanCyclesCompleted = _scanCycleCount,
                 accessPointsCount = _latestAccessPoints.Count,
                 incidentsCount = _latestIncidents.Count,
@@ -556,8 +608,8 @@ namespace WinWiFi.Services
             List<AccessPoint> aps = await _wifiService.ScanNetworksAsync(_activeAdapterId);
             _lastRefreshUtc = DateTime.UtcNow;
 
-            _latestAccessPoints = aps;
-            var threats = AnalyzeCurrentScan(aps);
+            _latestAccessPoints = ReconcileLiveAccessPoints(aps);
+            var threats = AnalyzeCurrentScan(_latestAccessPoints.Where(ap => ap.IsActiveInCurrentScan).ToList());
             _latestIncidents = threats.Findings;
             _scanCycleCount++;
 
@@ -580,12 +632,12 @@ namespace WinWiFi.Services
             {
                 cycle = _scanCycleCount,
                 timestamp = DateTime.UtcNow,
-                accessPointsCount = aps.Count,
-                accessPoints = aps,
+                accessPointsCount = _latestAccessPoints.Count,
+                accessPoints = _latestAccessPoints,
                 incidents = _latestIncidents
             });
 
-            await WriteJsonAsync(response, new { message = "Scan complete", count = aps.Count, accessPoints = aps, incidents = _latestIncidents });
+            await WriteJsonAsync(response, new { message = "Scan complete", count = _latestAccessPoints.Count, accessPoints = _latestAccessPoints, incidents = _latestIncidents });
         }
 
         private async Task HandleScanStartAsync(HttpListenerRequest request, HttpListenerResponse response)
