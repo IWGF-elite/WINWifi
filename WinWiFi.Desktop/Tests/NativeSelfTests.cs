@@ -723,6 +723,34 @@ SSID 2 : Guest-Open
             }));
 #endif
 
+            results.Add(RunTest("T19-NATIVE-RSN-PRESERVATION", "Native RSN Evidence Survives Netsh Reconciliation", () =>
+            {
+                var native = new AccessPoint
+                {
+                    Bssid = "00:11:22:33:44:55",
+                    Security = "WPA2-PSK",
+                    Cipher = "CCMP",
+                    PmfInformationAvailable = true,
+                    PmfRequired = false,
+                    SecurityScore = 90,
+                    RiskScore = 10,
+                    RiskFactors = new List<RiskFactor> { new() { Name = "PMF disabled", Points = 10 } }
+                };
+                var netsh = new AccessPoint
+                {
+                    Bssid = native.Bssid,
+                    Security = "WPA2-Personal",
+                    SecurityScore = 100,
+                    RiskScore = 0
+                };
+                var onlyNetsh = new AccessPoint { Bssid = "00:11:22:33:44:66", Ssid = "Extra visible BSSID" };
+                var merged = NativeWifiService.MergeWindowsScanResults(new List<AccessPoint> { native }, new List<AccessPoint> { netsh, onlyNetsh });
+                var result = merged.First(ap => ap.Bssid == native.Bssid);
+                if (merged.Count != 2 || result.RiskScore != 10 || !result.PmfInformationAvailable || result.RiskFactors.Count != 1)
+                    throw new Exception("Netsh reconciliation replaced native RSN, PMF, or risk-factor evidence.");
+                return "Native PMF and weighted risk evidence remain authoritative while netsh-only BSSIDs are retained.";
+            }));
+
             return results;
         }
 

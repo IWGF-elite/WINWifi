@@ -492,6 +492,15 @@ export class NativeBridgeClient {
       securityScore: ap.securityScore ?? ap.SecurityScore ?? 100,
       riskScore: ap.riskScore ?? ap.RiskScore ?? 0,
       riskFactors: ap.riskFactors ?? ap.RiskFactors ?? [],
+      // Native .NET names these fields IsWpsEnabled/PmfInformationAvailable.
+      // Map both JSON naming styles instead of allowing missing values to look
+      // like observed disabled settings in the inspection drawer.
+      wpsEnabled: ap.wpsEnabled ?? ap.isWpsEnabled ?? ap.IsWpsEnabled ?? false,
+      wpsLocked: ap.wpsLocked ?? ap.isWpsLocked ?? ap.IsWpsLocked ?? false,
+      wpsVersion: ap.wpsVersion ?? ap.WpsVersion,
+      pmfRequired: ap.pmfRequired ?? ap.PmfRequired ?? false,
+      pmfCapable: ap.pmfCapable ?? ap.PmfCapable ?? false,
+      pmfInformationAvailable: ap.pmfInformationAvailable ?? ap.PmfInformationAvailable ?? false,
       isRogue: ap.isRogue ?? ap.IsRogue ?? false,
       firstSeen: ap.firstSeen || ap.FirstSeen || '',
       lastSeen: ap.lastSeen || ap.LastSeen || '',

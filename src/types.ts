@@ -137,6 +137,8 @@ export interface AccessPoint {
   wpsLocked: boolean;
   wpsVersion?: string;
   pmfRequired: boolean; // Protected Management Frames (802.11w)
+  pmfCapable?: boolean;
+  pmfInformationAvailable?: boolean;
   vendor: string;
   oui?: string;
   beaconCount: number;

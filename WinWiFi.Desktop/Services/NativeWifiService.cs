@@ -376,15 +376,12 @@ namespace WinWiFi.Services
 
                                             accessPoints.Add(ap);
 
-                                            // Advance pointer safely
-                                            long advance = (long)entry.ulIeOffset + (long)entry.ulIeSize;
-                                            if (advance < entryStructSize)
-                                            {
-                                                advance = entryStructSize + (long)entry.ulIeSize;
-                                            }
-                                            if (advance <= 0) break;
-
-                                            currentOffset += advance;
+                                            // WLAN_BSS_LIST contains a contiguous array of fixed-size
+                                            // WLAN_BSS_ENTRY structures. ulIeOffset points from this
+                                            // entry to an IE blob elsewhere in the allocation; it is
+                                            // not part of the next-entry stride. Using it as a stride
+                                            // corrupts every record after the first one.
+                                            currentOffset += entryStructSize;
                                         }
 
                                         nativeScanSucceeded = true;
@@ -474,29 +471,28 @@ namespace WinWiFi.Services
         }
 
         /// <summary>
-        /// Produces one record per BSSID without imposing a result cap. Netsh is
-        /// the authoritative source for the visible-network list. Native records
-        /// only enrich matching entries because some drivers return malformed or
-        /// stale rows from WlanGetNetworkBssList.
+        /// Produces one record per BSSID without imposing a result cap. The
+        /// native BSS record is authoritative for information elements such as
+        /// RSN capabilities, PMF and WPS. Netsh has no equivalent fields, so it
+        /// can only add BSSIDs that the driver omitted; replacing native rows
+        /// here silently erased security evidence and flattened risk scores.
         /// </summary>
-        private static List<AccessPoint> MergeWindowsScanResults(
+        internal static List<AccessPoint> MergeWindowsScanResults(
             List<AccessPoint> nativeAccessPoints,
             List<AccessPoint> netshAccessPoints)
         {
             var merged = new Dictionary<string, AccessPoint>(StringComparer.OrdinalIgnoreCase);
-            foreach (var ap in netshAccessPoints)
+            foreach (var ap in nativeAccessPoints.Where(ap => IsValidBssid(ap.Bssid)))
             {
-                if (!string.IsNullOrWhiteSpace(ap.Bssid))
-                {
-                    merged[ap.Bssid] = ap;
-                }
+                merged[ap.Bssid] = ap;
             }
 
-            // Netsh may be unavailable on a stripped-down Windows image. In that
-            // case retain native output, but only with a valid hardware address.
-            if (merged.Count == 0)
+            // Netsh may report BSSIDs that a particular driver has omitted from
+            // WlanGetNetworkBssList. Keep those entries, while retaining the
+            // native object whenever both sources identify the same BSSID.
+            foreach (var ap in netshAccessPoints.Where(ap => IsValidBssid(ap.Bssid)))
             {
-                foreach (var ap in nativeAccessPoints.Where(ap => IsValidBssid(ap.Bssid)))
+                if (!merged.ContainsKey(ap.Bssid))
                     merged[ap.Bssid] = ap;
             }
 

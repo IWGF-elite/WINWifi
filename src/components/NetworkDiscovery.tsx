@@ -512,8 +512,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                 return (
                   <tr
                     key={ap.bssid}
-                    onClick={() => onSelectAp(ap.bssid)}
-                    className={`cursor-pointer transition-colors duration-150 ${
+                    className={`transition-colors duration-150 ${
                       isSelected
                         ? isDarkMode 
                           ? 'bg-blue-900/25 border-l-2 border-l-blue-500' 

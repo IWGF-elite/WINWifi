@@ -180,11 +180,11 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
           <div className={`p-3 rounded-xl border ${isDarkMode ? 'bg-[#14161d] border-[#252934]' : 'bg-slate-50 border-slate-200'}`}>
             <div className="text-[11px] text-slate-400 font-medium">PMF (802.11w)</div>
-            <div className={`text-sm font-bold mt-1 ${ap.pmfRequired ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {ap.pmfRequired ? 'Enforced' : 'Disabled'}
+            <div className={`text-sm font-bold mt-1 ${!ap.pmfInformationAvailable ? 'text-slate-400' : ap.pmfRequired ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {!ap.pmfInformationAvailable ? 'Not observed' : ap.pmfRequired ? 'Enforced' : ap.pmfCapable ? 'Capable' : 'Disabled'}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
-              {ap.pmfRequired ? 'Protected Mgmt Frames' : 'Vulnerable to Deauth'}
+              {!ap.pmfInformationAvailable ? 'Requires native RSN information elements' : ap.pmfRequired ? 'Protected Mgmt Frames' : 'Not required by this AP'}
             </div>
           </div>
 
