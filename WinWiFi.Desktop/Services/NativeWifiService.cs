@@ -698,12 +698,18 @@ namespace WinWiFi.Services
                             break;
 
                         case 191: // VHT Capabilities (802.11ac)
-                            ap.PhyType = "802.11ac (Wi-Fi 5)";
-                            ap.ChannelWidth = Math.Max(ap.ChannelWidth, 80);
+                            // VHT is a 5/6 GHz capability. Some vendor IE payloads
+                            // resemble VHT on 2.4 GHz frames; do not let those create
+                            // an impossible 80 MHz 2.4 GHz observation.
+                            if (ap.Band != "2.4 GHz")
+                            {
+                                ap.PhyType = "802.11ac (Wi-Fi 5)";
+                                ap.ChannelWidth = Math.Max(ap.ChannelWidth, 80);
+                            }
                             break;
 
                         case 192: // VHT Operation
-                            if (tagLength >= 1)
+                            if (tagLength >= 1 && ap.Band != "2.4 GHz")
                             {
                                 byte vhtWidth = ieBytes[index];
                                 if (vhtWidth == 1) ap.ChannelWidth = Math.Max(ap.ChannelWidth, 80);
@@ -736,6 +742,14 @@ namespace WinWiFi.Services
                     }
 
                     index += tagLength;
+                }
+
+                // The IEEE channel plan limits 2.4 GHz HT operation to 20/40 MHz.
+                // Keep the bridge's normalized field physically valid even when an
+                // AP advertises malformed or vendor-specific capability elements.
+                if (ap.Band == "2.4 GHz")
+                {
+                    ap.ChannelWidth = Math.Min(ap.ChannelWidth, 40);
                 }
             }
             catch (Exception ex)
