@@ -115,6 +115,26 @@ const mapAccessPointIssuesToIncidents = (aps: AccessPoint[]): IncidentRecord[] =
   })
 );
 
+// A historical browser record is not a live security finding. Retain a manual
+// case in the live view only when its BSSID is currently observed and the
+// analyst has explicitly classified that transmitter as a rogue. This prevents
+// stale browser storage from inflating the live incident count after a restart.
+const isCurrentAnalystCase = (incident: IncidentRecord, aps: AccessPoint[]): boolean => {
+  if (incident.id.startsWith('NATIVE-') || !incident.bssidTarget) return false;
+  const ap = aps.find(candidate => candidate.bssid.toUpperCase() === incident.bssidTarget?.toUpperCase());
+  return Boolean(ap && (ap.classification === 'Rogue' || ap.isRogueCandidate));
+};
+
+const reconcileLiveIncidents = (
+  nativeFindings: IncidentRecord[],
+  aps: AccessPoint[],
+  previous: IncidentRecord[],
+): IncidentRecord[] => [
+  ...nativeFindings,
+  ...mapAccessPointIssuesToIncidents(aps),
+  ...previous.filter(incident => isCurrentAnalystCase(incident, aps)),
+];
+
 // Icons
 import { 
   LayoutDashboard, 
@@ -174,6 +194,8 @@ export default function App() {
     const projectId = db.getCurrentProjectId();
     return applyAnalystOverrides(db.getAccessPoints(projectId).filter(ap => ap.dataSourceOrigin !== 'TRAINING'), db.getAnalystOverrides(projectId));
   });
+  const accessPointsRef = useRef(accessPoints);
+  useEffect(() => { accessPointsRef.current = accessPoints; }, [accessPoints]);
   const [packets, setPackets] = useState<PcapPacket[]>([]);
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
   // A visual row/focus selection is not permission to open the inspection drawer.
@@ -263,7 +285,7 @@ export default function App() {
         const resolvedAps = applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId));
         setAccessPoints(resolvedAps);
         setIncidents(previous => {
-          const live = [...mapAccessPointIssuesToIncidents(resolvedAps), ...previous.filter(i => !i.id.startsWith('NATIVE-AP-'))];
+          const live = reconcileLiveIncidents([], resolvedAps, previous);
           threatEngine.setIncidents(live);
           db.saveIncidents(live);
           return live;
@@ -287,9 +309,7 @@ export default function App() {
     const applyNativeIncidents = (findings: any[]) => {
       const native = mapNativeFindingsToIncidents(findings);
       setIncidents(previous => {
-        const liveApIssues = previous.filter(incident => incident.id.startsWith('NATIVE-AP-'));
-        const analyst = previous.filter(incident => !incident.id.startsWith('NATIVE-'));
-        const merged = [...native, ...liveApIssues, ...analyst];
+        const merged = reconcileLiveIncidents(native, accessPointsRef.current, previous);
         threatEngine.setIncidents(merged);
         db.saveIncidents(merged);
         return merged;

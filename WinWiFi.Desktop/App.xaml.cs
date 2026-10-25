@@ -62,8 +62,28 @@ public partial class App : Application
                 MessageBoxImage.Warning);
         }
 
-        var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
-        mainWindow.Show();
+        // Application_Startup is async because bridge initialization is async.
+        // With WPF's default OnLastWindowClose policy, an await here can leave
+        // the application with no visible window long enough for WPF to shut
+        // down before MainWindow.Show() resumes. Keep the process alive until
+        // the shell exists, then restore normal close-to-exit behavior.
+        try
+        {
+            var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
+            MainWindow = mainWindow;
+            mainWindow.Show();
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Unable to create the WinWiFi desktop window: {ex}");
+            MessageBox.Show(
+                $"WinWiFi could not open its desktop window.\n\n{ex.Message}",
+                "WinWiFi startup",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown();
+        }
     }
 
     private static async Task<bool> IsExistingWinWiFiBridgeAsync()
