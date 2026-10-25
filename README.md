@@ -67,6 +67,19 @@ Live scans work without an active Wi-Fi connection. Raw monitor-mode/EAPOL
 capture is optional and requires Npcap plus an adapter and driver that support
 802.11 monitor mode. The app reports that capability honestly when unavailable.
 
+### Troubleshooting another PC
+
+- **The dashboard is blank or does not open:** run
+  `Install-WebView2Runtime.exe` from the WinWiFi installation folder, then
+  restart the application.
+- **"Could not start its local dashboard bridge":** close any other running
+  WinWiFi window and start the app again. WinWiFi uses a local-only dashboard
+  bridge on `127.0.0.1:38989`; it does not expose the bridge to the network.
+- **No networks appear:** ensure the Windows Wi-Fi radio and adapter are
+  enabled. An active Internet connection is not required for scanning.
+- **Monitor-mode capture is unavailable:** this is expected unless both Npcap
+  and a monitor-mode capable Wi-Fi adapter/driver are installed.
+
 ### Build from source
 
 Use this path if no release installer is available yet, or if you want to
