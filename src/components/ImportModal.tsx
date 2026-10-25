@@ -236,7 +236,7 @@ SSID 3 : Public_Free_WiFi
                     {isProcessing ? 'Dissecting 802.11 Packets...' : 'Drag and drop your .pcap or .cap file here'}
                   </div>
                   <p className="text-xs text-slate-400 max-w-sm">
-                    Supports standard Libpcap 2.4 captures from Wireshark, Aircrack-ng, TCPdump, or Acrylic Wi-Fi. Decapsulates IEEE 802.11 Beacons, Radiotap RSSI, and EAPOL handshakes.
+                    Supports standard Libpcap 2.4 captures from Aircrack-ng, TCPdump, Acrylic Wi-Fi, or any compatible capture tool. Decapsulates IEEE 802.11 Beacons, Radiotap RSSI, and EAPOL handshakes.
                   </p>
                   <button
                     type="button"

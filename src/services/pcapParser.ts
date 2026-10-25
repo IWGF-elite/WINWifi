@@ -90,7 +90,7 @@ export class PcapService {
     } else if (magic === 0x4d3cb2a1) {
       isLittleEndian = false;
     } else if (magic === 0x0a0d0d0a) {
-      throw new Error('Detected PCAPNG format. Please convert to standard Libpcap (.pcap/.cap) or export as pcap in Wireshark.');
+      throw new Error('Detected PCAPNG format. Please convert the file to standard Libpcap (.pcap/.cap) before importing.');
     } else {
       throw new Error(`Unrecognized PCAP magic header (0x${magic.toString(16)}). Supported format: Libpcap 2.4.`);
     }
@@ -634,7 +634,7 @@ export class PcapService {
     };
   }
 
-  // Generate Valid Libpcap 2.4 Binary Output (Ready for Wireshark & Hashcat)
+  // Generate valid Libpcap 2.4 binary output for compatible analysis tools.
   public exportBinaryPcap(packets: PcapPacket[]): Uint8Array {
     // Calculate total buffer size
     // Global header: 24 bytes

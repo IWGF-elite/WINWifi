@@ -633,7 +633,7 @@ export default function App() {
       const log = db.appendLog({
         level: 'WARN',
         source: 'HANDSHAKE_VALIDATOR',
-        message: `Live cryptographic handshake capture for "${ap.ssid}" (${ap.bssid}) blocked: WinWiFi strictly prohibits synthesizing fake 4-way handshakes in production mode. Promiscuous 802.11 monitor capture driver (Npcap / Wireshark) required.`,
+        message: `Live cryptographic handshake capture for "${ap.ssid}" (${ap.bssid}) blocked: WinWiFi strictly prohibits synthesizing fake 4-way handshakes in production mode. Promiscuous 802.11 monitor capture driver (Npcap or equivalent) required.`,
       });
       setLogs((prev) => [log, ...prev]);
       setShowArchitectureModal(true);

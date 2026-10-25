@@ -91,7 +91,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
         <div className="space-y-1 text-[11px] leading-relaxed">
           <strong className="text-slate-200">Defensive Forensics &amp; Provenance Policy:</strong> In accordance with strict platform integrity, 
           WinWiFi never fabricates synthetic 4-way handshakes in live production mode. 
-          Capturing live EAPOL nonces on Windows requires a promiscuous 802.11 monitor capture pipeline (e.g. Npcap or Wireshark) and importing the resulting .pcap file. 
+          Capturing live EAPOL nonces on Windows requires a promiscuous 802.11 monitor capture pipeline (e.g. Npcap or an equivalent capture driver) and importing the resulting .pcap file.
           Simulated vectors are restricted strictly to offline Training Labs.
         </div>
       </div>
@@ -105,7 +105,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
             {isLive ? (
               <>
                 You are currently in <strong>Live Windows Mode</strong>. Native Windows WLAN APIs handle WPA key negotiation internally and do not expose raw EAPOL packets.
-                To audit handshakes for detected networks, capture 802.11 monitor traffic via Npcap or Wireshark and import the capture file.
+                To audit handshakes for detected networks, capture 802.11 monitor traffic via a monitor-mode capture tool such as Npcap and import the capture file.
               </>
             ) : (
               <>

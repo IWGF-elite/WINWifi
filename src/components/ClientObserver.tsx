@@ -216,7 +216,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
                     <div className="text-xs text-slate-500 max-w-md mx-auto">
                       {isLiveMode ? (
                         <>
-                          Windows Native WiFi API only surfaces BSS infrastructure frames. To inspect client stations, capture raw 802.11 frames using Npcap/Wireshark and import the .pcap file.
+                          Windows Native WiFi API only surfaces BSS infrastructure frames. To inspect client stations, capture raw 802.11 frames using Npcap or an equivalent capture driver and import the .pcap file.
                         </>
                       ) : (
                         <>No 802.11 client station frames match the active filter criteria.</>

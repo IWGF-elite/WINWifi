@@ -1,5 +1,7 @@
 # WinWiFi Security Auditor
 
+> ⚠️ **Status: Active development.** Core features work and are regularly tested, but expect ongoing changes.
+
 A Wi-Fi security auditing tool for Windows. It scans nearby wireless networks,
 evaluates their security configuration against known best practices (NIST SP
 800-153), and helps you spot weak or misconfigured access points on networks
@@ -18,7 +20,7 @@ files without any native backend.
 - Weighted security risk scoring with a transparent, explainable breakdown
 - Full IEEE OUI vendor lookup and randomized-MAC detection
 - PCAP/PCAPNG import with 802.11 frame and EAPOL handshake parsing
-- A Wireshark-style frame inspector (filters, field tree, hex view) for
+- A packet-frame inspector (filters, field tree, hex view) for
   imported captures
 - Rogue/evil-twin detection and configuration drift tracking over time
 - Policy compliance scoring and reporting

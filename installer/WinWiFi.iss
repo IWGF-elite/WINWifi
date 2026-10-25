@@ -21,7 +21,9 @@ PrivilegesRequired=admin
 WizardStyle=modern
 
 [Files]
-Source: "..\WinWiFi.Desktop\bin\Release\net8.0-windows\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+; Package the self-contained output produced by scripts\publish-windows.ps1.
+; Do not use bin\Release here: that build depends on a machine-wide .NET runtime.
+Source: "..\publish\win-x64\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{group}\WinWiFi Security Auditor"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
