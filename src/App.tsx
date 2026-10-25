@@ -228,7 +228,8 @@ export default function App() {
   const [showArchitectureModal, setShowArchitectureModal] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showBridgeModal, setShowBridgeModal] = useState<boolean>(false);
-  const [showStartupReadiness, setShowStartupReadiness] = useState<boolean>(() => sessionStorage.getItem('winwifi_startup_ready') !== 'true');
+  // This gate only closes when the operator explicitly opens the dashboard.
+  const [showStartupReadiness, setShowStartupReadiness] = useState<boolean>(true);
 
   // Native Windows Bridge State
   const [bridgeState, setBridgeState] = useState<BridgeConnectionState>('DISCONNECTED');
@@ -242,17 +243,6 @@ export default function App() {
   // to "OFFLINE" after 30 seconds even though the scanner was still running.
 
   const bridgeClient = NativeBridgeClient.getInstance();
-
-  useEffect(() => {
-    if (!showStartupReadiness) return;
-    if (bridgeState === 'CONNECTED' && dataSourceProfile === 'LIVE_WINDOWS') {
-      const timer = window.setTimeout(() => {
-        setShowStartupReadiness(false);
-        sessionStorage.setItem('winwifi_startup_ready', 'true');
-      }, 700);
-      return () => window.clearTimeout(timer);
-    }
-  }, [bridgeState, dataSourceProfile, showStartupReadiness]);
 
   // Subscribe to Native Windows Bridge events (SSE & Polling)
   useEffect(() => {
@@ -793,7 +783,7 @@ export default function App() {
         dataSourceProfile={dataSourceProfile}
         accessPointCount={accessPoints.length}
         error={bridgeNotice}
-        onContinue={() => { setShowStartupReadiness(false); sessionStorage.setItem('winwifi_startup_ready', 'true'); }}
+        onContinue={() => setShowStartupReadiness(false)}
       />}
       {/* Windows Native Title & Action Bar */}
       <TitleBar
@@ -1054,6 +1044,7 @@ export default function App() {
             currentChannel={currentChannel}
             dataSourceProfile={dataSourceProfile}
             bridgeState={bridgeState}
+            lastLiveDataAt={lastLiveDataAt}
             onOpenBridgeConfig={() => setShowBridgeModal(true)}
             onOpenImport={() => setShowImportModal(true)}
             onLoadBenchmark={handleLoadBenchmark}

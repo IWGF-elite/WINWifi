@@ -33,6 +33,7 @@ interface CommandCenterDashboardProps {
   currentChannel: number;
   dataSourceProfile?: DataSourceProfile;
   bridgeState?: BridgeConnectionState;
+  lastLiveDataAt?: number | null;
   onOpenBridgeConfig?: () => void;
   onOpenImport?: () => void;
   onLoadBenchmark?: () => void;
@@ -49,6 +50,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
   currentChannel = 6,
   dataSourceProfile = 'BENCHMARK',
   bridgeState = 'DISCONNECTED',
+  lastLiveDataAt = null,
   onOpenBridgeConfig,
   onOpenImport,
   onLoadBenchmark,
@@ -86,6 +88,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
     .slice(0, 6);
 
   const postureLabel = avgSecurityScore === null ? 'Awaiting observations' : avgSecurityScore >= 80 ? 'Resilient posture' : avgSecurityScore >= 60 ? 'Needs hardening' : 'Priority remediation';
+  const liveAge = lastLiveDataAt === null ? null : Math.max(0, Math.floor((Date.now() - lastLiveDataAt) / 1000));
   const recentChanges = [...securityChanges]
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, 4);
@@ -229,7 +232,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
           </div>
           <div className="text-2xl font-bold text-emerald-300 mt-1">{approvedNetworks}</div>
-          <div className="text-[11px] text-slate-500 mt-1">Known Baseline</div>
+          <div className="text-[11px] text-slate-500 mt-1">Manually approved baseline</div>
         </div>
 
         {/* Unknown Networks */}
@@ -294,7 +297,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
             <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">Live posture is calculated from the access points currently observed by this project. Changes appear only after a real scan or imported evidence records them.</p>
           </div>
           <div className="grid min-w-[360px] grid-cols-2 gap-2 sm:grid-cols-4">
-            <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Observed</p><p className="mt-1 text-lg font-bold text-slate-100">{totalNetworks}</p></div>
+            <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Observed now</p><p className="mt-1 text-lg font-bold text-slate-100">{totalNetworks}</p><p className="text-[10px] text-emerald-400">{liveAge === null ? 'Awaiting native scan' : `Native refresh ${liveAge}s ago`}</p></div>
             <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Changes</p><p className="mt-1 text-lg font-bold text-sky-300">{securityChanges.length}</p></div>
             <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Rogue signals</p><p className="mt-1 text-lg font-bold text-rose-300">{rogueNetworks}</p></div>
             <button onClick={() => onNavigate('threats', 'changes')} className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-left transition hover:bg-sky-500/20"><p className="text-[10px] uppercase tracking-wide text-sky-300">Review</p><p className="mt-1 text-xs font-bold text-slate-100">Open timeline →</p></button>

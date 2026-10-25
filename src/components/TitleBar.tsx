@@ -133,12 +133,12 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         : 'bg-[#f3f4f8] border-[#e2e4ea] text-slate-800'
     }`}>
       {/* Top Windows Chrome Bar */}
-      <div className="winwifi-window-chrome flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-1.5 text-xs" onDoubleClick={toggleWorkAreaFit} onMouseDown={(event) => {
+      <div className="winwifi-window-chrome flex items-center justify-between gap-2 overflow-hidden px-3 py-1.5 text-xs" onDoubleClick={toggleWorkAreaFit} onMouseDown={(event) => {
         if (event.button === 0 && !(event.target as HTMLElement).closest('button,select,input')) beginNativeDrag();
       }}>
-        <div className="flex min-w-0 items-center gap-2">
-          <img src="/WinWiFi.ico" alt="WinWiFi" className="h-5 w-5 rounded shadow-sm" />
-          <span className="font-semibold tracking-wide text-xs">WinWiFi Security Auditor</span>
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-600 p-0.5 shadow-sm"><img src="/WinWiFi.ico" alt="WinWiFi" className="h-full w-full object-contain" /></span>
+          <span className="truncate font-semibold tracking-wide text-xs">WinWiFi Security Auditor</span>
           <span className="winwifi-edition text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-mono">Enterprise v3.0</span>
           <span className="winwifi-project-separator text-slate-500">|</span>
           <span className="winwifi-project-name text-slate-400 font-medium truncate max-w-[200px]">{projectName}</span>
