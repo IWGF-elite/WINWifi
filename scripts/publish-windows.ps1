@@ -20,8 +20,6 @@ dotnet publish $projectPath `
     --configuration Release `
     --runtime win-x64 `
     --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
     --output $publishPath
 
 if ($LASTEXITCODE -ne 0) {

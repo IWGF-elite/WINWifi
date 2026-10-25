@@ -12,7 +12,7 @@ namespace WinWiFi
         [STAThread]
         public static int Main(string[] args)
         {
-#if WINDOWS
+#if WINDOWS_DESKTOP
             // WinExe applications do not inherit a console automatically. Attach to
             // an existing terminal (or create one when launched from Explorer) so
             // the documented CLI options can display their results.
@@ -138,7 +138,7 @@ namespace WinWiFi
                                                   a.Equals("--headless", StringComparison.OrdinalIgnoreCase) || 
                                                   a.Equals("--server", StringComparison.OrdinalIgnoreCase) || 
                                                   a.Equals("-b", StringComparison.OrdinalIgnoreCase));
-#if !WINDOWS
+#if !WINDOWS_DESKTOP
             // In CLI executable, default to bridge daemon if no other action argument was provided
             if (args.Length == 0) isBridgeRequested = true;
 #endif
@@ -180,7 +180,7 @@ namespace WinWiFi
             }
 
             // 3. Normal GUI Application Startup (Windows WPF)
-#if WINDOWS
+#if WINDOWS_DESKTOP
             try
             {
                 var app = new App();
@@ -199,7 +199,7 @@ namespace WinWiFi
 #endif
         }
 
-#if WINDOWS
+#if WINDOWS_DESKTOP
         private static void EnsureConsole()
         {
             if (!AttachConsole(uint.MaxValue)) AllocConsole();
