@@ -26,7 +26,7 @@ export class SqliteDatabaseService {
     if (!raw) {
       const defaultProject: AuditProject = {
         id: 'proj-001',
-        name: 'New Wi-Fi Assessment',
+        name: 'Wireless Security Audit',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         location: 'Not specified',
@@ -40,9 +40,9 @@ export class SqliteDatabaseService {
     }
     try {
       const projects = JSON.parse(raw) as AuditProject[];
-      const starter = projects.find(project => project.id === 'proj-001' && project.name === 'Corporate HQ Perimeter Audit 2026');
+      const starter = projects.find(project => project.id === 'proj-001' && (project.name === 'Corporate HQ Perimeter Audit 2026' || project.name === 'New Wi-Fi Assessment'));
       if (starter) {
-        starter.name = 'New Wi-Fi Assessment';
+        starter.name = 'Wireless Security Audit';
         starter.location = 'Not specified';
         starter.auditorName = 'Not assigned';
         starter.notes = '';

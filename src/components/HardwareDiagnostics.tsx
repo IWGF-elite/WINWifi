@@ -289,7 +289,7 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
                     <div className="text-[10px] font-mono text-slate-500">{cap.id}</div>
                   </td>
                   <td className="py-3 px-4">
-                    <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px]">
+                    <span className="inline-flex shrink-0 whitespace-nowrap px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px]">
                       {cap.category}
                     </span>
                   </td>
