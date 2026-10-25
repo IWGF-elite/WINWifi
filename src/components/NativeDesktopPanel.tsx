@@ -214,7 +214,7 @@ namespace WinWiFi.Data
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <AssemblyName>WinWiFi</AssemblyName>
-    <Version>3.0.0</Version>
+    <Version>3.0.1</Version>
     <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 

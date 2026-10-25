@@ -454,7 +454,7 @@ namespace WinWiFi.Services
             var status = new
             {
                 status = "online",
-                version = "3.0.0",
+                version = "3.0.1",
                 engine = "WinWiFi Native 802.11 Core (.NET 8)",
                 platform = Environment.OSVersion.ToString(),
                 isWindows = OperatingSystem.IsWindows(),
@@ -840,7 +840,7 @@ namespace WinWiFi.Services
             {
                 metadata = new
                 {
-                    generator = "WinWiFi 3.0.0",
+                    generator = "WinWiFi 3.0.1",
                     exportedAt = DateTime.UtcNow,
                     platform = Environment.OSVersion.ToString()
                 },
