@@ -47,6 +47,7 @@ import { ImportModal } from './components/ImportModal';
 import { BridgeConfigModal } from './components/BridgeConfigModal';
 import { LogConsole } from './components/LogConsole';
 import { NativeDesktopPanel } from './components/NativeDesktopPanel';
+import { StartupReadinessOverlay } from './components/StartupReadinessOverlay';
 
 const applyAnalystOverrides = (
   accessPoints: AccessPoint[],
@@ -227,6 +228,7 @@ export default function App() {
   const [showArchitectureModal, setShowArchitectureModal] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showBridgeModal, setShowBridgeModal] = useState<boolean>(false);
+  const [showStartupReadiness, setShowStartupReadiness] = useState<boolean>(() => sessionStorage.getItem('winwifi_startup_ready') !== 'true');
 
   // Native Windows Bridge State
   const [bridgeState, setBridgeState] = useState<BridgeConnectionState>('DISCONNECTED');
@@ -240,6 +242,17 @@ export default function App() {
   // to "OFFLINE" after 30 seconds even though the scanner was still running.
 
   const bridgeClient = NativeBridgeClient.getInstance();
+
+  useEffect(() => {
+    if (!showStartupReadiness) return;
+    if (bridgeState === 'CONNECTED' && dataSourceProfile === 'LIVE_WINDOWS') {
+      const timer = window.setTimeout(() => {
+        setShowStartupReadiness(false);
+        sessionStorage.setItem('winwifi_startup_ready', 'true');
+      }, 700);
+      return () => window.clearTimeout(timer);
+    }
+  }, [bridgeState, dataSourceProfile, showStartupReadiness]);
 
   // Subscribe to Native Windows Bridge events (SSE & Polling)
   useEffect(() => {
@@ -774,6 +787,14 @@ export default function App() {
     <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
       isDarkMode ? 'bg-[#0b0d11] text-slate-100' : 'bg-[#eef0f6] text-slate-900'
     }`}>
+      {showStartupReadiness && <StartupReadinessOverlay
+        bridgeState={bridgeState}
+        adapters={adapters}
+        dataSourceProfile={dataSourceProfile}
+        accessPointCount={accessPoints.length}
+        error={bridgeNotice}
+        onContinue={() => { setShowStartupReadiness(false); sessionStorage.setItem('winwifi_startup_ready', 'true'); }}
+      />}
       {/* Windows Native Title & Action Bar */}
       <TitleBar
         isDarkMode={isDarkMode}

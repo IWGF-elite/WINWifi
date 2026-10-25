@@ -85,6 +85,11 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
     .sort((a, b) => (b[1] as number) - (a[1] as number))
     .slice(0, 6);
 
+  const postureLabel = avgSecurityScore === null ? 'Awaiting observations' : avgSecurityScore >= 80 ? 'Resilient posture' : avgSecurityScore >= 60 ? 'Needs hardening' : 'Priority remediation';
+  const recentChanges = [...securityChanges]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 4);
+
   // Attention Items
   const attentionItems = [
     ...(rogueNetworks > 0 ? [{
@@ -279,6 +284,24 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
           <div className="text-[11px] text-slate-500 mt-1">Case Files Open</div>
         </div>
       </div>
+
+      {/* Real change-aware posture panel: uses only native scan history and security-change records. */}
+      <section className="overflow-hidden rounded-xl border border-sky-500/20 bg-[#0b1a30] shadow-sm">
+        <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-sky-300"><Activity className="h-4 w-4" /> Wireless change radar</div>
+            <div className="mt-2 flex items-end gap-3"><span className="text-4xl font-black tracking-tight text-slate-50">{avgSecurityScore ?? '—'}</span><span className="mb-1 text-sm font-semibold text-sky-200">{postureLabel}</span></div>
+            <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">Live posture is calculated from the access points currently observed by this project. Changes appear only after a real scan or imported evidence records them.</p>
+          </div>
+          <div className="grid min-w-[360px] grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Observed</p><p className="mt-1 text-lg font-bold text-slate-100">{totalNetworks}</p></div>
+            <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Changes</p><p className="mt-1 text-lg font-bold text-sky-300">{securityChanges.length}</p></div>
+            <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Rogue signals</p><p className="mt-1 text-lg font-bold text-rose-300">{rogueNetworks}</p></div>
+            <button onClick={() => onNavigate('threats', 'changes')} className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-left transition hover:bg-sky-500/20"><p className="text-[10px] uppercase tracking-wide text-sky-300">Review</p><p className="mt-1 text-xs font-bold text-slate-100">Open timeline →</p></button>
+          </div>
+        </div>
+        {recentChanges.length > 0 && <div className="grid border-t border-slate-700/70 bg-slate-950/20 md:grid-cols-2 xl:grid-cols-4">{recentChanges.map(change => <button key={change.id} onClick={() => onNavigate('threats', 'changes')} className="border-b border-r border-slate-800/80 px-4 py-3 text-left transition hover:bg-slate-800/40 xl:border-b-0"><p className="truncate text-xs font-semibold text-slate-200">{change.title}</p><p className="mt-1 truncate text-[11px] text-slate-500">{change.ssid || change.bssid} · {change.before} → {change.after}</p></button>)}</div>}
+      </section>
 
       {/* "What Needs Attention?" Direct Action Section */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">

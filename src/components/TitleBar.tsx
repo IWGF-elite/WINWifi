@@ -137,9 +137,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         if (event.button === 0 && !(event.target as HTMLElement).closest('button,select,input')) beginNativeDrag();
       }}>
         <div className="flex min-w-0 items-center gap-2">
-          <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600 text-white shadow-sm">
-            <ShieldCheck className="w-3.5 h-3.5" />
-          </div>
+          <img src="/WinWiFi.ico" alt="WinWiFi" className="h-5 w-5 rounded shadow-sm" />
           <span className="font-semibold tracking-wide text-xs">WinWiFi Security Auditor</span>
           <span className="winwifi-edition text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-mono">Enterprise v3.0</span>
           <span className="winwifi-project-separator text-slate-500">|</span>
