@@ -1,6 +1,7 @@
 import React from 'react';
 import { CheckCircle2, CircleDashed, ShieldCheck, TriangleAlert, Wifi } from 'lucide-react';
 import { BridgeConnectionState, DataSourceProfile, WifiAdapter } from '../types';
+import { WinWiFiLogo } from './WinWiFiLogo';
 
 interface StartupReadinessOverlayProps {
   bridgeState: BridgeConnectionState;
@@ -31,10 +32,10 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
         <div className="absolute inset-x-0 top-0 h-1 bg-sky-400" />
         <div className="p-8 sm:p-10">
           <div className="flex items-center gap-4">
-            <img src="/WinWiFi.ico" alt="WinWiFi" className="h-12 w-12 rounded-xl shadow-lg shadow-sky-500/20" />
+            <WinWiFiLogo className="h-12 w-12 shrink-0 rounded-xl shadow-lg shadow-sky-500/20" />
             <div><p className="text-xs font-bold tracking-[0.22em] text-sky-300">WINWIFI SECURITY AUDITOR</p><h1 className="mt-1 text-2xl font-bold tracking-tight">Preparing your local audit workspace</h1></div>
           </div>
-          <p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">Every status below comes from this Windows device. WinWiFi does not simulate hardware availability or scan results.</p>
+          <p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">Readiness checks are verified against this Windows device, its configured adapter, and the local audit workspace.</p>
           <div className="mt-8 space-y-3">
             {steps.map((step) => <div key={step.label} className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/45 px-4 py-3.5">
               {step.done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : step.failed ? <TriangleAlert className="h-5 w-5 shrink-0 text-amber-400" /> : <CircleDashed className="h-5 w-5 shrink-0 animate-spin text-sky-400" />}
