@@ -27,6 +27,9 @@ files without any native backend.
   with classification, approval status, site/building/floor, owner, and notes
 - Validated CSV import/export for the asset registry (5,000 rows / 2 MB per
   import, duplicate MACs update in place, formula-leading cells neutralized)
+- A project-scoped site directory (sites, buildings, floors) seeded from the
+  project scope; renames propagate to matching registry records, and entries
+  holding assets must be reassigned before deletion
 - Classification-routed policy compliance: Corporate, Guest, IoT, Suspicious,
   and Rogue assets are evaluated against their assigned policy, registry
   approval status is enforced (Unapproved/Rogue fail, review states warn), and

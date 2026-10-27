@@ -14,7 +14,8 @@ import {
   UserCheck,
   X
 } from 'lucide-react';
-import { EnterpriseAssetRecord, UIMode } from '../types';
+import { EnterpriseAssetRecord, SiteRecord, UIMode } from '../types';
+import { listBuildingNames, listFloorNames, listSiteNames } from '../services/siteDirectory';
 import {
   ASSET_APPROVAL_STATUSES,
   ASSET_CLASSIFICATIONS,
@@ -33,6 +34,7 @@ export interface AssetImportSummary {
 
 interface EnterpriseRegistryProps {
   assets: EnterpriseAssetRecord[];
+  siteDirectory: SiteRecord[];
   bridgeConnected: boolean;
   uiMode: UIMode;
   onSaveAsset: (asset: EnterpriseAssetRecord) => Promise<void>;
@@ -79,6 +81,7 @@ const classificationStyles: Record<string, string> = {
 
 export const EnterpriseRegistry: React.FC<EnterpriseRegistryProps> = ({
   assets,
+  siteDirectory = [],
   bridgeConnected,
   uiMode,
   onSaveAsset,
@@ -91,6 +94,9 @@ export const EnterpriseRegistry: React.FC<EnterpriseRegistryProps> = ({
   const [search, setSearch] = useState('');
   const [classificationFilter, setClassificationFilter] = useState('all');
   const [approvalFilter, setApprovalFilter] = useState('all');
+  const [siteFilter, setSiteFilter] = useState('all');
+  const [buildingFilter, setBuildingFilter] = useState('all');
+  const [floorFilter, setFloorFilter] = useState('all');
   const [draft, setDraft] = useState<EnterpriseAssetRecord | null>(null);
   const [editingIsNew, setEditingIsNew] = useState(false);
   const [formError, setFormError] = useState('');
@@ -98,16 +104,75 @@ export const EnterpriseRegistry: React.FC<EnterpriseRegistryProps> = ({
   const [notice, setNotice] = useState<{ tone: 'ok' | 'warn' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const nameEquals = (left: string | undefined, right: string | undefined): boolean =>
+    Boolean(left && right) && (left || '').trim().toLowerCase() === (right || '').trim().toLowerCase();
+
+  const siteOptions = useMemo(() => {
+    const names = new Set(listSiteNames(siteDirectory));
+    assets.forEach(asset => { if (asset.site) names.add(asset.site); });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, assets]);
+
+  const buildingOptions = useMemo(() => {
+    if (siteFilter === 'all') return [];
+    const names = new Set(listBuildingNames(siteDirectory, siteFilter));
+    assets.forEach(asset => {
+      if (nameEquals(asset.site, siteFilter) && asset.building) names.add(asset.building);
+    });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, assets, siteFilter]);
+
+  const floorOptions = useMemo(() => {
+    if (siteFilter === 'all' || buildingFilter === 'all') return [];
+    const names = new Set(listFloorNames(siteDirectory, siteFilter, buildingFilter));
+    assets.forEach(asset => {
+      if (nameEquals(asset.site, siteFilter) && nameEquals(asset.building, buildingFilter) && asset.areaFloor) {
+        names.add(asset.areaFloor);
+      }
+    });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, assets, siteFilter, buildingFilter]);
+
+  const draftSiteOptions = useMemo(() => {
+    const names = new Set(listSiteNames(siteDirectory));
+    assets.forEach(asset => { if (asset.site) names.add(asset.site); });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, assets]);
+
+  const draftBuildingOptions = useMemo(() => {
+    const siteName = draft?.site || '';
+    const names = new Set(listBuildingNames(siteDirectory, siteName));
+    assets.forEach(asset => {
+      if (nameEquals(asset.site, siteName) && asset.building) names.add(asset.building);
+    });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, assets, draft?.site]);
+
+  const draftFloorOptions = useMemo(() => {
+    const siteName = draft?.site || '';
+    const buildingName = draft?.building || '';
+    const names = new Set(listFloorNames(siteDirectory, siteName, buildingName));
+    assets.forEach(asset => {
+      if (nameEquals(asset.site, siteName) && nameEquals(asset.building, buildingName) && asset.areaFloor) {
+        names.add(asset.areaFloor);
+      }
+    });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, assets, draft?.site, draft?.building]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return assets.filter(asset => {
       if (classificationFilter !== 'all' && asset.classification !== classificationFilter) return false;
       if (approvalFilter !== 'all' && asset.approvalStatus !== approvalFilter) return false;
+      if (siteFilter !== 'all' && !nameEquals(asset.site, siteFilter)) return false;
+      if (buildingFilter !== 'all' && !nameEquals(asset.building, buildingFilter)) return false;
+      if (floorFilter !== 'all' && !nameEquals(asset.areaFloor, floorFilter)) return false;
       if (!term) return true;
       return [asset.ssid, asset.macAddress, asset.vendor, asset.model, asset.site, asset.building, asset.areaFloor, asset.ownerDepartment, asset.notes]
         .some(value => (value || '').toLowerCase().includes(term));
     });
-  }, [assets, search, classificationFilter, approvalFilter]);
+  }, [assets, search, classificationFilter, approvalFilter, siteFilter, buildingFilter, floorFilter]);
 
   const openNew = () => {
     setDraft(EMPTY_ASSET());
@@ -180,7 +245,13 @@ export const EnterpriseRegistry: React.FC<EnterpriseRegistryProps> = ({
     }
   };
 
-  const field = (label: string, key: keyof EnterpriseAssetRecord, placeholder: string, type: 'text' | 'textarea' = 'text') => (
+  const field = (
+    label: string,
+    key: keyof EnterpriseAssetRecord,
+    placeholder: string,
+    type: 'text' | 'textarea' = 'text',
+    listId?: string
+  ) => (
     <label className="space-y-1 block">
       <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</span>
       {type === 'textarea' ? (
@@ -194,6 +265,7 @@ export const EnterpriseRegistry: React.FC<EnterpriseRegistryProps> = ({
       ) : (
         <input
           type="text"
+          list={listId}
           value={String(draft?.[key] ?? '')}
           onChange={event => setDraft(current => current ? { ...current, [key]: event.target.value } : current)}
           placeholder={placeholder}
@@ -274,6 +346,35 @@ export const EnterpriseRegistry: React.FC<EnterpriseRegistryProps> = ({
           >
             <option value="all">All Approvals</option>
             {ASSET_APPROVAL_STATUSES.map(value => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <select
+            value={siteFilter}
+            onChange={event => { setSiteFilter(event.target.value); setBuildingFilter('all'); setFloorFilter('all'); }}
+            aria-label="Filter by site"
+            className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">All Sites</option>
+            {siteOptions.map(value => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <select
+            value={buildingFilter}
+            onChange={event => { setBuildingFilter(event.target.value); setFloorFilter('all'); }}
+            disabled={siteFilter === 'all' || buildingOptions.length === 0}
+            aria-label="Filter by building"
+            className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-blue-500 disabled:opacity-40"
+          >
+            <option value="all">{siteFilter === 'all' ? 'Select a site first' : 'All Buildings'}</option>
+            {buildingOptions.map(value => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <select
+            value={floorFilter}
+            onChange={event => setFloorFilter(event.target.value)}
+            disabled={buildingFilter === 'all' || floorOptions.length === 0}
+            aria-label="Filter by floor or area"
+            className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-blue-500 disabled:opacity-40"
+          >
+            <option value="all">{buildingFilter === 'all' ? 'Select a building first' : 'All Floors / Areas'}</option>
+            {floorOptions.map(value => <option key={value} value={value}>{value}</option>)}
           </select>
           <span className="text-[11px] font-mono text-slate-400 px-2 py-1 bg-slate-800 rounded">
             {filtered.length} of {assets.length}
@@ -447,14 +548,26 @@ export const EnterpriseRegistry: React.FC<EnterpriseRegistryProps> = ({
                     {ASSET_APPROVAL_STATUSES.map(value => <option key={value} value={value}>{value}</option>)}
                   </select>
                 </label>
-                {field('Site', 'site', 'Optional site name')}
-                {field('Building', 'building', 'Optional building')}
-                {field('Area / Floor', 'areaFloor', 'Optional floor or area')}
+                {field('Site', 'site', 'Optional site name', 'text', 'registry-site-options')}
+                {field('Building', 'building', 'Optional building', 'text', 'registry-building-options')}
+                {field('Area / Floor', 'areaFloor', 'Optional floor or area', 'text', 'registry-floor-options')}
                 {field('Owner / Department', 'ownerDepartment', 'Optional responsible team')}
                 {field('Vendor', 'vendor', 'Optional hardware vendor')}
                 {field('Model', 'model', 'Optional model or role')}
                 {field('Last seen (UTC)', 'lastSeen', 'YYYY-MM-DD HH:MM:SS')}
               </div>
+              <datalist id="registry-site-options">
+                {draftSiteOptions.map(value => <option key={value} value={value} />)}
+              </datalist>
+              <datalist id="registry-building-options">
+                {draftBuildingOptions.map(value => <option key={value} value={value} />)}
+              </datalist>
+              <datalist id="registry-floor-options">
+                {draftFloorOptions.map(value => <option key={value} value={value} />)}
+              </datalist>
+              <p className="text-[11px] text-slate-500">
+                Site, building, and floor suggestions come from the project site directory. Other values are still allowed and are not added to the directory automatically.
+              </p>
               {field('Notes', 'notes', 'Optional analyst notes. Multi-line text is supported.', 'textarea')}
 
               {formError && (
