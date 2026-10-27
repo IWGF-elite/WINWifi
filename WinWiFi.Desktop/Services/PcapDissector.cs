@@ -14,6 +14,7 @@ namespace WinWiFi.Services
         public List<AccessPoint> AccessPoints { get; set; } = new();
         public List<HandshakeInfo> Handshakes { get; set; } = new();
         public List<StationClientRecord> Clients { get; set; } = new();
+        public List<ThreatFinding> Incidents { get; set; } = new();
         public int TotalFramesCount { get; set; }
         public string CaptureFormat { get; set; } = "Libpcap 2.4";
         public string LinkTypeName { get; set; } = "DLT_IEEE802_11_RADIO";
@@ -21,6 +22,29 @@ namespace WinWiFi.Services
         public string CaptureStartTime { get; set; } = string.Empty;
         public string CaptureEndTime { get; set; } = string.Empty;
         public List<string> ParseWarnings { get; set; } = new();
+
+        // True when parsing stopped early because a safety limit was reached
+        // (frame count, malformed record length, or truncated capture).
+        public bool Truncated { get; set; }
+        public int SkippedFrames { get; set; }
+        public int WarningsSuppressed { get; set; }
+    }
+
+    /// <summary>
+    /// Hard limits applied to untrusted capture files so a malformed or hostile
+    /// file cannot exhaust memory, disk, or UI resources.
+    /// </summary>
+    public sealed class PcapDissectOptions
+    {
+        public const int DefaultMaxCaptureBytes = 100 * 1024 * 1024;
+        public const int DefaultMaxPackets = 200_000;
+        public const int DefaultMaxFrameBytes = 262_144;
+        public const int DefaultMaxHandshakes = 10_000;
+
+        public int MaxCaptureBytes { get; init; } = DefaultMaxCaptureBytes;
+        public int MaxPackets { get; init; } = DefaultMaxPackets;
+        public int MaxFrameBytes { get; init; } = DefaultMaxFrameBytes;
+        public int MaxHandshakes { get; init; } = DefaultMaxHandshakes;
     }
 
     public class PcapDissector
@@ -29,25 +53,46 @@ namespace WinWiFi.Services
         private const uint PCAP_MAGIC_SWAPPED = 0xd4c3b2a1;
         private const uint PCAP_MAGIC_NANOSECOND = 0xa1b23c4d;
         private const uint PCAPNG_SECTION_HEADER = 0x0a0d0d0a;
+        private const uint PCAPNG_INTERFACE_DESCRIPTION = 0x00000001;
+        private const uint PCAPNG_SIMPLE_PACKET = 0x00000003;
+        private const uint PCAPNG_ENHANCED_PACKET = 0x00000006;
+        private const uint PCAPNG_BYTE_ORDER_MAGIC = 0x1a2b3c4d;
+        private const int MaxWarnings = 25;
+        private const long MaxPcapngBlockBytes = 128L * 1024 * 1024;
 
-        public PcapDissectorResult DissectFile(string filePath)
+        public PcapDissectorResult DissectFile(string filePath, PcapDissectOptions? options = null)
         {
             if (!File.Exists(filePath))
             {
                 throw new FileNotFoundException("PCAP forensic capture file not found.", filePath);
             }
 
+            options ??= new PcapDissectOptions();
+            var info = new FileInfo(filePath);
+            if (info.Length > options.MaxCaptureBytes)
+            {
+                throw new InvalidDataException(
+                    $"Capture file is {info.Length / (1024 * 1024)} MB, which exceeds the {options.MaxCaptureBytes / (1024 * 1024)} MB import limit.");
+            }
+
             byte[] bytes = File.ReadAllBytes(filePath);
-            return DissectBytes(bytes);
+            return DissectBytes(bytes, options);
         }
 
-        public PcapDissectorResult DissectBytes(byte[] bytes)
+        public PcapDissectorResult DissectBytes(byte[] bytes, PcapDissectOptions? options = null)
         {
+            options ??= new PcapDissectOptions();
             var result = new PcapDissectorResult();
             if (bytes == null || bytes.Length < 24)
             {
                 result.ParseWarnings.Add("File too small to contain a valid PCAP or PCAPNG header.");
                 return result;
+            }
+
+            if (bytes.Length > options.MaxCaptureBytes)
+            {
+                throw new InvalidDataException(
+                    $"Capture payload is {bytes.Length / (1024 * 1024)} MB, which exceeds the {options.MaxCaptureBytes / (1024 * 1024)} MB import limit.");
             }
 
             using var ms = new MemoryStream(bytes);
@@ -57,7 +102,7 @@ namespace WinWiFi.Services
             if (magic == PCAPNG_SECTION_HEADER)
             {
                 result.CaptureFormat = "PCAPNG Next Generation Capture";
-                DissectPcapNg(bytes, result);
+                DissectPcapNg(bytes, result, options);
                 return result;
             }
 
@@ -81,6 +126,15 @@ namespace WinWiFi.Services
             uint snapLen = ReadUInt32(reader, isSwapped);
             uint networkLinkType = ReadUInt32(reader, isSwapped); // 127 = DLT_IEEE802_11_RADIO, 105 = DLT_IEEE802_11, 1 = Ethernet
 
+            if (versionMajor != 2 || versionMinor != 4)
+            {
+                AddWarning(result, $"Capture header reports libpcap version {versionMajor}.{versionMinor}; expected 2.4.");
+            }
+            if (snapLen > (uint)options.MaxFrameBytes)
+            {
+                AddWarning(result, $"Capture snaplen ({snapLen} bytes) exceeds the {options.MaxFrameBytes}-byte per-frame limit; oversized records will be rejected.");
+            }
+
             result.LinkTypeValue = networkLinkType;
             result.LinkTypeName = networkLinkType switch
             {
@@ -90,37 +144,99 @@ namespace WinWiFi.Services
                 _ => $"DLT_{networkLinkType} (Custom Link Layer)"
             };
 
+            if (networkLinkType != 127 && networkLinkType != 105)
+            {
+                AddWarning(result, $"Link type {result.LinkTypeName} is not an 802.11 capture. WinWiFi does not dissect non-802.11 frames, so no access points were inferred.");
+                FinalizeWarnings(result);
+                return result;
+            }
+
             var apMap = new Dictionary<string, AccessPoint>(StringComparer.OrdinalIgnoreCase);
             var clientMap = new Dictionary<string, StationClientRecord>(StringComparer.OrdinalIgnoreCase);
             var handshakeTracker = new Dictionary<string, HandshakeSession>(StringComparer.OrdinalIgnoreCase);
 
             int frameNum = 1;
+            double subSecondUnits = isNanosecond ? 1_000_000_000d : 1_000_000d;
+            int snapLenViolations = 0;
+            bool recordLimitReported = false;
 
             while (ms.Position + 16 <= ms.Length)
             {
+                if (result.Packets.Count >= options.MaxPackets)
+                {
+                    result.Truncated = true;
+                    if (!recordLimitReported)
+                    {
+                        AddWarning(result, $"Stopped after {options.MaxPackets:N0} frames; the capture contains more records than the import limit.");
+                        recordLimitReported = true;
+                    }
+                    break;
+                }
+
                 uint tsSec = ReadUInt32(reader, isSwapped);
                 uint tsSub = ReadUInt32(reader, isSwapped);
                 uint inclLen = ReadUInt32(reader, isSwapped);
                 uint origLen = ReadUInt32(reader, isSwapped);
 
-                if (inclLen == 0 || ms.Position + inclLen > ms.Length)
+                if (inclLen == 0)
                 {
+                    AddWarning(result, $"Record {frameNum} declares zero captured bytes and was skipped.");
+                    continue;
+                }
+
+                if (inclLen > (uint)options.MaxFrameBytes)
+                {
+                    result.Truncated = true;
+                    AddWarning(result, $"Record {frameNum} declares {inclLen:N0} bytes, above the {options.MaxFrameBytes:N0}-byte per-frame limit; parsing stopped.");
+                    break;
+                }
+
+                if (snapLen > 0 && inclLen > snapLen && snapLenViolations < 3)
+                {
+                    snapLenViolations++;
+                    AddWarning(result, $"Record {frameNum} captured {inclLen} bytes but the header snaplen is {snapLen}; the record was still parsed.");
+                }
+
+                if (origLen > 0 && inclLen > origLen)
+                {
+                    AddWarning(result, $"Record {frameNum} captured length ({inclLen}) exceeds original length ({origLen}).");
+                }
+
+                if (ms.Position + inclLen > ms.Length)
+                {
+                    result.Truncated = true;
+                    AddWarning(result, $"Record {frameNum} is truncated: header declares {inclLen} bytes but only {ms.Length - ms.Position} remain.");
                     break;
                 }
 
                 byte[] packetBytes = reader.ReadBytes((int)inclLen);
-                var packet = ParseSingleFrame(packetBytes, frameNum++, tsSec, tsSub, isNanosecond, networkLinkType, apMap, clientMap, handshakeTracker, result);
+                double fraction = Math.Clamp(tsSub / subSecondUnits, 0d, 0.9999999d);
+                var packet = ParseSingleFrame(packetBytes, frameNum++, tsSec, fraction, networkLinkType, apMap, clientMap, handshakeTracker, result, options);
                 if (packet != null)
                 {
                     result.Packets.Add(packet);
                 }
             }
 
-            // Consolidate Discovered Handshakes
+            if (!result.Truncated && ms.Position < ms.Length)
+            {
+                AddWarning(result, $"Ignored {ms.Length - ms.Position} trailing byte(s) that do not form a complete record header.");
+            }
+
+            ConsolidateResults(result, apMap, clientMap, handshakeTracker);
+            FinalizeWarnings(result);
+            return result;
+        }
+
+        private static void ConsolidateResults(
+            PcapDissectorResult result,
+            Dictionary<string, AccessPoint> apMap,
+            Dictionary<string, StationClientRecord> clientMap,
+            Dictionary<string, HandshakeSession> handshakeTracker)
+        {
             foreach (var kvp in handshakeTracker)
             {
-                var session = kvp.Value;
-                var hs = session.ToHandshakeInfo();
+                var hs = kvp.Value.ToHandshakeInfo();
                 if (hs != null)
                 {
                     result.Handshakes.Add(hs);
@@ -136,103 +252,140 @@ namespace WinWiFi.Services
                 result.CaptureStartTime = result.Packets.First().Timestamp;
                 result.CaptureEndTime = result.Packets.Last().Timestamp;
             }
+        }
 
-            return result;
+        private static void AddWarning(PcapDissectorResult result, string message)
+        {
+            if (result.ParseWarnings.Count < MaxWarnings)
+            {
+                result.ParseWarnings.Add(message);
+            }
+            else
+            {
+                result.WarningsSuppressed++;
+            }
+        }
+
+        private static void FinalizeWarnings(PcapDissectorResult result)
+        {
+            if (result.SkippedFrames > 0)
+            {
+                AddWarning(result, $"{result.SkippedFrames:N0} frame(s) were too short or malformed and were skipped.");
+            }
+            if (result.WarningsSuppressed > 0)
+            {
+                result.ParseWarnings.Add($"{result.WarningsSuppressed:N0} additional warning(s) suppressed.");
+            }
         }
 
         private PcapPacket? ParseSingleFrame(
             byte[] rawBytes,
             int frameNum,
             uint sec,
-            uint subSec,
-            bool isNano,
+            double subSecondFraction,
             uint linkType,
             Dictionary<string, AccessPoint> apMap,
             Dictionary<string, StationClientRecord> clientMap,
             Dictionary<string, HandshakeSession> handshakeTracker,
-            PcapDissectorResult result)
+            PcapDissectorResult result,
+            PcapDissectOptions options)
         {
             int offset = 0;
             int? signalDbm = null;
-            int? noiseDbm = null;
             int channel = 6;
             bool radiotapPresent = false;
-            int radiotapHeaderLen = 0;
 
             // 1. Process Radiotap Header (LinkType 127)
             if (linkType == 127 && rawBytes.Length >= 4)
             {
+                byte radiotapVersion = rawBytes[0];
                 ushort radiotapLen = BitConverter.ToUInt16(rawBytes, 2);
-                if (radiotapLen > 0 && radiotapLen < rawBytes.Length)
+
+                if (radiotapVersion != 0)
                 {
-                    radiotapPresent = true;
-                    radiotapHeaderLen = radiotapLen;
-                    offset = radiotapLen;
+                    result.SkippedFrames++;
+                    return null;
+                }
+                if (radiotapLen < 8 || radiotapLen > rawBytes.Length)
+                {
+                    AddWarning(result, $"Frame {frameNum}: radiotap length {radiotapLen} is outside the {rawBytes.Length}-byte frame; frame skipped.");
+                    result.SkippedFrames++;
+                    return null;
+                }
+                if (radiotapLen == rawBytes.Length)
+                {
+                    result.SkippedFrames++;
+                    return null;
+                }
 
-                    // Parse Radiotap Present Bitmask (offset 4, 4 bytes)
-                    if (radiotapLen >= 8)
+                radiotapPresent = true;
+                offset = radiotapLen;
+
+                // Parse Radiotap Present Bitmask (offset 4, 4 bytes)
+                uint presentMask = BitConverter.ToUInt32(rawBytes, 4);
+                int currentRadioOffset = 8;
+
+                // Check for extended present bits
+                while ((presentMask & 0x80000000) != 0 && currentRadioOffset + 4 <= radiotapLen)
+                {
+                    currentRadioOffset += 4;
+                    presentMask = BitConverter.ToUInt32(rawBytes, currentRadioOffset - 4);
+                }
+
+                // Parse Present Fields. Every field is bounds-checked before it
+                // is read so a declared radiotap length cannot drive an
+                // out-of-frame read into the 802.11 payload.
+                uint origPresent = BitConverter.ToUInt32(rawBytes, 4);
+
+                // Bit 0: TSFT (8 bytes, 8-byte alignment)
+                if ((origPresent & (1 << 0)) != 0)
+                {
+                    currentRadioOffset = (currentRadioOffset + 7) & ~7;
+                    currentRadioOffset += 8;
+                }
+
+                // Bit 1: Flags (1 byte)
+                if ((origPresent & (1 << 1)) != 0) currentRadioOffset += 1;
+
+                // Bit 2: Rate (1 byte)
+                if ((origPresent & (1 << 2)) != 0) currentRadioOffset += 1;
+
+                // Bit 3: Channel (4 bytes: 2 bytes MHz + 2 bytes flags)
+                if ((origPresent & (1 << 3)) != 0)
+                {
+                    // Radiotap 2-byte alignment for channel
+                    if ((currentRadioOffset % 2) != 0) currentRadioOffset++;
+                    if (currentRadioOffset + 4 <= radiotapLen)
                     {
-                        uint presentMask = BitConverter.ToUInt32(rawBytes, 4);
-                        int currentRadioOffset = 8;
-
-                        // Check for extended present bits
-                        while ((presentMask & 0x80000000) != 0 && currentRadioOffset + 4 <= radiotapLen)
+                        ushort freqMhz = BitConverter.ToUInt16(rawBytes, currentRadioOffset);
+                        if (freqMhz >= 2400)
                         {
-                            currentRadioOffset += 4;
-                            presentMask = BitConverter.ToUInt32(rawBytes, currentRadioOffset - 4);
+                            var (ch, _) = WinWiFi.Interop.NativeWifi.FrequencyToChannel((uint)freqMhz * 1000);
+                            if (ch > 0) channel = ch;
                         }
-
-                        // Parse Present Fields
-                        uint origPresent = BitConverter.ToUInt32(rawBytes, 4);
-
-                        // Bit 0: TSFT (8 bytes)
-                        if ((origPresent & (1 << 0)) != 0) currentRadioOffset += 8;
-
-                        // Bit 1: Flags (1 byte)
-                        if ((origPresent & (1 << 1)) != 0) currentRadioOffset += 1;
-
-                        // Bit 2: Rate (1 byte)
-                        if ((origPresent & (1 << 2)) != 0) currentRadioOffset += 1;
-
-                        // Bit 3: Channel (4 bytes: 2 bytes MHz + 2 bytes flags)
-                        if ((origPresent & (1 << 3)) != 0)
-                        {
-                            // Radiotap 2-byte alignment for channel
-                            if ((currentRadioOffset % 2) != 0) currentRadioOffset++;
-                            if (currentRadioOffset + 4 <= radiotapLen)
-                            {
-                                ushort freqMhz = BitConverter.ToUInt16(rawBytes, currentRadioOffset);
-                                if (freqMhz >= 2400)
-                                {
-                                    var (ch, _) = WinWiFi.Interop.NativeWifi.FrequencyToChannel((uint)freqMhz * 1000);
-                                    if (ch > 0) channel = ch;
-                                }
-                                currentRadioOffset += 4;
-                            }
-                        }
-
-                        // Bit 4: FHSS (2 bytes)
-                        if ((origPresent & (1 << 4)) != 0) currentRadioOffset += 2;
-
-                        // Bit 5: Antenna Signal (1 byte, sbyte in dBm)
-                        if ((origPresent & (1 << 5)) != 0 && currentRadioOffset < radiotapLen)
-                        {
-                            signalDbm = (sbyte)rawBytes[currentRadioOffset];
-                            currentRadioOffset += 1;
-                        }
-
-                        // Bit 6: Antenna Noise (1 byte, sbyte in dBm)
-                        if ((origPresent & (1 << 6)) != 0 && currentRadioOffset < radiotapLen)
-                        {
-                            noiseDbm = (sbyte)rawBytes[currentRadioOffset];
-                            currentRadioOffset += 1;
-                        }
+                        currentRadioOffset += 4;
                     }
                 }
+
+                // Bit 4: FHSS (2 bytes, 2-byte alignment)
+                if ((origPresent & (1 << 4)) != 0)
+                {
+                    currentRadioOffset = (currentRadioOffset + 1) & ~1;
+                    currentRadioOffset += 2;
+                }
+
+                // Bit 5: Antenna Signal (1 byte, sbyte in dBm)
+                if ((origPresent & (1 << 5)) != 0 && currentRadioOffset < radiotapLen)
+                {
+                    signalDbm = (sbyte)rawBytes[currentRadioOffset];
+                    currentRadioOffset += 1;
+                }
+
             }
 
-            if (offset + 24 > rawBytes.Length)
+            if (rawBytes.Length < 24 || offset + 24 > rawBytes.Length)
             {
+                result.SkippedFrames++;
                 return null;
             }
 
@@ -287,16 +440,17 @@ namespace WinWiFi.Services
 
             // Calculate Genuine Capture Timestamp
             string timestamp;
+            double clampedFraction = Math.Clamp(subSecondFraction, 0d, 0.9999999d);
             if (sec > 0)
             {
                 DateTimeOffset baseDto = DateTimeOffset.FromUnixTimeSeconds(sec);
-                long subUnits = isNano ? (subSec / 100) : (subSec * 10); // in 100-nanosecond ticks
+                long subUnits = (long)Math.Round(clampedFraction * TimeSpan.TicksPerSecond);
                 DateTimeOffset actualDto = baseDto.AddTicks(subUnits).ToLocalTime();
                 timestamp = actualDto.ToString("yyyy-MM-dd HH:mm:ss.ffffff");
             }
             else
             {
-                timestamp = $"+{(subSec / 1000000.0):F6}s";
+                timestamp = $"+{clampedFraction:F6}s";
             }
 
             string frameTypeName = type switch
@@ -463,7 +617,7 @@ namespace WinWiFi.Services
                     subtypeName = "EAPOL Key";
                     int eapolOffset = llcOffset + 8;
                     eapolFields = ExtractEapolFields(rawBytes, eapolOffset);
-                    info = DissectEapolFrame(rawBytes, eapolOffset, srcMac, destMac, bssid, timestamp, handshakeTracker, apMap);
+                    info = DissectEapolFrame(rawBytes, eapolOffset, srcMac, destMac, bssid, timestamp, handshakeTracker, apMap, result, options);
                 }
             }
 
@@ -534,7 +688,7 @@ namespace WinWiFi.Services
                 var duplicate = 2;
                 while (fields.ContainsKey(key)) key = $"{name} #{duplicate++}";
                 fields[key] = id == 0
-                    ? (value.Length == 0 ? "<hidden>" : Encoding.UTF8.GetString(value))
+                    ? (value.Length == 0 ? "<hidden>" : SanitizeText(Encoding.UTF8.GetString(value, 0, Math.Min(value.Length, 32))))
                     : BitConverter.ToString(value).Replace("-", " ");
             }
             return fields;
@@ -568,7 +722,9 @@ namespace WinWiFi.Services
             string bssid,
             string timestamp,
             Dictionary<string, HandshakeSession> handshakeTracker,
-            Dictionary<string, AccessPoint> apMap)
+            Dictionary<string, AccessPoint> apMap,
+            PcapDissectorResult result,
+            PcapDissectOptions options)
         {
             // Need at least: 4 (version/type/len) + 1 (descType) + 2 (keyInfo) + 2 (keyLen)
             // + 8 (replay) + 32 (nonce) + 16 (IV) + 8 (RSC) + 8 (reserved) + 16 (MIC) + 2 (keyDataLen) = 99 bytes
@@ -684,6 +840,11 @@ namespace WinWiFi.Services
             string sessionKey = $"{apMac.ToUpperInvariant()}_{clientMac.ToUpperInvariant()}";
             if (!handshakeTracker.TryGetValue(sessionKey, out var session))
             {
+                if (handshakeTracker.Count >= options.MaxHandshakes)
+                {
+                    AddWarning(result, $"Handshake tracking limit ({options.MaxHandshakes:N0}) reached; further sessions are reported as metadata only.");
+                    return $"EAPOL Key [{step}] (tracking limit reached)";
+                }
                 string ssid = apMap.TryGetValue(apMac, out var ap) ? ap.Ssid : "Forensic AP";
                 session = new HandshakeSession(apMac, clientMac, ssid);
                 handshakeTracker[sessionKey] = session;
@@ -757,7 +918,8 @@ namespace WinWiFi.Services
                 if (tag == 0) // Tag 0 = SSID
                 {
                     if (len == 0 || idx + len > bytes.Length) return "[Hidden SSID]";
-                    string val = Encoding.UTF8.GetString(bytes, idx, len).Trim();
+                    int ssidLength = Math.Min((int)len, 32); // 802.11 SSID field is at most 32 bytes
+                    string val = SanitizeText(Encoding.UTF8.GetString(bytes, idx, ssidLength));
                     return string.IsNullOrEmpty(val) ? "[Hidden SSID]" : val;
                 }
                 idx += len;
@@ -784,7 +946,7 @@ namespace WinWiFi.Services
             return defaultChannel;
         }
 
-        private void DissectPcapNg(byte[] bytes, PcapDissectorResult result)
+        private void DissectPcapNg(byte[] bytes, PcapDissectorResult result, PcapDissectOptions options)
         {
             using var ms = new MemoryStream(bytes);
             using var reader = new BinaryReader(ms);
@@ -792,73 +954,314 @@ namespace WinWiFi.Services
             var apMap = new Dictionary<string, AccessPoint>(StringComparer.OrdinalIgnoreCase);
             var clientMap = new Dictionary<string, StationClientRecord>(StringComparer.OrdinalIgnoreCase);
             var handshakeTracker = new Dictionary<string, HandshakeSession>(StringComparer.OrdinalIgnoreCase);
+            var interfaces = new Dictionary<uint, PcapNgInterface>();
 
             int frameNum = 1;
-            uint currentLinkType = 127; // Default to 802.11 Radiotap
+            bool sawSectionHeader = false;
+            bool recordLimitReported = false;
+            int malformedBlocks = 0;
+            int snapLenViolations = 0;
+            bool unsupportedLinkReported = false;
 
             while (ms.Position + 8 <= ms.Length)
             {
+                if (result.Packets.Count >= options.MaxPackets)
+                {
+                    result.Truncated = true;
+                    if (!recordLimitReported)
+                    {
+                        AddWarning(result, $"Stopped after {options.MaxPackets:N0} frames; the capture contains more records than the import limit.");
+                        recordLimitReported = true;
+                    }
+                    break;
+                }
+
+                long blockStart = ms.Position;
                 uint blockType = reader.ReadUInt32();
                 uint blockTotalLen = reader.ReadUInt32();
 
-                if (blockTotalLen < 12 || ms.Position + blockTotalLen - 8 > ms.Length) break;
-                long blockEndPos = ms.Position + blockTotalLen - 8;
-
-                // 1. Interface Description Block (Type 0x00000001)
-                if (blockType == 0x00000001 && blockTotalLen >= 16)
+                if (blockTotalLen < 12 || blockTotalLen > MaxPcapngBlockBytes)
                 {
-                    ushort linkTypeValue = reader.ReadUInt16();
-                    reader.ReadUInt16(); // reserved
-                    reader.ReadUInt32(); // snaplen
-                    currentLinkType = linkTypeValue;
-                    result.LinkTypeValue = currentLinkType;
-                    result.LinkTypeName = currentLinkType == 127 
-                        ? "DLT_IEEE802_11_RADIO (Radiotap)" 
-                        : (currentLinkType == 105 ? "DLT_IEEE802_11" : $"DLT_{currentLinkType}");
+                    result.Truncated = true;
+                    AddWarning(result, $"PCAPNG block at offset {blockStart:N0} declares an invalid length ({blockTotalLen:N0}); parsing stopped.");
+                    break;
                 }
-                // 2. Enhanced Packet Block (Type 0x00000006)
-                else if (blockType == 0x00000006 && blockTotalLen >= 32)
+
+                long blockEnd = blockStart + blockTotalLen;
+                if (blockEnd > ms.Length)
                 {
-                    uint ifaceId = reader.ReadUInt32();
-                    uint tsHigh = reader.ReadUInt32();
-                    uint tsLow = reader.ReadUInt32();
-                    uint capLen = reader.ReadUInt32();
-                    uint origLen = reader.ReadUInt32();
+                    result.Truncated = true;
+                    AddWarning(result, $"PCAPNG block at offset {blockStart:N0} extends past the end of the file; parsing stopped.");
+                    break;
+                }
 
-                    // Standard PCAPNG timestamp resolution is 1e-6 (microsecond)
-                    ulong totalTicks = ((ulong)tsHigh << 32) | tsLow;
-                    uint sec = (uint)(totalTicks / 1000000);
-                    uint usec = (uint)(totalTicks % 1000000);
-
-                    if (capLen > 0 && ms.Position + capLen <= ms.Length)
+                if (blockType == PCAPNG_SECTION_HEADER)
+                {
+                    if (blockTotalLen < 28)
                     {
-                        byte[] pkt = reader.ReadBytes((int)capLen);
-                        var packet = ParseSingleFrame(pkt, frameNum++, sec, usec, false, currentLinkType, apMap, clientMap, handshakeTracker, result);
-                        if (packet != null)
+                        malformedBlocks++;
+                    }
+                    else
+                    {
+                        ms.Position = blockStart + 8;
+                        uint byteOrderMagic = reader.ReadUInt32();
+                        if (byteOrderMagic != PCAPNG_BYTE_ORDER_MAGIC)
                         {
-                            result.Packets.Add(packet);
+                            if (byteOrderMagic == 0x4d3c2b1a)
+                            {
+                                throw new NotSupportedException("Byte-swapped PCAPNG captures are not supported. Re-export the capture in native byte order.");
+                            }
+                            throw new InvalidDataException("PCAPNG section header is missing the byte-order magic.");
+                        }
+
+                        ushort majorVersion = reader.ReadUInt16();
+                        if (majorVersion != 1)
+                        {
+                            AddWarning(result, $"PCAPNG section reports version {majorVersion}; expected 1.");
+                        }
+
+                        sawSectionHeader = true;
+                        interfaces.Clear();
+                        result.LinkTypeValue = 127;
+                        result.LinkTypeName = DescribeLinkType(127);
+                    }
+                }
+                else if (!sawSectionHeader)
+                {
+                    throw new InvalidDataException("PCAPNG capture does not start with a section header block.");
+                }
+                else if (blockType == PCAPNG_INTERFACE_DESCRIPTION)
+                {
+                    if (blockEnd - ms.Position < 8)
+                    {
+                        malformedBlocks++;
+                    }
+                    else
+                    {
+                        ushort linkType = reader.ReadUInt16();
+                        _ = reader.ReadUInt16(); // reserved
+                        uint snapLen = reader.ReadUInt32();
+                        double unitsPerSecond = ParseTimestampResolution(reader, ms.Position, blockEnd - 4);
+                        uint ifaceId = (uint)interfaces.Count;
+                        interfaces[ifaceId] = new PcapNgInterface(linkType, snapLen, unitsPerSecond);
+
+                        result.LinkTypeValue = linkType;
+                        result.LinkTypeName = DescribeLinkType(linkType);
+                        if (snapLen > (uint)options.MaxFrameBytes)
+                        {
+                            AddWarning(result, $"Interface {ifaceId} snaplen ({snapLen} bytes) exceeds the {options.MaxFrameBytes}-byte per-frame limit.");
+                        }
+                    }
+                }
+                else if (blockType == PCAPNG_ENHANCED_PACKET)
+                {
+                    if (blockEnd - ms.Position < 20)
+                    {
+                        malformedBlocks++;
+                    }
+                    else
+                    {
+                        uint ifaceId = reader.ReadUInt32();
+                        uint tsHigh = reader.ReadUInt32();
+                        uint tsLow = reader.ReadUInt32();
+                        uint capLen = reader.ReadUInt32();
+                        _ = reader.ReadUInt32(); // original length
+
+                        if (!interfaces.TryGetValue(ifaceId, out var iface))
+                        {
+                            if (interfaces.Count == 0)
+                            {
+                                AddWarning(result, "Enhanced packet block appeared before any interface description; assuming 802.11 radiotap.");
+                            }
+                            else
+                            {
+                                AddWarning(result, $"Enhanced packet block references unknown interface {ifaceId}; assuming 802.11 radiotap.");
+                            }
+                            iface = new PcapNgInterface(127, (uint)options.MaxFrameBytes, 1_000_000d);
+                        }
+
+                        if (capLen > (uint)options.MaxFrameBytes)
+                        {
+                            result.Truncated = true;
+                            AddWarning(result, $"PCAPNG packet declares {capLen:N0} captured bytes, above the {options.MaxFrameBytes:N0}-byte limit; parsing stopped.");
+                            break;
+                        }
+
+                        if (iface.SnapLen > 0 && capLen > iface.SnapLen && snapLenViolations < 3)
+                        {
+                            snapLenViolations++;
+                            AddWarning(result, $"PCAPNG packet captured {capLen} bytes but interface {ifaceId} snaplen is {iface.SnapLen}.");
+                        }
+
+                        if (iface.LinkType != 127 && iface.LinkType != 105)
+                        {
+                            if (!unsupportedLinkReported)
+                            {
+                                AddWarning(result, $"Interface {ifaceId} uses {DescribeLinkType(iface.LinkType)}; only 802.11 captures are dissected.");
+                                unsupportedLinkReported = true;
+                            }
+                        }
+                        else if (ms.Position + capLen > blockEnd - 4)
+                        {
+                            AddWarning(result, $"PCAPNG packet at offset {blockStart:N0} is truncated inside its block.");
+                            malformedBlocks++;
+                        }
+                        else
+                        {
+                            ulong totalTicks = ((ulong)tsHigh << 32) | tsLow;
+                            var (sec, fraction) = ConvertPcapNgTimestamp(totalTicks, iface.UnitsPerSecond);
+                            byte[] pkt = reader.ReadBytes((int)capLen);
+                            var packet = ParseSingleFrame(pkt, frameNum++, sec, fraction, iface.LinkType, apMap, clientMap, handshakeTracker, result, options);
+                            if (packet != null)
+                            {
+                                result.Packets.Add(packet);
+                            }
+                        }
+                    }
+                }
+                else if (blockType == PCAPNG_SIMPLE_PACKET)
+                {
+                    if (blockEnd - ms.Position < 4)
+                    {
+                        malformedBlocks++;
+                    }
+                    else
+                    {
+                        uint originalLength = reader.ReadUInt32();
+                        long dataStart = ms.Position;
+                        long available = blockEnd - 4 - dataStart;
+                        int capLen = (int)Math.Clamp(available, 0, options.MaxFrameBytes);
+                        if (originalLength > 0 && originalLength < (uint)capLen)
+                        {
+                            capLen = (int)originalLength;
+                        }
+
+                        if (capLen > 0)
+                        {
+                            var iface = interfaces.TryGetValue(0, out var firstInterface)
+                                ? firstInterface
+                                : new PcapNgInterface(127, (uint)options.MaxFrameBytes, 1_000_000d);
+                            if (iface.LinkType != 127 && iface.LinkType != 105)
+                            {
+                                if (!unsupportedLinkReported)
+                                {
+                                    AddWarning(result, $"Interface 0 uses {DescribeLinkType(iface.LinkType)}; only 802.11 captures are dissected.");
+                                    unsupportedLinkReported = true;
+                                }
+                            }
+                            else
+                            {
+                                var (sec, fraction) = (0u, 0d);
+                                byte[] pkt = reader.ReadBytes(capLen);
+                                var packet = ParseSingleFrame(pkt, frameNum++, sec, fraction, iface.LinkType, apMap, clientMap, handshakeTracker, result, options);
+                                if (packet != null)
+                                {
+                                    result.Packets.Add(packet);
+                                }
+                            }
                         }
                     }
                 }
 
-                ms.Seek(blockEndPos, SeekOrigin.Begin);
+                // Verify the block trailer so a corrupt length cannot silently
+                // shift the parser into the middle of another block.
+                ms.Position = blockEnd - 4;
+                uint trailerLength = reader.ReadUInt32();
+                if (trailerLength != blockTotalLen)
+                {
+                    AddWarning(result, $"PCAPNG block at offset {blockStart:N0} has mismatched trailer length ({trailerLength:N0} vs {blockTotalLen:N0}); parsing stopped.");
+                    result.Truncated = true;
+                    break;
+                }
+
+                ms.Position = blockEnd;
             }
 
-            foreach (var kvp in handshakeTracker)
+            if (!sawSectionHeader)
             {
-                var hs = kvp.Value.ToHandshakeInfo();
-                if (hs != null) result.Handshakes.Add(hs);
+                throw new InvalidDataException("PCAPNG capture does not start with a section header block.");
             }
-
-            result.AccessPoints.AddRange(apMap.Values);
-            result.Clients.AddRange(clientMap.Values);
-            result.TotalFramesCount = result.Packets.Count;
-
-            if (result.Packets.Count > 0)
+            if (ms.Position < ms.Length && !result.Truncated && ms.Position + 8 > ms.Length)
             {
-                result.CaptureStartTime = result.Packets.First().Timestamp;
-                result.CaptureEndTime = result.Packets.Last().Timestamp;
+                AddWarning(result, $"Ignored {ms.Length - ms.Position} trailing byte(s) that do not form a complete block header.");
             }
+            if (malformedBlocks > 0)
+            {
+                AddWarning(result, $"{malformedBlocks} malformed PCAPNG block(s) were skipped.");
+            }
+
+            ConsolidateResults(result, apMap, clientMap, handshakeTracker);
+            FinalizeWarnings(result);
+        }
+
+        private static double ParseTimestampResolution(BinaryReader reader, long optionsStart, long optionsEnd)
+        {
+            double unitsPerSecond = 1_000_000d; // PCAPNG default is microseconds
+            long position = optionsStart;
+            while (position + 4 <= optionsEnd)
+            {
+                reader.BaseStream.Position = position;
+                ushort code = reader.ReadUInt16();
+                ushort length = reader.ReadUInt16();
+                if (code == 0) break;
+
+                int paddedLength = (length + 3) & ~3;
+                if (position + 4 + paddedLength > optionsEnd) break;
+
+                if (code == 9 && length >= 1) // if_tsresol
+                {
+                    byte raw = reader.ReadByte();
+                    int exponent = raw & 0x7F;
+                    if ((raw & 0x80) != 0)
+                    {
+                        if (exponent <= 62) unitsPerSecond = Math.Pow(2, exponent);
+                    }
+                    else if (exponent <= 18)
+                    {
+                        unitsPerSecond = Math.Pow(10, exponent);
+                    }
+                    if (!(unitsPerSecond >= 1)) unitsPerSecond = 1;
+                }
+
+                position += 4 + paddedLength;
+            }
+            return unitsPerSecond;
+        }
+
+        private static (uint sec, double fraction) ConvertPcapNgTimestamp(ulong totalTicks, double unitsPerSecond)
+        {
+            ulong wholeUnits = (ulong)Math.Round(unitsPerSecond);
+            if (unitsPerSecond <= 1_000_000_000d && Math.Abs(unitsPerSecond - wholeUnits) < 0.5)
+            {
+                ulong sec = totalTicks / wholeUnits;
+                double fraction = (totalTicks % wholeUnits) / (double)wholeUnits;
+                return sec > uint.MaxValue ? (uint.MaxValue, 0.9999999d) : ((uint)sec, fraction);
+            }
+
+            double totalSeconds = totalTicks / unitsPerSecond;
+            if (totalSeconds > uint.MaxValue) return (uint.MaxValue, 0.9999999d);
+            uint wholeSeconds = (uint)Math.Floor(totalSeconds);
+            return (wholeSeconds, totalSeconds - wholeSeconds);
+        }
+
+        private static string DescribeLinkType(uint linkType) => linkType switch
+        {
+            127 => "DLT_IEEE802_11_RADIO (Radiotap)",
+            105 => "DLT_IEEE802_11 (Raw 802.11)",
+            1 => "DLT_EN10MB (Ethernet)",
+            _ => $"DLT_{linkType} (Custom Link Layer)"
+        };
+
+        private sealed record PcapNgInterface(ushort LinkType, uint SnapLen, double UnitsPerSecond);
+
+        private static string SanitizeText(string value)
+        {
+            var builder = new StringBuilder(value.Length);
+            foreach (char c in value)
+            {
+                builder.Append(char.IsControl(c) ? '?' : c);
+            }
+            return builder.ToString().Trim();
         }
 
         private static string FormatHexDump(byte[] data, int offset, int length)

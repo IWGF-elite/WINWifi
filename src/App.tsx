@@ -460,7 +460,17 @@ export default function App() {
       source: 'PCAP_PARSER',
       message: `Parsed binary capture file "${filename}": Decoded ${result.packets.length} frames, discovered ${taggedAps.length} BSSIDs.`,
     });
-    setLogs((prev) => [log, ...prev]);
+    const integrityLogs = (result.warnings ?? []).map((message) =>
+      db.appendLog({ level: 'WARN', source: 'PCAP_PARSER', message })
+    );
+    if (result.truncated) {
+      integrityLogs.push(db.appendLog({
+        level: 'WARN',
+        source: 'PCAP_PARSER',
+        message: 'Capture parsing stopped at a safety limit; only the validated prefix is shown.',
+      }));
+    }
+    setLogs((prev) => [...integrityLogs.reverse(), log, ...prev]);
   };
 
   const handleImportPcapFile = async (file: File) => {
@@ -479,6 +489,8 @@ export default function App() {
         dataSourceOrigin: 'IMPORTED' as DataOrigin
       })),
       handshakes: native.handshakes || [],
+      warnings: Array.isArray(native.parseWarnings) ? native.parseWarnings : [],
+      truncated: Boolean(native.truncated),
       summary: {
         totalPackets: native.totalFramesCount || 0,
         beaconCount: (native.packets || []).filter((p: any) => p.subtype === 'Beacon').length,
@@ -494,6 +506,18 @@ export default function App() {
       if (ap) ap.handshake = { ...handshake, origin: 'IMPORTED', isSimulated: false };
     });
     handleImportPcap(parsed, file.name);
+
+    const importedFindings = Array.isArray(native.incidents) ? native.incidents : [];
+    const importedIncidents = mapNativeFindingsToIncidents(importedFindings);
+    if (importedIncidents.length > 0) {
+      const projectId = currentProjectIdRef.current;
+      setIncidents(previous => {
+        const merged = reconcileLiveIncidents(importedIncidents, parsed.accessPoints, previous);
+        threatEngine.setIncidents(merged);
+        db.saveIncidents(merged, projectId);
+        return merged;
+      });
+    }
   };
 
   // Ingestion: Real Windows Netsh CLI Ingest

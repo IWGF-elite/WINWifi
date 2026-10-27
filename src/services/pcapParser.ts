@@ -12,6 +12,8 @@ export interface PcapParseResult {
   packets: PcapPacket[];
   accessPoints: AccessPoint[];
   handshakes: HandshakeInfo[];
+  warnings?: string[];
+  truncated?: boolean;
   summary: {
     totalPackets: number;
     beaconCount: number;
@@ -25,6 +27,10 @@ export interface PcapParseResult {
 
 export class PcapService {
   private static instance: PcapService;
+  private static readonly MAX_CAPTURE_BYTES = 100 * 1024 * 1024;
+  private static readonly MAX_FRAMES = 200_000;
+  private static readonly MAX_FRAME_BYTES = 262_144;
+  private static readonly MAX_WARNINGS = 25;
 
   public static getInstance(): PcapService {
     if (!PcapService.instance) {
@@ -74,8 +80,16 @@ export class PcapService {
     if (data.length < 24) {
       throw new Error('File size is too small for a valid PCAP header (< 24 bytes).');
     }
+    if (data.length > PcapService.MAX_CAPTURE_BYTES) {
+      throw new Error(`Capture size is ${Math.round(data.length / (1024 * 1024))} MB; the local import limit is ${PcapService.MAX_CAPTURE_BYTES / (1024 * 1024)} MB.`);
+    }
 
     const view = new DataView(buffer);
+    const warnings: string[] = [];
+    let truncated = false;
+    const addWarning = (message: string) => {
+      if (warnings.length < PcapService.MAX_WARNINGS) warnings.push(message);
+    };
     const magic = view.getUint32(0, true);
     let isLittleEndian = true;
 
@@ -105,6 +119,16 @@ export class PcapService {
       network === 105 ? 'IEEE 802.11 Wireless' :
       network === 1 ? 'Ethernet' : `LinkType (${network})`;
 
+    if (network !== 127 && network !== 105) {
+      throw new Error(`This capture uses ${linkTypeName}. WinWiFi only dissects 802.11 captures and will not infer access points from other link types.`);
+    }
+    if (versionMajor !== 2 || versionMinor !== 4) {
+      addWarning(`Capture header reports libpcap version ${versionMajor}.${versionMinor}; expected 2.4.`);
+    }
+    if (snaplen > PcapService.MAX_FRAME_BYTES) {
+      addWarning(`Capture snaplen (${snaplen} bytes) exceeds the ${PcapService.MAX_FRAME_BYTES}-byte per-frame limit; oversized records will be rejected.`);
+    }
+
     let offset = 24;
     const packets: PcapPacket[] = [];
     const apMap = new Map<string, AccessPoint>();
@@ -115,14 +139,34 @@ export class PcapService {
     let eapolCount = 0;
 
     while (offset + 16 <= data.length) {
+      if (packets.length >= PcapService.MAX_FRAMES) {
+        truncated = true;
+        addWarning(`Stopped after ${PcapService.MAX_FRAMES.toLocaleString()} frames; the capture contains more records than the import limit.`);
+        break;
+      }
+
       const tsSec = view.getUint32(offset, isLittleEndian);
       const tsUsec = view.getUint32(offset + 4, isLittleEndian);
       const inclLen = view.getUint32(offset + 8, isLittleEndian);
       const origLen = view.getUint32(offset + 12, isLittleEndian);
       offset += 16;
 
+      if (inclLen === 0) {
+        addWarning(`Record ${packetNumber} declares zero captured bytes and was skipped.`);
+        continue;
+      }
+      if (inclLen > PcapService.MAX_FRAME_BYTES) {
+        truncated = true;
+        addWarning(`Record ${packetNumber} declares ${inclLen.toLocaleString()} bytes, above the ${PcapService.MAX_FRAME_BYTES.toLocaleString()}-byte per-frame limit; parsing stopped.`);
+        break;
+      }
+      if (origLen > 0 && inclLen > origLen) {
+        addWarning(`Record ${packetNumber} captured length (${inclLen}) exceeds original length (${origLen}).`);
+      }
       if (offset + inclLen > data.length) {
-        break; // Truncated final packet
+        truncated = true;
+        addWarning(`Record ${packetNumber} is truncated: header declares ${inclLen} bytes but only ${data.length - offset} remain.`);
+        break;
       }
 
       const packetBytes = data.subarray(offset, offset + inclLen);
@@ -133,9 +177,19 @@ export class PcapService {
       let rssi = -65;
       let channel = 6;
 
-      if (network === 127 && packetBytes.length >= 8) {
+      if (network === 127) {
+        if (packetBytes.length < 8) {
+          addWarning(`Record ${packetNumber} is too short to contain a radiotap header and was skipped.`);
+          packetNumber++;
+          continue;
+        }
         const rtLen = packetBytes[2] | (packetBytes[3] << 8);
-        if (rtLen <= packetBytes.length && rtLen >= 8) {
+        if (rtLen > packetBytes.length || rtLen < 8 || rtLen === packetBytes.length) {
+          addWarning(`Record ${packetNumber} declares radiotap length ${rtLen} outside its ${packetBytes.length}-byte frame and was skipped.`);
+          packetNumber++;
+          continue;
+        }
+        {
           const rtView = new DataView(packetBytes.buffer, packetBytes.byteOffset, rtLen);
           const present = rtView.getUint32(4, true);
 
@@ -323,6 +377,10 @@ export class PcapService {
       }
     }
 
+    if (!truncated && offset < data.length) {
+      addWarning(`Ignored ${data.length - offset} trailing byte(s) that do not form a complete record header.`);
+    }
+
     // Attach parsed handshakes to access points
     const handshakes = Array.from(handshakesMap.values());
     handshakes.forEach(h => {
@@ -339,6 +397,8 @@ export class PcapService {
       packets,
       accessPoints,
       handshakes,
+      warnings,
+      truncated,
       summary: {
         totalPackets: packets.length,
         beaconCount,
@@ -349,6 +409,10 @@ export class PcapService {
         fileSize: buffer.byteLength
       }
     };
+  }
+
+  private static sanitizeSsid(value: string): string {
+    return value.replace(/[\u0000-\u001F\u007F]/g, '?').trim();
   }
 
   // Parse Beacon / Probe Response Information Elements
@@ -378,7 +442,7 @@ export class PcapService {
 
       // Tag 0: SSID
       if (tag === 0) {
-        ssid = new TextDecoder('utf-8').decode(tagData);
+        ssid = PcapService.sanitizeSsid(new TextDecoder('utf-8').decode(tagData.subarray(0, 32)));
       }
       // Tag 3: DSSS Parameter Set (Current Channel)
       else if (tag === 3 && len >= 1) {
