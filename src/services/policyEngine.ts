@@ -1,4 +1,19 @@
-import { AccessPoint, SecurityPolicy, PolicyEvaluationResult } from '../types';
+import { AccessPoint, AssetClassification, SecurityPolicy, PolicyEvaluationResult } from '../types';
+
+/**
+ * Classification routing. Classified assets are evaluated against the policy
+ * assigned to their class; unclassified or Unknown assets fall back to the
+ * analyst-selected default policy.
+ */
+export const POLICY_CLASSIFICATION_ROUTES: { classification: AssetClassification; policyId: string; rationale: string }[] = [
+  { classification: 'Corporate', policyId: 'corp-policy', rationale: 'Enterprise baseline for authorized corporate infrastructure.' },
+  { classification: 'Trusted', policyId: 'corp-policy', rationale: 'Analyst-trusted infrastructure inherits the enterprise baseline.' },
+  { classification: 'Guest', policyId: 'guest-policy', rationale: 'Visitor networks may allow OWE or PSK but still prohibit legacy ciphers.' },
+  { classification: 'IoT', policyId: 'iot-policy', rationale: 'IoT radios are held to WPA2-AES with WPS prohibited.' },
+  { classification: 'Suspicious', policyId: 'high-sec-policy', rationale: 'Suspicious transmitters are held to the strictest available baseline.' },
+  { classification: 'Rogue', policyId: 'high-sec-policy', rationale: 'Rogue transmitters are held to the strictest available baseline.' },
+  { classification: 'Investigating', policyId: 'high-sec-policy', rationale: 'Assets under investigation are held to the strictest available baseline.' }
+];
 
 export const DEFAULT_POLICIES: SecurityPolicy[] = [
   {
@@ -81,10 +96,22 @@ export class PolicyEngine {
     }
   }
 
+  /** Resolves the effective policy for an asset from its classification. */
+  public resolvePolicy(ap: AccessPoint): SecurityPolicy {
+    const route = ap.classification
+      ? POLICY_CLASSIFICATION_ROUTES.find(candidate => candidate.classification === ap.classification)
+      : undefined;
+    const routed = route ? this.policies.find(policy => policy.id === route.policyId) : undefined;
+    return routed || this.getActivePolicy();
+  }
+
+  /** Evaluates one AP. An explicit policy overrides classification routing. */
   public evaluateAP(ap: AccessPoint, policy?: SecurityPolicy): PolicyEvaluationResult {
-    const pol = policy || this.getActivePolicy();
+    const pol = policy || this.resolvePolicy(ap);
     const failed: string[] = [];
     const passed: string[] = [];
+    let approvalNonCompliant = false;
+    let approvalWarning = false;
 
     // 1. WEP Check
     if (pol.wepProhibited && (ap.security.includes('WEP') || ap.cipher === 'WEP')) {
@@ -128,17 +155,47 @@ export class PolicyEngine {
       passed.push('Complies with WPA3 protocol standard');
     }
 
+    // 7. Classification and registry approval governance
+    if (ap.classification === 'Rogue') {
+      failed.push('Network is classified as rogue in the project scope');
+      approvalNonCompliant = true;
+    } else if (ap.classification === 'Suspicious') {
+      failed.push('Network is classified as suspicious and requires analyst review');
+      approvalWarning = true;
+    }
+
+    switch (ap.approvedStatus) {
+      case 'Approved':
+        passed.push('Registry approval status is Approved');
+        break;
+      case 'Unapproved':
+        failed.push('Registry approval status is Unapproved');
+        approvalNonCompliant = true;
+        break;
+      case 'Investigating':
+        failed.push('Registry approval status is Under Investigation');
+        approvalWarning = true;
+        break;
+      case 'Pending Review':
+        failed.push('Registry approval status is Pending Review');
+        approvalWarning = true;
+        break;
+    }
+
     let status: 'Compliant' | 'Warning' | 'Non-Compliant' = 'Compliant';
-    if (failed.length > 2 || failed.some(f => f.includes('WEP') || f.includes('cleartext'))) {
+    if (approvalNonCompliant || failed.length > 2 || failed.some(f => f.includes('WEP') || f.includes('cleartext'))) {
       status = 'Non-Compliant';
-    } else if (failed.length > 0) {
+    } else if (approvalWarning || failed.length > 0) {
       status = 'Warning';
     }
 
     return {
       apBssid: ap.bssid,
+      policyId: pol.id,
       policyName: pol.name,
       status,
+      classification: ap.classification,
+      approvalStatus: ap.approvedStatus,
       failedRules: failed,
       passedRules: passed,
     };

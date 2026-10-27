@@ -316,8 +316,11 @@ export interface SecurityPolicy {
 
 export interface PolicyEvaluationResult {
   apBssid: string;
+  policyId: string;
   policyName: string;
   status: 'Compliant' | 'Warning' | 'Non-Compliant' | 'Unknown';
+  classification?: AssetClassification;
+  approvalStatus?: AccessPoint['approvedStatus'];
   failedRules: string[];
   passedRules: string[];
 }
