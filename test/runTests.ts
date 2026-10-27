@@ -23,6 +23,29 @@ import {
   parseAssetCsv,
   serializeAssetCsv
 } from '../src/services/assetRegistry';
+import {
+  addBuilding,
+  addFloor,
+  addSite,
+  countAssetsAtSite,
+  countAssetsInBuilding,
+  countAssetsOnFloor,
+  deleteBuilding,
+  deleteFloor,
+  deleteSite,
+  ensureScopeInDirectory,
+  listBuildingNames,
+  listFloorNames,
+  listSiteNames,
+  normalizeSiteDirectory,
+  renameBuilding,
+  renameBuildingInAssets,
+  renameFloor,
+  renameFloorInAssets,
+  renameSite,
+  renameSiteInAssets,
+  sanitizeSiteName
+} from '../src/services/siteDirectory';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -826,6 +849,152 @@ runTest('T21: Classification Routing & Approval Enforcement', () => {
   }
 
   engine.setActivePolicy('corp-policy');
+});
+
+// 22. Site Directory Bounds, Rename Propagation & Scope Seeding
+runTest('T22: Site Directory CRUD, Counts & Rename Propagation', () => {
+  if (sanitizeSiteName('  \u0000 HQ \n\t Main  ') !== 'HQ Main') {
+    throw new Error(`sanitizeSiteName did not strip control characters and collapse whitespace: ${JSON.stringify(sanitizeSiteName('  \u0000 HQ \n\t Main  '))}`);
+  }
+  if (sanitizeSiteName('x'.repeat(120)).length !== 80) {
+    throw new Error('sanitizeSiteName did not cap names at 80 characters');
+  }
+  if (normalizeSiteDirectory('not-an-array').length !== 0 ||
+      normalizeSiteDirectory([{ name: '' }, null, 42, { name: 'HQ' }]).length !== 1) {
+    throw new Error('normalizeSiteDirectory accepted malformed input');
+  }
+
+  const raw = [
+    { id: 'same', name: 'HQ', buildings: [{ id: 'b-same', name: 'Main', floors: [{ id: 'f-same', name: '3' }] }] },
+    { id: 'same', name: 'hq', buildings: [] },
+    { id: 'b-same', name: 'Branch', buildings: [{ id: 'b-same', name: 'Annex', floors: [{ id: 'f-same', name: '1' }, { id: 'f-same', name: '2' }] }] }
+  ];
+  const normalizedDirectory = normalizeSiteDirectory(raw);
+  if (normalizedDirectory.length !== 2) {
+    throw new Error(`Duplicate site names were not removed: ${normalizedDirectory.length}`);
+  }
+  const allIds = [
+    ...normalizedDirectory.map(site => site.id),
+    ...normalizedDirectory.flatMap(site => site.buildings.map(building => building.id)),
+    ...normalizedDirectory.flatMap(site => site.buildings.flatMap(building => building.floors.map(floor => floor.id)))
+  ];
+  if (new Set(allIds).size !== allIds.length) {
+    throw new Error('normalizeSiteDirectory did not regenerate duplicate IDs');
+  }
+  if (listSiteNames(normalizedDirectory).join('|') !== 'HQ|Branch' ||
+      listBuildingNames(normalizedDirectory, 'hq').join('|') !== 'Main' ||
+      listFloorNames(normalizedDirectory, 'hq', 'MAIN').join('|') !== '3') {
+    throw new Error('Directory listing helpers are not case-insensitive');
+  }
+
+  let directory: ReturnType<typeof normalizeSiteDirectory> = [];
+  const addSiteResult = addSite(directory, 'Headquarters');
+  if (addSiteResult.error || addSiteResult.directory.length !== 1) {
+    throw new Error(`addSite failed: ${addSiteResult.error}`);
+  }
+  directory = addSiteResult.directory;
+  if (!addSite(directory, '  headquarters ').error) {
+    throw new Error('addSite accepted a case-insensitive duplicate');
+  }
+  if (!addSite(directory, '   ').error) {
+    throw new Error('addSite accepted an empty name');
+  }
+  const siteId = directory[0].id;
+
+  directory = addBuilding(directory, siteId, 'Main').directory;
+  const buildingId = directory[0].buildings[0].id;
+  directory = addFloor(directory, siteId, buildingId, '3').directory;
+  const floorId = directory[0].buildings[0].floors[0].id;
+  if (!addBuilding(directory, siteId, 'main').error || !addFloor(directory, siteId, buildingId, '3').error) {
+    throw new Error('addBuilding/addFloor accepted duplicates');
+  }
+
+  directory = renameSite(directory, siteId, 'HQ').directory;
+  directory = renameBuilding(directory, siteId, buildingId, 'Main Campus').directory;
+  directory = renameFloor(directory, siteId, buildingId, floorId, 'Floor 3').directory;
+  if (directory[0].name !== 'HQ' || directory[0].buildings[0].name !== 'Main Campus' || directory[0].buildings[0].floors[0].name !== 'Floor 3') {
+    throw new Error('Rename helpers did not apply the new names');
+  }
+  if (!renameSite(directory, 'missing', 'X').error || !renameBuilding(directory, siteId, 'missing', 'X').error || !renameFloor(directory, siteId, buildingId, 'missing', 'X').error) {
+    throw new Error('Rename helpers accepted missing identifiers');
+  }
+
+  const asset = (overrides: Partial<any>): any => ({
+    id: 'AST-1',
+    macAddress: '02:00:00:00:00:01',
+    ssid: 'Test',
+    assetType: 'Access Point',
+    classification: 'Corporate',
+    approvalStatus: 'Approved',
+    site: '',
+    building: '',
+    areaFloor: '',
+    ownerDepartment: '',
+    vendor: '',
+    model: '',
+    lastSeen: '2026-01-01 00:00:00',
+    notes: '',
+    ...overrides
+  });
+  const siteAsset = asset({ id: 'AST-HQ', macAddress: '02:00:00:00:00:01', site: 'HQ', building: 'Main Campus', areaFloor: 'Floor 3' });
+  const caseAsset = asset({ id: 'AST-HQ-2', macAddress: '02:00:00:00:00:02', site: 'hq', building: 'main campus', areaFloor: 'floor 3' });
+  const branchAsset = asset({ id: 'AST-BR', macAddress: '02:00:00:00:00:03', site: 'Branch', building: 'Annex', areaFloor: '1' });
+  const assets = [siteAsset, caseAsset, branchAsset];
+
+  if (countAssetsAtSite(assets, 'hq') !== 2 ||
+      countAssetsInBuilding(assets, 'HQ', 'MAIN CAMPUS') !== 2 ||
+      countAssetsOnFloor(assets, 'hq', 'main campus', 'floor 3') !== 2 ||
+      countAssetsAtSite(assets, 'Branch') !== 1) {
+    throw new Error('Location counts are not case-insensitive or are miscounted');
+  }
+
+  const renamedAssets = renameSiteInAssets(assets, 'HQ', 'Headquarters');
+  if (renamedAssets[0].site !== 'Headquarters' || renamedAssets[1].site !== 'Headquarters' || renamedAssets[2] !== branchAsset) {
+    throw new Error('renameSiteInAssets did not update matching records or preserve non-matches');
+  }
+  const renamedBuildings = renameBuildingInAssets(renamedAssets, 'headquarters', 'Main Campus', 'Building A');
+  if (renamedBuildings[0].building !== 'Building A' || renamedBuildings[1].building !== 'Building A' || renamedBuildings[2] !== branchAsset) {
+    throw new Error('renameBuildingInAssets did not scope the rename to the site');
+  }
+  const renamedFloors = renameFloorInAssets(renamedBuildings, 'Headquarters', 'building a', 'Floor 3', 'Level 3');
+  if (renamedFloors[0].areaFloor !== 'Level 3' || renamedFloors[1].areaFloor !== 'Level 3' || renamedFloors[2] !== branchAsset) {
+    throw new Error('renameFloorInAssets did not scope the rename to site and building');
+  }
+  if (renameSiteInAssets(assets, 'HQ', 'HQ') !== assets) {
+    throw new Error('A no-op rename did not preserve array identity');
+  }
+
+  const removedFloor = deleteFloor(directory, siteId, buildingId, floorId);
+  if (removedFloor.error || removedFloor.directory[0].buildings[0].floors.length !== 0) {
+    throw new Error(`deleteFloor failed: ${removedFloor.error}`);
+  }
+  const removedBuilding = deleteBuilding(removedFloor.directory, siteId, buildingId);
+  if (removedBuilding.error || removedBuilding.directory[0].buildings.length !== 0) {
+    throw new Error(`deleteBuilding failed: ${removedBuilding.error}`);
+  }
+  if (!deleteBuilding(removedBuilding.directory, siteId, buildingId).error) {
+    throw new Error('deleteBuilding accepted a missing building');
+  }
+  if (!deleteSite(directory, 'missing').error) {
+    throw new Error('deleteSite accepted a missing site');
+  }
+
+  const seeded = ensureScopeInDirectory([], { organization: 'Org', site: 'HQ', building: 'Main', area: '3', assessmentId: 'A1' } as any);
+  if (seeded.length !== 1 || seeded[0].name !== 'HQ' || seeded[0].buildings.length !== 1 || seeded[0].buildings[0].name !== 'Main') {
+    throw new Error('ensureScopeInDirectory did not seed the project scope');
+  }
+  if (ensureScopeInDirectory(seeded, { site: 'hq', building: 'MAIN' } as any) !== seeded) {
+    throw new Error('ensureScopeInDirectory changed an already-seeded directory');
+  }
+  if (ensureScopeInDirectory([], undefined).length !== 0) {
+    throw new Error('ensureScopeInDirectory invented a site without a scope');
+  }
+
+  let capped = normalizeSiteDirectory([]);
+  for (let index = 0; index < 50; index++) capped = addSite(capped, `Site ${index}`).directory;
+  if (!addSite(capped, 'Site 51').error) {
+    throw new Error('addSite ignored the 50-site cap');
+  }
 });
 
 console.log(`\nResults: ${passedCount}/${totalCount} tests passed.\n`);

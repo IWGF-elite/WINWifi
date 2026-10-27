@@ -325,6 +325,23 @@ export interface PolicyEvaluationResult {
   passedRules: string[];
 }
 
+export interface SiteFloorRecord {
+  id: string;
+  name: string;
+}
+
+export interface SiteBuildingRecord {
+  id: string;
+  name: string;
+  floors: SiteFloorRecord[];
+}
+
+export interface SiteRecord {
+  id: string;
+  name: string;
+  buildings: SiteBuildingRecord[];
+}
+
 export interface EnterpriseScope {
   organization: string;
   site: string;

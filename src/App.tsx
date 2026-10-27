@@ -17,7 +17,9 @@ import {
   SecurityChange,
   TrainingLabScenario,
   AnalystClassification,
-  EnterpriseAssetRecord
+  EnterpriseAssetRecord,
+  EnterpriseScope,
+  SiteRecord
 } from './types';
 import { WifiEngine } from './services/wifiEngine';
 import { SqliteDatabaseService } from './services/storage';
@@ -39,6 +41,7 @@ import {
   removeAssetFromAccessPoints,
   serializeAssetCsv
 } from './services/assetRegistry';
+import { ensureScopeInDirectory } from './services/siteDirectory';
 import type { AssetImportSummary } from './components/EnterpriseRegistry';
 
 // Components
@@ -161,6 +164,17 @@ export default function App() {
       return next.every((ap, index) => ap === previous[index]) ? previous : next;
     });
   }, [enterpriseAssets]);
+  const [siteDirectory, setSiteDirectory] = useState<SiteRecord[]>(() => {
+    const projectId = db.getCurrentProjectId();
+    const raw = db.getSiteDirectory(projectId);
+    const project = db.getProjects().find(candidate => candidate.id === projectId);
+    const seeded = ensureScopeInDirectory(raw, project?.scope);
+    if (seeded !== raw) db.saveSiteDirectory(seeded, projectId);
+    return seeded;
+  });
+  const siteDirectoryRef = useRef(siteDirectory);
+  useEffect(() => { siteDirectoryRef.current = siteDirectory; }, [siteDirectory]);
+
   const [packets, setPackets] = useState<PcapPacket[]>([]);
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
   // A visual row/focus selection is not permission to open the inspection drawer.
@@ -713,6 +727,43 @@ export default function App() {
     db.saveAccessPoints(currentProjectId, next);
   };
 
+  const handleSiteDirectoryChange = useCallback((sites: SiteRecord[], changedAssets: EnterpriseAssetRecord[]) => {
+    const projectId = currentProjectIdRef.current;
+    siteDirectoryRef.current = sites;
+    setSiteDirectory(sites);
+    db.saveSiteDirectory(sites, projectId);
+
+    if (changedAssets.length === 0) return;
+
+    const next = mergeAssetLists(enterpriseAssetsRef.current, changedAssets);
+    commitEnterpriseAssets(next, projectId);
+    setAccessPoints(previous => applyAssetsToAccessPoints(previous, next));
+
+    const countLabel = `${changedAssets.length} registry location record${changedAssets.length === 1 ? '' : 's'}`;
+    if (bridgeClient.getState() !== 'CONNECTED') {
+      const log = db.appendLog({
+        level: 'INFO',
+        source: 'SITE_DIRECTORY',
+        message: `Updated ${countLabel} locally after a directory rename; native sync is deferred until the bridge reconnects.`,
+      }, projectId);
+      setLogs(previous => [log, ...previous]);
+      return;
+    }
+
+    void Promise.allSettled(changedAssets.map(asset => bridgeClient.saveEnterpriseAsset(asset))).then(results => {
+      if (currentProjectIdRef.current !== projectId) return;
+      const failed = results.filter(result => result.status === 'rejected').length;
+      const log = db.appendLog({
+        level: failed ? 'WARN' : 'SUCCESS',
+        source: 'SITE_DIRECTORY',
+        message: failed
+          ? `Updated ${countLabel} locally after a directory rename; ${failed} native sync${failed === 1 ? '' : 's'} failed and will retry on reconnect.`
+          : `Updated ${countLabel} after a directory rename.`,
+      }, projectId);
+      setLogs(previous => [log, ...previous]);
+    });
+  }, [bridgeClient, commitEnterpriseAssets, db]);
+
   const handleSaveEnterpriseAsset = async (asset: EnterpriseAssetRecord) => {
     const projectId = currentProjectIdRef.current;
     const next = mergeAssetLists(enterpriseAssetsRef.current, [asset]);
@@ -915,11 +966,16 @@ export default function App() {
 
   // Switching projects reloads every scoped entity so the dashboard never shows
   // a previous site's cases, evidence, or logs.
-  const applyProjectWorkspace = (projectId: string, projectName?: string) => {
+  const applyProjectWorkspace = (projectId: string, projectName?: string, scope?: EnterpriseScope) => {
     const savedAps = applyAnalystOverrides(
       db.getAccessPoints(projectId).filter(ap => ap.dataSourceOrigin !== 'TRAINING'),
       db.getAnalystOverrides(projectId));
     const savedIncidents = db.getIncidents(projectId) ?? [];
+    const storedDirectory = db.getSiteDirectory(projectId);
+    const localDirectory = ensureScopeInDirectory(storedDirectory, scope);
+    if (localDirectory !== storedDirectory) db.saveSiteDirectory(localDirectory, projectId);
+    siteDirectoryRef.current = localDirectory;
+    setSiteDirectory(localDirectory);
     const localAssets = db.getEnterpriseAssets(projectId);
     enterpriseAssetsRef.current = localAssets;
     setEnterpriseAssets(localAssets);
@@ -969,7 +1025,7 @@ export default function App() {
     setCurrentProjectId(newProj.id);
     db.setCurrentProjectId(newProj.id);
     currentProjectIdRef.current = newProj.id;
-    applyProjectWorkspace(newProj.id, newProj.name);
+    applyProjectWorkspace(newProj.id, newProj.name, newProj.scope);
     void bridgeClient.saveProject(newProj).catch(() => {
       // The local workspace is still usable while the native bridge is offline.
     });
@@ -1009,7 +1065,7 @@ export default function App() {
       db.setCurrentProjectId(next.id);
       setCurrentProjectId(next.id);
       currentProjectIdRef.current = next.id;
-      applyProjectWorkspace(next.id, next.name);
+      applyProjectWorkspace(next.id, next.name, next.scope);
     }
     const log = db.appendLog({ level: 'INFO', source: 'PROJECT_MGR', message: `Deleted project "${projects.find(project => project.id === projectId)?.name || projectId}" and its saved network observations.` });
     setLogs(previous => [log, ...previous]);
@@ -1367,6 +1423,7 @@ export default function App() {
               <AssetInventory
                 accessPoints={accessPoints}
                 enterpriseAssets={enterpriseAssets}
+                siteDirectory={siteDirectory}
                 bridgeConnected={bridgeState === 'CONNECTED'}
                 uiMode={uiMode}
                 initialFilter={tabFilterParam}
@@ -1505,16 +1562,19 @@ export default function App() {
             currentProject={currentProject}
             projects={projects}
             accessPoints={accessPoints}
+            enterpriseAssets={enterpriseAssets}
+            siteDirectory={siteDirectory}
             dataSourceProfile={dataSourceProfile}
             onSwitchProject={(proj) => {
               setCurrentProjectId(proj.id);
               db.setCurrentProjectId(proj.id);
               currentProjectIdRef.current = proj.id;
-              applyProjectWorkspace(proj.id, proj.name);
+              applyProjectWorkspace(proj.id, proj.name, proj.scope);
             }}
             onCreateProject={handleCreateProject}
             onRenameProject={handleRenameProject}
             onDeleteProject={handleDeleteProject}
+            onSiteDirectoryChange={handleSiteDirectoryChange}
           />
         )}
 

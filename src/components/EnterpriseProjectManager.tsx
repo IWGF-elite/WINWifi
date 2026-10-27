@@ -17,29 +17,36 @@ import {
   Pencil,
   Trash2
 } from 'lucide-react';
-import { AuditProject, AccessPoint, EnterpriseScope, DataSourceProfile } from '../types';
+import { AuditProject, AccessPoint, EnterpriseScope, DataSourceProfile, EnterpriseAssetRecord, SiteRecord } from '../types';
 import { SqlQueryResult, SqliteDatabaseService } from '../services/storage';
+import { SiteDirectory } from './SiteDirectory';
 
 interface EnterpriseProjectManagerProps {
   currentProject: AuditProject;
   projects: AuditProject[];
   accessPoints: AccessPoint[];
+  enterpriseAssets: EnterpriseAssetRecord[];
+  siteDirectory: SiteRecord[];
   dataSourceProfile: DataSourceProfile;
   onSwitchProject: (proj: AuditProject) => void;
   onCreateProject: (proj: AuditProject) => void;
   onRenameProject: (projectId: string, name: string) => void;
   onDeleteProject: (projectId: string) => void;
+  onSiteDirectoryChange: (sites: SiteRecord[], changedAssets: EnterpriseAssetRecord[]) => void;
 }
 
 export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> = ({
   currentProject,
   projects = [],
   accessPoints = [],
+  enterpriseAssets = [],
+  siteDirectory = [],
   dataSourceProfile,
   onSwitchProject,
   onCreateProject,
   onRenameProject,
-  onDeleteProject
+  onDeleteProject,
+  onSiteDirectoryChange
 }) => {
   const [showNewModal, setShowNewModal] = useState(false);
   const [orgName, setOrgName] = useState('');
@@ -280,6 +287,12 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
           </div>
         </div>
       </div>
+
+      <SiteDirectory
+        sites={siteDirectory}
+        assets={enterpriseAssets}
+        onChange={onSiteDirectoryChange}
+      />
 
       {/* New Project Modal */}
       {showNewModal && (

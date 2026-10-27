@@ -17,13 +17,15 @@ import {
   Eye,
   SlidersHorizontal
 } from 'lucide-react';
-import { AccessPoint, AssetClassification, EnterpriseAssetRecord, PolicyEvaluationResult, UIMode } from '../types';
+import { AccessPoint, AssetClassification, EnterpriseAssetRecord, PolicyEvaluationResult, SiteRecord, UIMode } from '../types';
 import { PolicyEngine } from '../services/policyEngine';
+import { listBuildingNames, listFloorNames, listSiteNames } from '../services/siteDirectory';
 import { EnterpriseRegistry, AssetImportSummary } from './EnterpriseRegistry';
 
 interface AssetInventoryProps {
   accessPoints: AccessPoint[];
   enterpriseAssets: EnterpriseAssetRecord[];
+  siteDirectory: SiteRecord[];
   bridgeConnected: boolean;
   uiMode: UIMode;
   initialFilter?: string;
@@ -39,6 +41,7 @@ interface AssetInventoryProps {
 export const AssetInventory: React.FC<AssetInventoryProps> = ({
   accessPoints = [],
   enterpriseAssets = [],
+  siteDirectory = [],
   bridgeConnected,
   uiMode,
   initialFilter = '',
@@ -55,6 +58,8 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
   const [classificationFilter, setClassificationFilter] = useState<string>('all');
   const [approvalFilter, setApprovalFilter] = useState<string>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
+  const [siteFilter, setSiteFilter] = useState<string>('all');
+  const [buildingFilter, setBuildingFilter] = useState<string>('all');
   const [editingBssid, setEditingBssid] = useState<string | null>(null);
 
   // Form states for editing metadata
@@ -74,6 +79,40 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
 
   // Collect all unique tags
   const allTags = Array.from(new Set((accessPoints || []).flatMap(ap => ap.tags || [])));
+
+  const nameEquals = (left: string | undefined, right: string | undefined): boolean =>
+    Boolean(left && right) && (left || '').trim().toLowerCase() === (right || '').trim().toLowerCase();
+
+  const siteFilterOptions = useMemo(() => {
+    const names = new Set(listSiteNames(siteDirectory));
+    accessPoints.forEach(ap => { if (ap.site) names.add(ap.site); });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, accessPoints]);
+
+  const buildingFilterOptions = useMemo(() => {
+    if (siteFilter === 'all') return [];
+    const names = new Set(listBuildingNames(siteDirectory, siteFilter));
+    accessPoints.forEach(ap => {
+      if (nameEquals(ap.site, siteFilter) && ap.building) names.add(ap.building);
+    });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, accessPoints, siteFilter]);
+
+  const editBuildingOptions = useMemo(() => {
+    const names = new Set(listBuildingNames(siteDirectory, editSite));
+    accessPoints.forEach(ap => {
+      if (nameEquals(ap.site, editSite) && ap.building) names.add(ap.building);
+    });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, accessPoints, editSite]);
+
+  const editFloorOptions = useMemo(() => {
+    const names = new Set(listFloorNames(siteDirectory, editSite, editBuilding));
+    accessPoints.forEach(ap => {
+      if (nameEquals(ap.site, editSite) && nameEquals(ap.building, editBuilding) && ap.floor) names.add(ap.floor);
+    });
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [siteDirectory, accessPoints, editSite, editBuilding]);
 
   // Filtered APs
   const filtered = (accessPoints || []).filter(ap => {
@@ -102,6 +141,8 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
     if (classificationFilter !== 'all' && ap.classification !== classificationFilter) return false;
     if (approvalFilter !== 'all' && ap.approvedStatus !== approvalFilter) return false;
     if (selectedTag !== 'all' && (!ap.tags || !ap.tags.includes(selectedTag))) return false;
+    if (siteFilter !== 'all' && !nameEquals(ap.site, siteFilter)) return false;
+    if (buildingFilter !== 'all' && !nameEquals(ap.building, buildingFilter)) return false;
 
     return true;
   });
@@ -189,6 +230,7 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
     return (
       <EnterpriseRegistry
         assets={enterpriseAssets}
+        siteDirectory={siteDirectory}
         bridgeConnected={bridgeConnected}
         uiMode={uiMode}
         onSaveAsset={onSaveAsset}
@@ -270,6 +312,33 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
                 ))}
               </select>
             )}
+
+            {/* Site Filter */}
+            <select
+              value={siteFilter}
+              onChange={(e) => { setSiteFilter(e.target.value); setBuildingFilter('all'); }}
+              aria-label="Filter by site"
+              className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2.5 py-2 focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">All Sites</option>
+              {siteFilterOptions.map(site => (
+                <option key={site} value={site}>{site}</option>
+              ))}
+            </select>
+
+            {/* Building Filter */}
+            <select
+              value={buildingFilter}
+              onChange={(e) => setBuildingFilter(e.target.value)}
+              disabled={siteFilter === 'all' || buildingFilterOptions.length === 0}
+              aria-label="Filter by building"
+              className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2.5 py-2 focus:outline-none focus:border-blue-500 disabled:opacity-40"
+            >
+              <option value="all">{siteFilter === 'all' ? 'Select a site first' : 'All Buildings'}</option>
+              {buildingFilterOptions.map(building => (
+                <option key={building} value={building}>{building}</option>
+              ))}
+            </select>
 
             <div className="text-slate-400 font-mono text-[11px] px-2 py-1 bg-slate-800 rounded">
               {filtered.length} of {accessPoints.length} Assets
@@ -451,30 +520,45 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
                   <label className="text-slate-400 font-medium block mb-1">Site</label>
                   <input
                     type="text"
+                    list="inventory-site-options"
                     value={editSite}
                     onChange={(e) => setEditSite(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-slate-200"
                   />
+                  <datalist id="inventory-site-options">
+                    {siteFilterOptions.map(site => <option key={site} value={site} />)}
+                  </datalist>
                 </div>
                 <div>
                   <label className="text-slate-400 font-medium block mb-1">Building</label>
                   <input
                     type="text"
+                    list="inventory-building-options"
                     value={editBuilding}
                     onChange={(e) => setEditBuilding(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-slate-200"
                   />
+                  <datalist id="inventory-building-options">
+                    {editBuildingOptions.map(building => <option key={building} value={building} />)}
+                  </datalist>
                 </div>
                 <div>
                   <label className="text-slate-400 font-medium block mb-1">Floor / Room</label>
                   <input
                     type="text"
+                    list="inventory-floor-options"
                     value={editFloor}
                     onChange={(e) => setEditFloor(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-slate-200"
                   />
+                  <datalist id="inventory-floor-options">
+                    {editFloorOptions.map(floor => <option key={floor} value={floor} />)}
+                  </datalist>
                 </div>
               </div>
+              <p className="text-[11px] text-slate-500">
+                Suggestions come from the project site directory. Free-text values are stored as entered.
+              </p>
 
               <div>
                 <label className="text-slate-400 font-medium block mb-1">Tags (Comma-separated)</label>
