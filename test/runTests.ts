@@ -574,4 +574,106 @@ runTest('T18: Per-Launch Bridge Token Wiring', () => {
   }
 });
 
+runTest('T19: Browser Capture Parser Limits & Integrity Warnings', () => {
+  const pcap = PcapService.getInstance();
+  const buildHeader = (view: DataView, network: number) => {
+    view.setUint32(0, 0xa1b2c3d4, true);
+    view.setUint16(4, 2, true);
+    view.setUint16(6, 4, true);
+    view.setUint32(8, 0, true);
+    view.setUint32(12, 0, true);
+    view.setUint32(16, 65535, true);
+    view.setUint32(20, network, true);
+  };
+  const buildBeacon = (ssidBytes: number[] = []) => {
+    const frame = new Uint8Array(8 + 24 + 12 + 2 + ssidBytes.length);
+    const view = new DataView(frame.buffer);
+    frame[2] = 8; // radiotap length
+    view.setUint16(8, 0x0080, true); // beacon
+    frame.set([0xff, 0xff, 0xff, 0xff, 0xff, 0xff], 12);
+    frame.set([0x10, 0x20, 0x30, 0x40, 0x50, 0x60], 18);
+    frame.set([0x10, 0x20, 0x30, 0x40, 0x50, 0x60], 24);
+    const ieOffset = 8 + 24 + 12;
+    frame[ieOffset] = 0;
+    frame[ieOffset + 1] = ssidBytes.length;
+    frame.set(ssidBytes, ieOffset + 2);
+    return frame;
+  };
+  const buildPcap = (network: number, packets: Uint8Array[]) => {
+    const total = 24 + packets.reduce((sum, packet) => sum + 16 + packet.length, 0);
+    const buffer = new ArrayBuffer(total);
+    const view = new DataView(buffer);
+    buildHeader(view, network);
+    const data = new Uint8Array(buffer);
+    let offset = 24;
+    packets.forEach((packet, index) => {
+      view.setUint32(offset, 1710000000 + index, true);
+      view.setUint32(offset + 4, 0, true);
+      view.setUint32(offset + 8, packet.length, true);
+      view.setUint32(offset + 12, packet.length, true);
+      data.set(packet, offset + 16);
+      offset += 16 + packet.length;
+    });
+    return buffer;
+  };
+
+  const beacon = buildBeacon([0x53, 0x61, 0x66, 0x65]);
+  const sanitized = pcap.parseBinaryPcap(buildPcap(127, [buildBeacon([0x45, 0x76, 0x69, 0x6c, 0x01, 0x4e, 0x65, 0x74])]));
+  if (sanitized.accessPoints.length !== 1 || sanitized.accessPoints[0].ssid !== 'Evil?Net') {
+    throw new Error(`SSID sanitization failed: ${sanitized.accessPoints[0]?.ssid ?? '(none)'}`);
+  }
+
+  const oversizedBuffer = new ArrayBuffer(40);
+  const oversizedView = new DataView(oversizedBuffer);
+  buildHeader(oversizedView, 127);
+  oversizedView.setUint32(32, 0xfffffff0, true);
+  oversizedView.setUint32(36, 0xfffffff0, true);
+  const oversized = pcap.parseBinaryPcap(oversizedBuffer);
+  if (!oversized.truncated || oversized.packets.length !== 0 || !oversized.warnings?.some(w => w.includes('per-frame limit'))) {
+    throw new Error('Oversized record length was not rejected in the browser parser');
+  }
+
+  const truncatedBuffer = new ArrayBuffer(50);
+  const truncatedView = new DataView(truncatedBuffer);
+  buildHeader(truncatedView, 127);
+  truncatedView.setUint32(32, 100, true);
+  truncatedView.setUint32(36, 100, true);
+  const truncated = pcap.parseBinaryPcap(truncatedBuffer);
+  if (!truncated.truncated || !truncated.warnings?.some(w => /is truncated/i.test(w))) {
+    throw new Error('Truncated record was not reported in the browser parser');
+  }
+
+  const zeroLength = new Uint8Array(24 + 16 + 16 + beacon.length);
+  const zeroView = new DataView(zeroLength.buffer);
+  buildHeader(zeroView, 127);
+  zeroView.setUint32(24, 1710000000, true);
+  zeroView.setUint32(32, 0, true);
+  zeroView.setUint32(36, 0, true);
+  zeroView.setUint32(40, 1710000001, true);
+  zeroView.setUint32(48, beacon.length, true);
+  zeroView.setUint32(52, beacon.length, true);
+  zeroLength.set(beacon, 56);
+  const zeroParsed = pcap.parseBinaryPcap(zeroLength.buffer);
+  if (zeroParsed.packets.length !== 1 || !zeroParsed.warnings?.some(w => w.includes('zero captured bytes'))) {
+    throw new Error('Zero-length record handling failed in the browser parser');
+  }
+
+  const badRadiotapFrame = buildBeacon([0x53]);
+  badRadiotapFrame[2] = 100;
+  const badRadiotap = pcap.parseBinaryPcap(buildPcap(127, [badRadiotapFrame]));
+  if (badRadiotap.packets.length !== 0 || !badRadiotap.warnings?.some(w => w.includes('radiotap length'))) {
+    throw new Error('Malformed radiotap header was not rejected in the browser parser');
+  }
+
+  let rejectedNetwork = false;
+  try {
+    pcap.parseBinaryPcap(buildPcap(1, [beacon]));
+  } catch (error: any) {
+    rejectedNetwork = /only dissects 802\.11/i.test(error.message);
+  }
+  if (!rejectedNetwork) {
+    throw new Error('Browser parser accepted a non-802.11 link type');
+  }
+});
+
 console.log(`\nResults: ${passedCount}/${totalCount} tests passed.\n`);

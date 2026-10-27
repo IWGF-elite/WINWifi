@@ -1025,12 +1025,28 @@ namespace WinWiFi.Services
             }
             byte[] bytes = ms.ToArray();
 
-            var result = _pcapDissector.DissectBytes(bytes);
-            _latestAccessPoints = result.AccessPoints;
-            _latestClients = result.Clients;
-            var threats = AnalyzeCurrentScan(result.AccessPoints);
-            _latestIncidents = threats.Findings;
+            PcapDissectorResult result;
+            try
+            {
+                result = _pcapDissector.DissectBytes(bytes);
+            }
+            catch (InvalidDataException ex)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_capture", ex.Message);
+                return;
+            }
+            catch (NotSupportedException ex)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "unsupported_capture", ex.Message);
+                return;
+            }
 
+            // Imported evidence is returned to the caller with IMPORTED
+            // provenance. It must never replace the live scan state, because
+            // /api/networks and the SSE stream are labelled as live telemetry.
+            // Analyze without the live baseline so an import cannot alter drift
+            // comparisons for the next real scan.
+            result.Incidents = _securityAnalyzer.AnalyzeThreatsAndDrift(result.AccessPoints, null).Findings;
             await WriteJsonAsync(response, result);
         }
 

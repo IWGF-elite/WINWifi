@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -85,8 +86,8 @@ namespace WinWiFi.Tests
                 // Write 1 Packet Record
                 w.Write(1710000000); // Sec
                 w.Write(50000);      // Usec
-                w.Write(40);         // InclLen
-                w.Write(40);         // OrigLen
+                w.Write(32);         // InclLen (8-byte radiotap + 24-byte 802.11 header)
+                w.Write(32);         // OrigLen
 
                 // Radiotap (8 bytes)
                 w.Write((byte)0); w.Write((byte)0); // Version & Pad
@@ -921,6 +922,118 @@ SSID 2 : Guest-Open
                 return "Native PMF and weighted risk evidence remain authoritative while netsh-only BSSIDs are retained.";
             }));
 
+            results.Add(RunTest("T20-PCAP-HARDENING", "Capture Import Limits, Integrity Warnings & Timestamp Resolution", () =>
+            {
+                var dissector = new PcapDissector();
+                var beacon = BuildBeaconFrame("SafeNet");
+
+                using (var stream = new MemoryStream())
+                using (var writer = new BinaryWriter(stream))
+                {
+                    WritePcapHeader(writer, 127);
+                    writer.Write(1710000000u);
+                    writer.Write(0u);
+                    writer.Write(0xFFFFFFF0u);
+                    writer.Write(0xFFFFFFF0u);
+                    var oversized = dissector.DissectBytes(stream.ToArray());
+                    if (oversized.Packets.Count != 0 || !oversized.Truncated || oversized.ParseWarnings.Count == 0)
+                        throw new Exception("Oversized record length was not rejected with a warning.");
+                }
+
+                using (var stream = new MemoryStream())
+                using (var writer = new BinaryWriter(stream))
+                {
+                    WritePcapHeader(writer, 127);
+                    writer.Write(1710000000u);
+                    writer.Write(0u);
+                    writer.Write(100u);
+                    writer.Write(100u);
+                    writer.Write(new byte[10]);
+                    var truncated = dissector.DissectBytes(stream.ToArray());
+                    if (!truncated.Truncated || truncated.Packets.Count != 0 ||
+                        !truncated.ParseWarnings.Any(w => w.Contains("truncated", StringComparison.OrdinalIgnoreCase)))
+                        throw new Exception("Truncated capture record was not reported.");
+                }
+
+                using (var stream = new MemoryStream())
+                using (var writer = new BinaryWriter(stream))
+                {
+                    WritePcapHeader(writer, 127);
+                    writer.Write(1710000000u);
+                    writer.Write(0u);
+                    writer.Write(0u);
+                    writer.Write(0u);
+                    writer.Write(1710000001u);
+                    writer.Write(0u);
+                    writer.Write((uint)beacon.Length);
+                    writer.Write((uint)beacon.Length);
+                    writer.Write(beacon);
+                    var zeroLength = dissector.DissectBytes(stream.ToArray());
+                    if (zeroLength.Packets.Count != 1 || !zeroLength.ParseWarnings.Any(w => w.Contains("zero captured bytes")))
+                        throw new Exception("Zero-length record handling failed.");
+                }
+
+                var limited = dissector.DissectBytes(BuildPcap(127, beacon, beacon), new PcapDissectOptions { MaxPackets = 1 });
+                if (limited.Packets.Count != 1 || !limited.Truncated)
+                    throw new Exception("Packet-count limit was not enforced.");
+
+                var frameLimited = dissector.DissectBytes(BuildPcap(127, beacon), new PcapDissectOptions { MaxFrameBytes = 32 });
+                if (frameLimited.Packets.Count != 0 || !frameLimited.Truncated ||
+                    !frameLimited.ParseWarnings.Any(w => w.Contains("per-frame limit")))
+                    throw new Exception("Per-frame byte limit was not enforced.");
+
+                var ethernet = dissector.DissectBytes(BuildPcap(1, beacon));
+                if (ethernet.Packets.Count != 0 || ethernet.AccessPoints.Count != 0 ||
+                    !ethernet.ParseWarnings.Any(w => w.Contains("not an 802.11 capture")))
+                    throw new Exception("Non-802.11 capture was dissected as if it were 802.11.");
+
+                var badRadiotap = new byte[32];
+                badRadiotap[2] = 100;
+                var radiotap = dissector.DissectBytes(BuildPcap(127, badRadiotap));
+                if (radiotap.Packets.Count != 0 || radiotap.SkippedFrames != 1 ||
+                    !radiotap.ParseWarnings.Any(w => w.Contains("radiotap length")))
+                    throw new Exception("Malformed radiotap header was not rejected.");
+
+                var controlSsid = dissector.DissectBytes(BuildPcap(127, BuildBeaconFrame("Evil\u0001Net")));
+                if (controlSsid.AccessPoints.Count != 1 || controlSsid.AccessPoints[0].Ssid != "Evil?Net")
+                    throw new Exception($"SSID sanitization failed: {controlSsid.AccessPoints.FirstOrDefault()?.Ssid}");
+
+                var longSsid = dissector.DissectBytes(BuildPcap(127, BuildBeaconFrame(new string('A', 40))));
+                if (longSsid.AccessPoints.Count != 1 || longSsid.AccessPoints[0].Ssid.Length != 32)
+                    throw new Exception("SSID longer than 32 bytes was not capped.");
+
+                using (var stream = new MemoryStream())
+                using (var writer = new BinaryWriter(stream))
+                {
+                    WritePcapNgBlock(writer, 0x0a0d0d0a, BuildPcapNgSectionHeader());
+                    WritePcapNgBlock(writer, 1, BuildPcapNgInterface(65535, 3));
+                    WritePcapNgBlock(writer, 6, BuildPcapNgEnhancedPacket(0, 1_500_000UL, beacon));
+                    WritePcapNgBlock(writer, 6, BuildPcapNgEnhancedPacket(0, 1_501_000UL, beacon));
+                    var pcapng = dissector.DissectBytes(stream.ToArray());
+                    if (pcapng.Packets.Count != 2)
+                        throw new Exception($"PCAPNG parsed {pcapng.Packets.Count} packets instead of 2.");
+                    const string format = "yyyy-MM-dd HH:mm:ss.ffffff";
+                    if (!DateTime.TryParseExact(pcapng.Packets[0].Timestamp, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out var first) ||
+                        !DateTime.TryParseExact(pcapng.Packets[1].Timestamp, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out var second))
+                        throw new Exception("PCAPNG timestamps were not formatted as capture times.");
+                    if (Math.Abs((second - first).TotalSeconds - 1d) > 0.01)
+                        throw new Exception($"if_tsresol was not applied: packet delta was {(second - first).TotalSeconds:F3}s.");
+                }
+
+                using (var stream = new MemoryStream())
+                using (var writer = new BinaryWriter(stream))
+                {
+                    WritePcapNgBlock(writer, 0x0a0d0d0a, BuildPcapNgSectionHeader());
+                    WritePcapNgBlock(writer, 1, BuildPcapNgInterface(65535));
+                    WritePcapNgBlock(writer, 6, BuildPcapNgEnhancedPacket(0, 0, beacon), corruptTrailer: true);
+                    var corrupt = dissector.DissectBytes(stream.ToArray());
+                    if (!corrupt.Truncated || !corrupt.ParseWarnings.Any(w => w.Contains("mismatched trailer")))
+                        throw new Exception("PCAPNG block trailer corruption was not detected.");
+                }
+
+                return "Rejected oversized and truncated records, enforced frame/packet limits, skipped malformed radiotap, sanitized SSIDs, honored if_tsresol, and detected PCAPNG trailer corruption.";
+            }));
+
             return results;
         }
 
@@ -938,8 +1051,8 @@ SSID 2 : Guest-Open
             writer.Write(127);
             writer.Write(1710000000);
             writer.Write(50000);
-            writer.Write(40);
-            writer.Write(40);
+            writer.Write(44);
+            writer.Write(44);
             writer.Write((byte)0); writer.Write((byte)0); writer.Write((ushort)8); writer.Write(0u);
             writer.Write((ushort)0x0080); writer.Write((ushort)0);
             writer.Write(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF });
@@ -949,6 +1062,112 @@ SSID 2 : Guest-Open
             return stream.ToArray();
         }
 #endif
+
+        private static void WritePcapHeader(BinaryWriter writer, uint linkType)
+        {
+            writer.Write(0xa1b2c3d4);
+            writer.Write((ushort)2);
+            writer.Write((ushort)4);
+            writer.Write(0);
+            writer.Write(0);
+            writer.Write(65535u);
+            writer.Write(linkType);
+        }
+
+        private static byte[] BuildPcap(uint linkType, params byte[][] packets)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            WritePcapHeader(writer, linkType);
+            uint timestamp = 1710000000;
+            foreach (var packet in packets)
+            {
+                writer.Write(timestamp++);
+                writer.Write(0u);
+                writer.Write((uint)packet.Length);
+                writer.Write((uint)packet.Length);
+                writer.Write(packet);
+            }
+            return stream.ToArray();
+        }
+
+        private static byte[] BuildBeaconFrame(string ssid)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((ushort)8);
+            writer.Write(0u);
+            writer.Write((ushort)0x0080);
+            writer.Write((ushort)0);
+            writer.Write(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF });
+            writer.Write(new byte[] { 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 });
+            writer.Write(new byte[] { 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 });
+            writer.Write((ushort)0);
+            writer.Write(0UL);
+            writer.Write((ushort)100);
+            writer.Write((ushort)0x0011);
+            byte[] ssidBytes = Encoding.UTF8.GetBytes(ssid);
+            writer.Write((byte)0);
+            writer.Write((byte)ssidBytes.Length);
+            writer.Write(ssidBytes);
+            return stream.ToArray();
+        }
+
+        private static void WritePcapNgBlock(BinaryWriter writer, uint blockType, byte[] body, bool corruptTrailer = false)
+        {
+            int padding = (4 - (body.Length % 4)) % 4;
+            uint totalLength = (uint)(12 + body.Length + padding);
+            writer.Write(blockType);
+            writer.Write(totalLength);
+            writer.Write(body);
+            for (int index = 0; index < padding; index++) writer.Write((byte)0);
+            writer.Write(corruptTrailer ? totalLength + 4 : totalLength);
+        }
+
+        private static byte[] BuildPcapNgSectionHeader()
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write(0x1a2b3c4du);
+            writer.Write((ushort)1);
+            writer.Write((ushort)0);
+            writer.Write(ulong.MaxValue);
+            return stream.ToArray();
+        }
+
+        private static byte[] BuildPcapNgInterface(uint snapLength, byte? timestampResolution = null)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write((ushort)127);
+            writer.Write((ushort)0);
+            writer.Write(snapLength);
+            if (timestampResolution.HasValue)
+            {
+                writer.Write((ushort)9);
+                writer.Write((ushort)1);
+                writer.Write(timestampResolution.Value);
+                writer.Write((byte)0);
+            }
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+            return stream.ToArray();
+        }
+
+        private static byte[] BuildPcapNgEnhancedPacket(uint interfaceId, ulong timestampTicks, byte[] packet)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write(interfaceId);
+            writer.Write((uint)(timestampTicks >> 32));
+            writer.Write((uint)(timestampTicks & 0xFFFFFFFF));
+            writer.Write((uint)packet.Length);
+            writer.Write((uint)packet.Length);
+            writer.Write(packet);
+            return stream.ToArray();
+        }
 
         private TestResultItem RunTest(string id, string name, Func<string> action)
         {

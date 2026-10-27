@@ -932,6 +932,14 @@ namespace WinWiFi.ViewModels
                 // Parse captures off the UI thread, then return to WPF's UI
                 // context before changing the bound collections.
                 var result = await Task.Run(() => _pcapDissector.DissectFile(filePath));
+                foreach (var warning in result.ParseWarnings)
+                {
+                    AddLog("WARN", "PCAP_INGEST", warning);
+                }
+                if (result.Truncated)
+                {
+                    AddLog("WARN", "PCAP_INGEST", "Capture parsing stopped at a safety limit; only the validated prefix is shown.");
+                }
                 Packets = new ObservableCollection<PcapPacket>(result.Packets);
 
                 foreach (var ap in result.AccessPoints)

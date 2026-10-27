@@ -33,6 +33,13 @@ packet injection, or password cracking, and it will only act on networks
 explicitly added to its authorized scope. Only use it against networks and
 devices you own or are explicitly authorized to test.
 
+Imported captures are treated as untrusted evidence. The desktop shell accepts
+files up to 100 MB and the local dashboard bridge accepts up to 50 MB; both are
+capped at 200,000 frames and 262,144 bytes per frame. Truncated records,
+malformed radiotap/PCAPNG blocks, and non-802.11 link types are reported as
+warnings instead of being silently accepted, and imported data is always
+labelled as imported rather than live.
+
 ## Built with
 
 .NET 8 (WPF) for the Windows desktop shell and native WLAN/PCAP integration,
