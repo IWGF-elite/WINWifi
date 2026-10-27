@@ -257,7 +257,7 @@ SSID 3 : Public_Free_WiFi
                 <ul className="list-disc list-inside space-y-0.5 text-[11px] pl-1 text-slate-400">
                   <li>Decodes Radiotap dBm antenna signal levels and channel frequencies (MHz)</li>
                   <li>Parses Tag 0 (SSID), Tag 3 (Channel), and Tag 48 (RSN WPA2/WPA3 / PMF) Information Elements</li>
-                  <li>Extracts EAPOL 4-Way key exchanges and PMKID nonces for Hashcat mode 22000</li>
+                  <li>Records EAPOL 4-Way sequence metadata (steps, replay counter, key descriptor); does not export nonce/MIC material or 22000 hash lines</li>
                   <li>Populates the live spectrum analyzer, BSSID inventory, and relational SQLite store</li>
                 </ul>
               </div>

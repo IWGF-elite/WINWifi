@@ -117,7 +117,7 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
               Expert Mode (Power Under the Hood)
             </div>
             <p className="mt-1.5 text-xs text-slate-300 leading-relaxed">
-              Unlocks full 802.11 RSN Tag 48 parsing, AKM cipher suites, Protected Management Frame bitflags, Radiotap antenna measurements, raw hexadecimal packet inspector, and Hashcat Mode 22000 exports.
+              Unlocks full 802.11 RSN Tag 48 parsing, AKM cipher suites, Protected Management Frame bitflags, Radiotap antenna measurements, and the raw hexadecimal packet inspector. Hashcat Mode 22000 export is not implemented.
             </p>
           </div>
         </div>

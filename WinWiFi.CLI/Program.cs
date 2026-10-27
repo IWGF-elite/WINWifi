@@ -85,7 +85,9 @@ internal static class Program
         await using var bridge = new HttpBridgeServer(port, wifi, analyzer, pcap, reports, storage, scanner);
 
         await bridge.StartAsync();
-        Console.WriteLine($"WinWiFi bridge listening on http://127.0.0.1:{port}/. Press Ctrl+C to stop.");
+        Console.WriteLine($"WinWiFi bridge listening on http://127.0.0.1:{port}/");
+        Console.WriteLine($"Dashboard URL: http://127.0.0.1:{port}/?token={bridge.AuthToken}");
+        Console.WriteLine("Press Ctrl+C to stop.");
         using var stop = new CancellationTokenSource();
         Console.CancelKeyPress += (_, eventArgs) =>
         {

@@ -25,6 +25,9 @@ namespace WinWiFi.Services
 
             string secUpper = ap.Security.ToUpperInvariant();
             string cipherUpper = ap.Cipher.ToUpperInvariant();
+            // "OWE (Enhanced Open)" is encrypted (RFC 8110) and must not be
+            // classified as unencrypted just because the label contains "Open".
+            bool isOwe = secUpper.Contains("OWE") || secUpper.Contains("ENHANCED OPEN");
 
             // 1. WEP Deprecation Check (NIST SP 800-153 §4.2, PCI-DSS 4.0 Req 2.1)
             if (secUpper.Contains("WEP") || cipherUpper.Contains("WEP"))
@@ -41,7 +44,7 @@ namespace WinWiFi.Services
                 });
             }
             // 2. Open / Unencrypted Wi-Fi (NIST SP 800-153 §4.1)
-            else if (secUpper.Contains("OPEN") || secUpper.Contains("NONE"))
+            else if (!isOwe && (secUpper.Contains("OPEN") || secUpper.Contains("NONE")))
             {
                 score -= 45;
                 ap.SecurityIssues.Add(new SecurityIssue
@@ -150,7 +153,6 @@ namespace WinWiFi.Services
             Dictionary<string, AccessPoint>? baselineAps)
         {
             var result = new ThreatAnalysisResult();
-            var findingIdCounter = 1;
 
             // Group current APs by trimmed SSID
             var ssidGroups = currentAps
@@ -161,98 +163,61 @@ namespace WinWiFi.Services
             {
                 var apList = group.ToList();
 
-                // 1. Multi-factor Evil Twin & Rogue Detection
+                // 1. Multi-signal Evil Twin & Rogue Detection.
+                // A single difference (security string, vendor, or signal) is
+                // normal in mixed-AP and WPA2/WPA3 transition deployments.
+                // Require at least two independent signals before alerting.
+                var candidates = new Dictionary<string, RogueCandidate>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < apList.Count; i++)
                 {
                     for (int j = i + 1; j < apList.Count; j++)
                     {
-                        var ap1 = apList[i];
-                        var ap2 = apList[j];
-
-                        // Criterion A: Security Profile Downgrade on Same SSID
-                        if (!string.Equals(ap1.Security, ap2.Security, StringComparison.OrdinalIgnoreCase))
-                        {
-                            var suspiciousAp = (ap1.Security.Contains("Open") || ap1.SecurityScore < ap2.SecurityScore) ? ap1 : ap2;
-                            var trustedPeer = suspiciousAp == ap1 ? ap2 : ap1;
-
-                            result.Findings.Add(new ThreatFinding
-                            {
-                                Id = $"THR-{findingIdCounter++:D4}",
-                                Category = "Evil Twin",
-                                Title = $"Evil Twin Clone of SSID '{group.Key}'",
-                                Severity = "CRITICAL",
-                                Confidence = 95,
-                                RiskScore = 95,
-                                RelatedBssid = suspiciousAp.Bssid,
-                                RelatedSsid = group.Key,
-                                Evidence = $"BSSID {suspiciousAp.Bssid} broadcasts '{group.Key}' with security '{suspiciousAp.Security}', while peer BSSID {trustedPeer.Bssid} runs '{trustedPeer.Security}'.",
-                                Explanation = "Attackers clone authorized SSIDs using lower security (or Open) to intercept client credentials and perform captive-portal credential harvesting.",
-                                Remediation = "Locate transmitter via directional antenna or signal survey. Block client connection profiles and alert facilities security.",
-                                Status = "New",
-                                StandardReference = "NIST SP 800-153 §5.1"
-                            });
-                        }
-
-                        // Criterion B: Vendor / OUI Mismatch on Infrastructure SSID
-                        bool vendor1Known = ap1.Vendor != "Unknown" && !ap1.Vendor.Contains("Randomized");
-                        bool vendor2Known = ap2.Vendor != "Unknown" && !ap2.Vendor.Contains("Randomized");
-                        if (vendor1Known && vendor2Known && !string.Equals(ap1.Vendor, ap2.Vendor, StringComparison.OrdinalIgnoreCase))
-                        {
-                            // If one is enterprise infrastructure (Cisco, Aruba, Ubiquiti, Fortinet) and the other is consumer/IoT
-                            bool isInfra1 = IsEnterpriseVendor(ap1.Vendor);
-                            bool isInfra2 = IsEnterpriseVendor(ap2.Vendor);
-
-                            if (isInfra1 != isInfra2)
-                            {
-                                var rogue = isInfra1 ? ap2 : ap1;
-                                var infra = isInfra1 ? ap1 : ap2;
-
-                                result.Findings.Add(new ThreatFinding
-                                {
-                                    Id = $"THR-{findingIdCounter++:D4}",
-                                    Category = "Rogue AP",
-                                    Title = $"Hardware Vendor Mismatch on SSID '{group.Key}'",
-                                    Severity = "CRITICAL",
-                                    Confidence = 90,
-                                    RiskScore = 90,
-                                    RelatedBssid = rogue.Bssid,
-                                    RelatedSsid = group.Key,
-                                    Evidence = $"Authorized infrastructure vendor is '{infra.Vendor}' ({infra.Bssid}), but BSSID {rogue.Bssid} is manufactured by '{rogue.Vendor}'.",
-                                    Explanation = "Enterprise wireless deployments use homogenous hardware. An unexpected consumer or IoT vendor broadcasting the same SSID indicates an unauthorized rogue access point.",
-                                    Remediation = "Verify physical switch ports for unapproved rogue hardware. Disconnect port immediately.",
-                                    Status = "New",
-                                    StandardReference = "PCI-DSS 4.0 Req 11.2 / NIST SP 800-153 §5.1"
-                                });
-                            }
-                        }
-
-                        // Criterion C: Signal Disparity / Rogue Proximity Lure (+25 dBm difference)
-                        if (Math.Abs(ap1.Rssi - ap2.Rssi) >= 28)
-                        {
-                            var stronger = ap1.Rssi > ap2.Rssi ? ap1 : ap2;
-                            var weaker = stronger == ap1 ? ap2 : ap1;
-
-                            if (stronger.SecurityScore < weaker.SecurityScore || WinWiFi.Services.OuiLookupService.IsLocallyAdministered(stronger.Bssid))
-                            {
-                                result.Findings.Add(new ThreatFinding
-                                {
-                                    Id = $"THR-{findingIdCounter++:D4}",
-                                    Category = "Evil Twin",
-                                    Title = $"High-Power Signal Anomaly on SSID '{group.Key}'",
-                                    Severity = "HIGH",
-                                    Confidence = 80,
-                                    RiskScore = 85,
-                                    RelatedBssid = stronger.Bssid,
-                                    RelatedSsid = group.Key,
-                                    Evidence = $"BSSID {stronger.Bssid} is broadcasting at {stronger.Rssi} dBm ({Math.Abs(stronger.Rssi - weaker.Rssi)} dBm higher than peer {weaker.Bssid} at {weaker.Rssi} dBm).",
-                                    Explanation = "Attackers place rogue APs in close physical proximity to force 802.11 client roaming algorithms to associate with the stronger malicious signal.",
-                                    Remediation = "Triangulate signal source location. Check for rogue battery-powered devices in conference rooms or public areas.",
-                                    Status = "New",
-                                    StandardReference = "NIST SP 800-153 §5.1"
-                                });
-                            }
-                        }
+                        ConsiderRoguePair(apList[i], apList[j], baselineAps, candidates);
+                        ConsiderRoguePair(apList[j], apList[i], baselineAps, candidates);
                     }
+                }
+
+                foreach (var candidate in candidates.Values.Where(c => c.Signals.Count >= 2))
+                {
+                    var suspect = candidate.Suspect;
+                    var peer = candidate.Peer;
+                    bool downgrade = candidate.Signals.Contains("security_downgrade");
+                    bool ouiMismatch = candidate.Signals.Contains("oui_mismatch");
+                    bool unapproved = candidate.Signals.Contains("unapproved_bssid");
+
+                    string category = downgrade ? "Evil Twin" : "Rogue AP";
+                    string severity = (candidate.Signals.Count >= 3 || (downgrade && (ouiMismatch || unapproved)))
+                        ? "CRITICAL"
+                        : "HIGH";
+                    int confidence = Math.Min(95, 40 + candidate.Signals.Count * 15 + (downgrade ? 5 : 0));
+
+                    result.Findings.Add(new ThreatFinding
+                    {
+                        Id = MakeFindingId(category, suspect.Bssid),
+                        Category = category,
+                        Title = downgrade
+                            ? $"Evil Twin Clone of SSID '{group.Key}'"
+                            : $"Rogue AP Broadcasting SSID '{group.Key}'",
+                        Severity = severity,
+                        Confidence = confidence,
+                        RiskScore = confidence,
+                        RelatedBssid = suspect.Bssid,
+                        RelatedSsid = group.Key,
+                        Evidence = string.Join("; ", candidate.Signals.Select(signal => signal switch
+                        {
+                            "security_downgrade" => $"security downgrade '{suspect.Security}' vs peer '{peer.Security}' ({peer.Bssid})",
+                            "oui_mismatch" => $"OUI anomaly '{suspect.Vendor}' ({suspect.Bssid}) vs '{peer.Vendor}' ({peer.Bssid})",
+                            "unapproved_bssid" => $"BSSID {suspect.Bssid} is absent from the approved asset registry for '{group.Key}'",
+                            "signal_anomaly" => $"signal anomaly {suspect.Rssi} dBm vs {peer.Rssi} dBm (+{Math.Abs(suspect.Rssi - peer.Rssi)} dB)",
+                            _ => signal
+                        })),
+                        Explanation = downgrade
+                            ? "Multiple independent indicators suggest this transmitter clones an authorized SSID with weaker security to intercept client traffic."
+                            : "Multiple independent indicators suggest an unauthorized access point is broadcasting a known SSID.",
+                        Remediation = "Verify the transmitter against the approved asset registry, locate it physically, and remove it if unauthorized.",
+                        Status = "New",
+                        StandardReference = "NIST SP 800-153 §5.1"
+                    });
                 }
             }
 
@@ -263,8 +228,10 @@ namespace WinWiFi.Services
                 {
                     if (baselineAps.TryGetValue(current.Bssid, out var baseline))
                     {
-                        // Drift 1: Encryption Downgrade
-                        if (!string.Equals(current.Security, baseline.Security, StringComparison.OrdinalIgnoreCase))
+                        // Drift 1: Encryption Downgrade. A WPA2/WPA3 pair is a
+                        // normal transition deployment, not a downgrade.
+                        if (!string.Equals(current.Security, baseline.Security, StringComparison.OrdinalIgnoreCase)
+                            && !IsTransitionCompatible(current.Security, baseline.Security))
                         {
                             var drift = new SecurityChange
                             {
@@ -281,7 +248,7 @@ namespace WinWiFi.Services
 
                             result.Findings.Add(new ThreatFinding
                             {
-                                Id = $"THR-{findingIdCounter++:D4}",
+                                Id = MakeFindingId("Security Downgrade", current.Bssid),
                                 Category = "Security Downgrade",
                                 Title = $"Active Encryption Downgrade on {current.Bssid}",
                                 Severity = "CRITICAL",
@@ -315,7 +282,7 @@ namespace WinWiFi.Services
 
                             result.Findings.Add(new ThreatFinding
                             {
-                                Id = $"THR-{findingIdCounter++:D4}",
+                                Id = MakeFindingId("PMF Stripped", current.Bssid),
                                 Category = "PMF Stripped",
                                 Title = $"PMF Protection Stripped on '{current.Ssid}'",
                                 Severity = "HIGH",
@@ -377,7 +344,7 @@ namespace WinWiFi.Services
                         {
                             result.Findings.Add(new ThreatFinding
                             {
-                                Id = $"THR-{findingIdCounter++:D4}",
+                                Id = MakeFindingId("Unapproved Hardware", current.Bssid),
                                 Category = "Unapproved Hardware",
                                 Title = $"Unregistered BSSID on Corporate SSID '{current.Ssid}'",
                                 Severity = "HIGH",
@@ -413,14 +380,149 @@ namespace WinWiFi.Services
             return result;
         }
 
-        private static bool IsEnterpriseVendor(string vendor)
+        private const int SignalAnomalyThresholdDb = 25;
+
+        private sealed class RogueCandidate
         {
-            if (string.IsNullOrEmpty(vendor)) return false;
-            string v = vendor.ToUpperInvariant();
-            return v.Contains("CISCO") || v.Contains("MERAKI") || v.Contains("ARUBA") ||
-                   v.Contains("HEWLETT") || v.Contains("UBIQUITI") || v.Contains("FORTINET") ||
-                   v.Contains("RUCKUS") || v.Contains("EXTREME") || v.Contains("MIST") ||
-                   v.Contains("JUNIPER") || v.Contains("AEROHIVE");
+            public AccessPoint Suspect { get; init; } = null!;
+            public AccessPoint Peer { get; init; } = null!;
+            public HashSet<string> Signals { get; } = new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static void ConsiderRoguePair(
+            AccessPoint suspect,
+            AccessPoint peer,
+            Dictionary<string, AccessPoint>? baselineAps,
+            Dictionary<string, RogueCandidate> candidates)
+        {
+            if (!IsPlausibleSuspect(suspect, peer, baselineAps)) return;
+
+            var signals = CollectSignals(suspect, peer, baselineAps);
+            if (signals.Count < 2) return;
+
+            if (candidates.TryGetValue(suspect.Bssid, out var existing) && existing.Signals.Count >= signals.Count)
+                return;
+
+            var candidate = new RogueCandidate { Suspect = suspect, Peer = peer };
+            foreach (var signal in signals) candidate.Signals.Add(signal);
+            candidates[suspect.Bssid] = candidate;
+        }
+
+        private static bool IsPlausibleSuspect(
+            AccessPoint suspect,
+            AccessPoint peer,
+            Dictionary<string, AccessPoint>? baselineAps)
+        {
+            if (string.IsNullOrWhiteSpace(suspect.Bssid) ||
+                string.Equals(suspect.Bssid, peer.Bssid, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            int suspectTier = SecurityTier(suspect.Security);
+            int peerTier = SecurityTier(peer.Security);
+            if (!IsTransitionCompatible(suspect.Security, peer.Security) &&
+                suspectTier >= 0 && peerTier >= 0 && suspectTier < peerTier)
+                return true;
+
+            if (IsUnapprovedBssid(suspect, baselineAps) && !IsUnapprovedBssid(peer, baselineAps))
+                return true;
+
+            bool suspectLaa = OuiLookupService.IsLocallyAdministered(suspect.Bssid);
+            bool peerLaa = OuiLookupService.IsLocallyAdministered(peer.Bssid);
+            if (suspectLaa && !peerLaa) return true;
+
+            return suspect.Rssi - peer.Rssi >= SignalAnomalyThresholdDb;
+        }
+
+        private static HashSet<string> CollectSignals(
+            AccessPoint suspect,
+            AccessPoint peer,
+            Dictionary<string, AccessPoint>? baselineAps)
+        {
+            var signals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int suspectTier = SecurityTier(suspect.Security);
+            int peerTier = SecurityTier(peer.Security);
+
+            if (!IsTransitionCompatible(suspect.Security, peer.Security) &&
+                suspectTier >= 0 && peerTier >= 0 && suspectTier < peerTier)
+            {
+                signals.Add("security_downgrade");
+            }
+
+            if (IsOuiAnomaly(suspect, peer)) signals.Add("oui_mismatch");
+            if (IsUnapprovedBssid(suspect, baselineAps)) signals.Add("unapproved_bssid");
+            if (suspect.Rssi - peer.Rssi >= SignalAnomalyThresholdDb) signals.Add("signal_anomaly");
+
+            return signals;
+        }
+
+        private static bool IsOuiAnomaly(AccessPoint suspect, AccessPoint peer)
+        {
+            bool suspectLaa = OuiLookupService.IsLocallyAdministered(suspect.Bssid);
+            bool peerLaa = OuiLookupService.IsLocallyAdministered(peer.Bssid);
+            if (suspectLaa != peerLaa) return true;
+
+            if (!IsKnownVendor(suspect.Vendor) || !IsKnownVendor(peer.Vendor)) return false;
+            return !string.Equals(suspect.Vendor, peer.Vendor, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsKnownVendor(string? vendor) =>
+            !string.IsNullOrWhiteSpace(vendor) &&
+            !vendor.Equals("Unknown", StringComparison.OrdinalIgnoreCase) &&
+            !vendor.Contains("Randomized", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsUnapprovedBssid(AccessPoint ap, Dictionary<string, AccessPoint>? baselineAps)
+        {
+            if (baselineAps == null || baselineAps.Count == 0) return false;
+
+            bool ssidHasApprovedHardware = baselineAps.Values.Any(b =>
+                string.Equals(b.Ssid, ap.Ssid, StringComparison.OrdinalIgnoreCase) && IsApprovedAsset(b));
+            if (!ssidHasApprovedHardware) return false;
+
+            return !baselineAps.TryGetValue(ap.Bssid, out var known) || !IsApprovedAsset(known);
+        }
+
+        private static bool IsApprovedAsset(AccessPoint ap) =>
+            string.Equals(ap.ApprovedStatus, "Approved", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(ap.Classification, "Corporate", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(ap.Classification, "Trusted", StringComparison.OrdinalIgnoreCase);
+
+        // WPA2 and WPA3 are routinely advertised by different APs in the same
+        // transition or mixed-AP deployment. That alone is not a downgrade.
+        private static bool IsTransitionCompatible(string first, string second)
+        {
+            string a = (first ?? string.Empty).ToUpperInvariant();
+            string b = (second ?? string.Empty).ToUpperInvariant();
+            bool aWpa3 = a.Contains("WPA3");
+            bool bWpa3 = b.Contains("WPA3");
+            bool aWpa2 = a.Contains("WPA2");
+            bool bWpa2 = b.Contains("WPA2");
+            return (aWpa3 && bWpa2) || (aWpa2 && bWpa3);
+        }
+
+        private static int SecurityTier(string? security)
+        {
+            string value = (security ?? string.Empty).ToUpperInvariant();
+            if (value.Contains("OWE") || value.Contains("ENHANCED OPEN")) return 3;
+            if (value.Contains("WPA3")) return 4;
+            if (value.Contains("WPA2")) return 3;
+            if (value.Contains("WEP")) return 1;
+            if (value.Contains("WPA")) return 2;
+            if (value.Contains("OPEN") || value.Contains("NONE")) return 0;
+            return -1;
+        }
+
+        private static string MakeFindingId(string category, string bssid)
+        {
+            string categorySlug = Slug(category);
+            string targetSlug = Slug(bssid);
+            return $"THR-{categorySlug}-{(targetSlug.Length > 0 ? targetSlug : "SESSION")}";
+        }
+
+        private static string Slug(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            var chars = value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).Take(24).ToArray();
+            return new string(chars);
         }
     }
 }

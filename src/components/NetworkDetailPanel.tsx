@@ -84,6 +84,15 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
   const handleConnect = async () => {
     if (!onConnect) return;
+    const profileAction = password
+      ? 'create or update a Windows WLAN profile using the password you entered'
+      : 'use an existing Windows WLAN profile';
+    const approved = window.confirm(
+      `Connect this PC to "${ap.ssid || '[hidden network]'}" (${ap.bssid})?\n\n` +
+      `Windows will ${profileAction} and attempt an association on the selected adapter. ` +
+      'WinWiFi does not store the password. Only continue if you own or are authorized to test this network.'
+    );
+    if (!approved) return;
     setConnectionMessage('Requesting Windows connection…');
     try { setConnectionMessage(await onConnect(ap, password, authorizationConfirmed)); }
     catch (error: any) { setConnectionMessage(error?.message || 'Connection request failed.'); }
@@ -400,7 +409,11 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-500">MIC Verification:</span>
-                  <div className="text-emerald-400 font-semibold">VALID (CRC32/HMAC)</div>
+                  <div className="text-slate-200 font-semibold">
+                    {ap.handshake.micHex
+                      ? (ap.handshake.micVerified ? 'MIC present (not validated)' : 'MIC unverified')
+                      : 'Not exposed by native importer'}
+                  </div>
                 </div>
                 <div>
                   <span className="text-slate-500">Frames Captured:</span>
@@ -412,15 +425,15 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
               <div className="pt-2 border-t border-slate-700/30 space-y-1 text-[10px]">
                 <div className="truncate">
                   <span className="text-slate-500">ANonce (AP): </span>
-                  <span className="text-amber-300">{ap.handshake.anonce}</span>
+                  <span className="text-amber-300">{ap.handshake.anonce || 'Not exposed'}</span>
                 </div>
                 <div className="truncate">
                   <span className="text-slate-500">SNonce (Client): </span>
-                  <span className="text-cyan-300">{ap.handshake.snonce}</span>
+                  <span className="text-cyan-300">{ap.handshake.snonce || 'Not exposed'}</span>
                 </div>
                 <div className="truncate">
                   <span className="text-slate-500">MIC: </span>
-                  <span className="text-emerald-400">{ap.handshake.micHex}</span>
+                  <span className="text-emerald-400">{ap.handshake.micHex || 'Not exposed'}</span>
                 </div>
               </div>
 
@@ -428,7 +441,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
               {ap.handshake.hashcatFormat && (
                 <div className="pt-2 border-t border-slate-700/30">
                   <div className="flex items-center justify-between text-slate-400 text-[10px] mb-1">
-                    <span>Audit Export Format (Hashcat mode 22000 / PMKID):</span>
+                    <span>Mode 22000 line (training / browser-parsed, not native-verified):</span>
                     <button
                       onClick={handleCopyHashcat}
                       className="flex items-center gap-1 text-blue-400 hover:text-blue-300"
@@ -450,7 +463,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
               <Radio className="w-6 h-6 mx-auto mb-1.5 opacity-40 text-blue-400" />
               <p>No active EAPOL key exchange recorded for this AP during current session.</p>
               <p className="text-[11px] text-slate-500 mt-1">
-                Click &quot;Simulate Handshake Capture&quot; to test key dissection & Hashcat 22000 extraction.
+                The training lab can load a synthetic handshake fixture; it is not a captured or exportable credential record.
               </p>
             </div>
           )}

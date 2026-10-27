@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
@@ -110,21 +111,25 @@ namespace WinWiFi.Tests
                 return $"Parsed {res.Packets.Count} frame, BSSID: {res.AccessPoints[0].Bssid}";
             }));
 
-            // Test 4: EAPOL 4-Way Handshake & Hashcat Formatting
-            results.Add(RunTest("T4-EAPOL-HASHCAT", "EAPOL 4-Way Handshake & Hashcat 22000", () =>
+            // Test 4: The parsed handshake path keeps forensic metadata but withholds
+            // export material and never fabricates a Hashcat mode 22000 line.
+            results.Add(RunTest("T4-EAPOL-METADATA", "EAPOL 4-Way Metadata (No Hash Export)", () =>
             {
-                var hs = new HandshakeInfo
-                {
-                    ApBssid = "00:11:22:33:44:55",
-                    ClientMac = "AA:BB:CC:DD:EE:FF",
-                    Ssid = "CorpWiFi",
-                    SnonCe = "11223344556677889900AABBCCDDEEFF11223344556677889900AABBCCDDEEFF",
-                    MicHex = "A1B2C3D4E5F60718293A4B5C6D7E8F90",
-                    HashcatFormat = "WPA*02*a1b2c3d4e5f60718293a4b5c6d7e8f90*001122334455*aabbccddeeff*436f727057694669*11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff*0103005f02030a00000000000000000001"
-                };
+                var packet = new byte[128];
+                var session = new HandshakeSession("00:11:22:33:44:55", "AA:BB:CC:DD:EE:FF", "CorpWiFi");
+                session.AddFrame("M1", new string('A', 64), new string('0', 32), 7, 2, null, packet, 32, "2026-01-01 12:00:00");
+                session.AddFrame("M2", new string('B', 64), new string('C', 32), 7, 2, null, packet, 32, "2026-01-01 12:00:01");
 
-                if (!hs.HashcatFormat.StartsWith("WPA*02*")) throw new Exception("Invalid Hashcat mode 22000 prefix");
-                return "Validated Mode 22000 WPA-PBKDF2-PMKID/EAPOL format string.";
+                var hs = session.ToHandshakeInfo() ?? throw new Exception("EAPOL session did not produce a handshake record.");
+                if (!hs.CapturedSteps.Contains("M1") || !hs.CapturedSteps.Contains("M2"))
+                    throw new Exception("Parsed EAPOL message steps were not retained.");
+                if (hs.HashcatFormat is not null)
+                    throw new Exception("Native parser emitted a Hashcat line it does not generate.");
+                if (hs.IsExportReady || !hs.ExportReadiness.StartsWith("Not available", StringComparison.Ordinal))
+                    throw new Exception("Native handshake record incorrectly reports export readiness.");
+                if (hs.HasAnonce || hs.HasSnonce || hs.HasMic)
+                    throw new Exception("Native parser exposed cryptographic export material.");
+                return "Retained M1/M2 metadata, confirmed no hash line or nonce/MIC export material is emitted.";
             }));
 
             // Test 5: NIST SP 800-153 Security Scoring
@@ -133,17 +138,21 @@ namespace WinWiFi.Tests
                 var analyzer = new SecurityAnalyzer();
                 var wepAp = new AccessPoint { Bssid = "00:01:02:03:04:05", Security = "WEP-128", Cipher = "WEP" };
                 var openAp = new AccessPoint { Bssid = "00:01:02:03:04:06", Security = "Open", Cipher = "None" };
+                var oweAp = new AccessPoint { Bssid = "00:01:02:03:04:08", Security = "OWE (Enhanced Open)", Cipher = "CCMP (AES)" };
                 var wpa3Ap = new AccessPoint { Bssid = "00:01:02:03:04:07", Security = "WPA3-SAE", Cipher = "GCMP-256", PmfRequired = true };
 
                 analyzer.EvaluateSecurityPosture(wepAp);
                 analyzer.EvaluateSecurityPosture(openAp);
+                analyzer.EvaluateSecurityPosture(oweAp);
                 analyzer.EvaluateSecurityPosture(wpa3Ap);
 
                 if (wepAp.SecurityScore > 45) throw new Exception("WEP must score < 45");
                 if (openAp.SecurityScore > 65) throw new Exception("Open Wi-Fi must score < 65");
+                if (oweAp.SecurityScore < 95) throw new Exception($"OWE (Enhanced Open) must not be penalized as unencrypted; got {oweAp.SecurityScore}");
+                if (oweAp.SecurityIssues.Any(i => i.Id == "VULN-OPEN-UNENCRYPTED")) throw new Exception("OWE was misclassified as VULN-OPEN-UNENCRYPTED");
                 if (wpa3Ap.SecurityScore < 95) throw new Exception("WPA3-SAE + PMF must score >= 95");
 
-                return $"WEP: {wepAp.SecurityScore}, Open: {openAp.SecurityScore}, WPA3: {wpa3Ap.SecurityScore}";
+                return $"WEP: {wepAp.SecurityScore}, Open: {openAp.SecurityScore}, OWE: {oweAp.SecurityScore}, WPA3: {wpa3Ap.SecurityScore}";
             }));
 
             // Test 6: SQLite Storage Repository CRUD
@@ -227,19 +236,36 @@ namespace WinWiFi.Tests
             results.Add(RunTest("T7C-VENDOR-MISMATCH", "Enterprise vs Consumer Vendor Mismatch", () =>
             {
                 var analyzer = new SecurityAnalyzer();
+                var baseline = new Dictionary<string, AccessPoint>
+                {
+                    ["00:00:0C:AA:BB:01"] = new AccessPoint
+                    {
+                        Bssid = "00:00:0C:AA:BB:01",
+                        Ssid = "Enterprise_WLAN",
+                        Security = "WPA2-Enterprise",
+                        Cipher = "CCMP",
+                        Vendor = "Cisco Systems",
+                        Classification = "Corporate",
+                        ApprovedStatus = "Approved"
+                    }
+                };
                 var aps = new List<AccessPoint>
                 {
-                    new AccessPoint { Bssid = "00:00:0C:AA:BB:01", Ssid = "Enterprise_WLAN", Security = "WPA2-Enterprise", Cipher = "CCMP", Vendor = "Cisco Systems", SecurityScore = 85 },
-                    new AccessPoint { Bssid = "50:D4:F7:11:22:33", Ssid = "Enterprise_WLAN", Security = "WPA2-Enterprise", Cipher = "CCMP", Vendor = "TP-Link Technologies", SecurityScore = 85 }
+                    new AccessPoint { Bssid = "00:00:0C:AA:BB:01", Ssid = "Enterprise_WLAN", Security = "WPA2-Enterprise", Cipher = "CCMP", Vendor = "Cisco Systems", SecurityScore = 85, Rssi = -70 },
+                    new AccessPoint { Bssid = "50:D4:F7:11:22:33", Ssid = "Enterprise_WLAN", Security = "WPA2-Enterprise", Cipher = "CCMP", Vendor = "TP-Link Technologies", SecurityScore = 85, Rssi = -40 }
                 };
 
-                var res = analyzer.AnalyzeThreatsAndDrift(aps, null);
+                var res = analyzer.AnalyzeThreatsAndDrift(aps, baseline);
                 var vendorMismatch = res.Findings.Find(f => f.Category == "Rogue AP" && f.RelatedBssid == "50:D4:F7:11:22:33");
                 if (vendorMismatch == null)
                 {
                     throw new Exception("Failed to flag TP-Link consumer AP masquerading on Cisco Enterprise WLAN.");
                 }
-                return $"Flagged Rogue AP {vendorMismatch.RelatedBssid} ({vendorMismatch.Evidence}).";
+                if (vendorMismatch.Confidence < 70)
+                {
+                    throw new Exception($"Multi-signal finding should carry confidence >= 70, got {vendorMismatch.Confidence}.");
+                }
+                return $"Flagged Rogue AP {vendorMismatch.RelatedBssid} with {vendorMismatch.Confidence}% confidence ({vendorMismatch.Evidence}).";
             }));
 
             // Test 7D: High-Power Proximity Signal Lure
@@ -253,12 +279,16 @@ namespace WinWiFi.Tests
                 };
 
                 var res = analyzer.AnalyzeThreatsAndDrift(aps, null);
-                var lure = res.Findings.Find(f => f.Category == "Evil Twin" && f.RelatedBssid == "02:11:22:33:44:55");
+                var lure = res.Findings.Find(f => f.Category == "Rogue AP" && f.RelatedBssid == "02:11:22:33:44:55");
                 if (lure == null)
                 {
                     throw new Exception("Failed to flag high-power proximity lure (+33 dBm disparity with LAA).");
                 }
-                return $"Detected proximity lure: {lure.Title} at {lure.RelatedBssid} (+33 dBm difference).";
+                if (lure.Severity != "HIGH" || lure.Confidence < 70)
+                {
+                    throw new Exception($"LAA + signal anomaly should produce HIGH confidence >= 70, got {lure.Severity}/{lure.Confidence}.");
+                }
+                return $"Detected proximity lure: {lure.Title} at {lure.RelatedBssid} (+33 dBm difference, {lure.Confidence}% confidence).";
             }));
 
             // Test 7E: LAA / Randomized MAC BSSID Detection
@@ -300,7 +330,7 @@ namespace WinWiFi.Tests
                     {
                         Bssid = "00:11:22:33:44:00",
                         Ssid = "Corporate_Root",
-                        Security = "WPA2-PSK",      // Drift 1: Encryption Downgrade
+                        Security = "Open",             // Drift 1: Encryption Downgrade
                         PmfRequired = false,         // Drift 2: PMF Stripped
                         PmfCapable = true,
                         IsWpsEnabled = true,         // Drift 3: WPS Enabled
@@ -356,6 +386,56 @@ namespace WinWiFi.Tests
                     throw new Exception("Failed to flag unapproved BSSID broadcasting approved corporate SSID.");
                 }
                 return $"Successfully identified unapproved rogue hardware on Corporate SSID: {unapproved.RelatedBssid}";
+            }));
+
+            // Test 7H: WPA2/WPA3 transition must not be flagged as an evil twin.
+            results.Add(RunTest("T7H-TRANSITION-NO-FP", "WPA2/WPA3 Transition Produces No False Positive", () =>
+            {
+                var analyzer = new SecurityAnalyzer();
+                var aps = new List<AccessPoint>
+                {
+                    new AccessPoint { Bssid = "00:00:0C:10:20:01", Ssid = "Transition-WiFi", Security = "WPA2-PSK", Cipher = "CCMP", Vendor = "Cisco Systems", Rssi = -60 },
+                    new AccessPoint { Bssid = "00:00:0C:10:20:02", Ssid = "Transition-WiFi", Security = "WPA3-SAE", Cipher = "CCMP", Vendor = "Cisco Systems", Rssi = -65 }
+                };
+
+                var res = analyzer.AnalyzeThreatsAndDrift(aps, null);
+                if (res.Findings.Count > 0)
+                    throw new Exception($"WPA2/WPA3 transition produced {res.Findings.Count} finding(s): {res.Findings[0].Title}");
+                return "WPA2/WPA3 transition deployment produced 0 findings.";
+            }));
+
+            // Test 7I: A single OUI mismatch is not enough to alert.
+            results.Add(RunTest("T7I-SINGLE-SIGNAL", "Single-Signal OUI Difference Does Not Alert", () =>
+            {
+                var analyzer = new SecurityAnalyzer();
+                var aps = new List<AccessPoint>
+                {
+                    new AccessPoint { Bssid = "00:00:0C:30:40:01", Ssid = "Mixed-Vendor", Security = "WPA2-Enterprise", Cipher = "CCMP", Vendor = "Cisco Systems", Rssi = -60 },
+                    new AccessPoint { Bssid = "50:D4:F7:30:40:02", Ssid = "Mixed-Vendor", Security = "WPA2-Enterprise", Cipher = "CCMP", Vendor = "TP-Link Technologies", Rssi = -62 }
+                };
+
+                var res = analyzer.AnalyzeThreatsAndDrift(aps, null);
+                if (res.Findings.Count > 0)
+                    throw new Exception($"Single OUI signal should not alert, got {res.Findings[0].Title}");
+                return "Single-signal OUI difference suppressed as designed.";
+            }));
+
+            // Test 7J: Finding IDs must survive AP reordering.
+            results.Add(RunTest("T7J-STABLE-FINDING-IDS", "Stable Threat Finding IDs Across Scan Reordering", () =>
+            {
+                var analyzer = new SecurityAnalyzer();
+                var first = new AccessPoint { Bssid = "00:00:0C:50:60:01", Ssid = "Stable-ID", Security = "WPA2-Enterprise", Cipher = "CCMP", Vendor = "Cisco Systems", Rssi = -70 };
+                var second = new AccessPoint { Bssid = "00:1A:1E:50:60:02", Ssid = "Stable-ID", Security = "Open", Cipher = "None", Vendor = "Aruba Networks", Rssi = -40 };
+
+                var forward = analyzer.AnalyzeThreatsAndDrift(new List<AccessPoint> { first, second }, null);
+                var reverse = analyzer.AnalyzeThreatsAndDrift(new List<AccessPoint> { second, first }, null);
+                var forwardIds = forward.Findings.Select(f => f.Id).OrderBy(id => id).ToList();
+                var reverseIds = reverse.Findings.Select(f => f.Id).OrderBy(id => id).ToList();
+
+                if (forwardIds.Count == 0) throw new Exception("Stable-ID fixture produced no finding.");
+                if (!forwardIds.SequenceEqual(reverseIds))
+                    throw new Exception($"Finding IDs changed after reordering: [{string.Join(",", forwardIds)}] vs [{string.Join(",", reverseIds)}]");
+                return $"Stable finding ID validated: {forwardIds[0]}.";
             }));
 
             // Test 8: Offline OUI Database Resolution
@@ -673,26 +753,94 @@ SSID 2 : Guest-Open
                 }
             }));
 
-            results.Add(RunTest("T16-REPORT-EXPORT", "HTML Report Generation", () =>
+#endif
+
+            results.Add(await RunTestAsync("T17-PROJECT-SCOPE", "Bridge Project Scope & SQLite Isolation", async () =>
+            {
+                if (!HttpBridgeServer.IsValidProjectId("proj-Alpha_1.2"))
+                    throw new Exception("A valid project identifier was rejected.");
+                foreach (string invalid in new[] { "", "../escape", "a b", new string('a', 65), "proj;drop" })
+                {
+                    if (HttpBridgeServer.IsValidProjectId(invalid))
+                        throw new Exception($"Invalid project identifier accepted: '{invalid}'");
+                }
+
+                string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_scope_{Guid.NewGuid():N}.db");
+                try
+                {
+                    using var storage = new SqliteStorageService(tempDb);
+                    await storage.EnsureProjectAsync("proj-alpha", "Alpha Audit");
+                    await storage.SaveAccessPointsAsync("proj-alpha", new List<AccessPoint>
+                    {
+                        new() { Bssid = "02:11:22:33:44:55", Ssid = "Alpha-Only", Channel = 1, Band = "2.4 GHz", Security = "WPA3-Personal" }
+                    });
+
+                    var alpha = await storage.GetAccessPointsAsync("proj-alpha");
+                    var beta = await storage.GetAccessPointsAsync("proj-beta");
+                    var projects = await storage.GetProjectsAsync();
+                    if (alpha.Count != 1 || alpha[0].Ssid != "Alpha-Only")
+                        throw new Exception("Project-scoped access point was not persisted.");
+                    if (beta.Count != 0)
+                        throw new Exception("Access point leaked into a different project.");
+                    if (!projects.Any(project => project.Id == "proj-alpha"))
+                        throw new Exception("EnsureProjectAsync did not create the project row.");
+                    return "Validated project identifier rejection and per-project SQLite isolation.";
+                }
+                finally
+                {
+                    SqliteStorageService.ReleaseAllPools();
+                    try
+                    {
+                        if (File.Exists(tempDb)) File.Delete(tempDb);
+                        if (File.Exists(tempDb + "-wal")) File.Delete(tempDb + "-wal");
+                        if (File.Exists(tempDb + "-shm")) File.Delete(tempDb + "-shm");
+                    }
+                    catch { }
+                }
+            }));
+
+            results.Add(RunTest("T16-REPORT-EXPORT", "HTML Report Generation & Field Encoding", () =>
             {
                 string tempReport = Path.Combine(Path.GetTempPath(), $"winwifi_report_{Guid.NewGuid():N}.html");
                 try
                 {
-                    var project = new AuditProject { Id = "proj-report", Name = "Report Workflow Test", Location = "Lab", AuditorName = "Test Auditor" };
-                    var ap = new AccessPoint { Bssid = "AA:BB:CC:DD:EE:FF", Ssid = "Report-Network", Channel = 1, Band = "2.4 GHz", Security = "WPA2-Personal" };
+                    var project = new AuditProject
+                    {
+                        Id = "proj-report",
+                        Name = "<script>alert('project')</script>",
+                        Location = "Lab",
+                        AuditorName = "A & B <admin@example.test>"
+                    };
+                    var ap = new AccessPoint
+                    {
+                        Bssid = "AA:BB:CC:DD:EE:FF",
+                        Ssid = "<img src=x onerror=alert(1)>",
+                        Channel = 1,
+                        Band = "2.4 GHz <b>",
+                        Security = "WPA2 & Co",
+                        Cipher = "CCMP\"quoted\""
+                    };
+                    ap.SecurityIssues.Add(new SecurityIssue { Title = "<script>issue</script> & bad" });
+
                     new ReportGenerator().SaveReportToFile(tempReport, project, new List<AccessPoint> { ap });
                     if (!File.Exists(tempReport)) throw new Exception("Report generator did not create an HTML file.");
                     string html = File.ReadAllText(tempReport);
-                    if (!html.Contains(project.Name, StringComparison.Ordinal) || !html.Contains(ap.Ssid, StringComparison.Ordinal))
-                        throw new Exception("Generated report omitted the project or observed network.");
-                    return "Generated an HTML audit report and verified it includes project and network data.";
+                    foreach (string raw in new[] { "<script>alert('project')</script>", "<img src=x", "<script>issue</script>", "CCMP\"quoted\"" })
+                    {
+                        if (html.Contains(raw, StringComparison.Ordinal))
+                            throw new Exception($"Report leaked an unencoded field: {raw}");
+                    }
+                    if (!html.Contains("&lt;script&gt;", StringComparison.Ordinal) ||
+                        !html.Contains("&amp;", StringComparison.Ordinal) ||
+                        !html.Contains("&quot;", StringComparison.Ordinal))
+                        throw new Exception("Report did not HTML-encode dynamic fields.");
+                    return "Generated an HTML report and verified project, auditor, BSSID, band, security, cipher, and issue titles are encoded.";
                 }
                 finally
                 {
                     try { if (File.Exists(tempReport)) File.Delete(tempReport); } catch { }
                 }
             }));
-#endif
 
             results.Add(RunTest("T17-LOCAL-BRIDGE-ORIGINS", "Local Bridge Origin and Private-Network Contract", () =>
             {
@@ -706,6 +854,28 @@ SSID 2 : Guest-Open
                 if (!HttpBridgeServer.RequestsPrivateNetworkAccess("true") || HttpBridgeServer.RequestsPrivateNetworkAccess("false"))
                     throw new Exception("Private-network preflight header detection failed.");
                 return "Validated configurable loopback origins, remote/path rejection, allowlist matching, and private-network preflight detection.";
+            }));
+
+            results.Add(RunTest("T18-BRIDGE-TOKEN", "Per-Launch Bridge Token Contract", () =>
+            {
+                string first = HttpBridgeServer.GenerateAuthToken();
+                string second = HttpBridgeServer.GenerateAuthToken();
+                if (first.Length != 64 || !first.All(ch => (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')))
+                    throw new Exception("Bridge token is not 32 random bytes rendered as lowercase hex.");
+                if (string.Equals(first, second, StringComparison.Ordinal))
+                    throw new Exception("Two launches produced the same bridge token.");
+                if (!HttpBridgeServer.IsValidAuthToken(first, first))
+                    throw new Exception("A matching bridge token was rejected.");
+                if (HttpBridgeServer.IsValidAuthToken(null, first) ||
+                    HttpBridgeServer.IsValidAuthToken(second, first) ||
+                    HttpBridgeServer.IsValidAuthToken(first + "0", first))
+                    throw new Exception("Bridge token validation accepted a missing, different, or padded token.");
+
+                string tokenPath = HttpBridgeServer.BridgeTokenFilePath();
+                string expectedSuffix = Path.Combine("WinWiFi", "bridge.token");
+                if (!tokenPath.EndsWith(expectedSuffix, StringComparison.OrdinalIgnoreCase))
+                    throw new Exception($"Bridge token path is not under LOCALAPPDATA\\WinWiFi: {tokenPath}");
+                return "Validated per-launch 256-bit tokens, constant-time accept/reject behavior, and the LOCALAPPDATA token path.";
             }));
 
 #if WINDOWS_DESKTOP

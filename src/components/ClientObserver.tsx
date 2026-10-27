@@ -76,6 +76,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
 
   const isLiveMode = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
   const isPcap = dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED';
+  const isTrainingDataset = !isLiveMode && !isPcap && allClients.length > 0;
 
   return (
     <div className="space-y-5 pb-8">
@@ -120,17 +121,29 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
             VERIFIED FORENSIC DATA
           </span>
         </div>
+      ) : isTrainingDataset ? (
+        <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 text-xs text-purple-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Info className="w-4 h-4 text-purple-400" />
+            <span className="font-semibold">Training dataset — these client records are synthetic lab fixtures, not live or captured observations.</span>
+          </div>
+          <span className="px-2 py-0.5 rounded bg-purple-500/20 font-mono text-[10px] font-bold">
+            SYNTHETIC / NOT LIVE
+          </span>
+        </div>
       ) : null}
 
       {/* Header with KPI cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm">
           <div className="text-xs text-slate-400 font-medium flex items-center justify-between">
-            <span>Observed Stations</span>
+            <span>{isTrainingDataset ? 'Training Fixtures' : 'Observed Stations'}</span>
             <Laptop className="w-4 h-4 text-blue-400" />
           </div>
           <div className="text-2xl font-bold text-slate-100 mt-1">{allClients.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">Actively transmitting clients</div>
+          <div className="text-[11px] text-slate-500 mt-1">
+            {isTrainingDataset ? 'Synthetic lab records — not live observations' : 'Actively transmitting clients'}
+          </div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm">

@@ -55,13 +55,13 @@ namespace WinWiFi.Models
             }
         }
 
-        public bool IsExportReady => (HasAnonce && HasSnonce && HasMic) || HasPmkid;
+        // The native importer deliberately withholds nonce/MIC material and does
+        // not build hash lines, so an imported record is never export-ready.
+        public bool IsExportReady => false;
 
-        public string ExportReadiness => IsExportReady
-            ? (HasPmkid ? "Export Ready (PMKID Mode 22000)" : "Export Ready (4-Way Mode 22000)")
-            : "Incomplete (Missing required cryptographic nonce or MIC)";
+        public string ExportReadiness => "Not available: WinWiFi does not emit Hashcat 22000 hash lines.";
 
-        public string? HashcatFormat { get; set; } // Hashcat mode 22000: WPA*02*MIC*MAC_AP*MAC_CLI*ESSID*NONCE_AP*EAPOL
+        public string? HashcatFormat { get; set; } // Reserved. Native imports always leave this null.
         public string? EapolPayloadHex { get; set; }
         public string ValidationNotes { get; set; } = string.Empty;
     }

@@ -9,6 +9,8 @@ namespace WinWiFi.Services
 {
     public class ReportGenerator
     {
+        private static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? string.Empty);
+
         public string GenerateHtmlReport(AuditProject project, List<AccessPoint> accessPoints)
         {
             var sb = new StringBuilder();
@@ -22,7 +24,7 @@ namespace WinWiFi.Services
             sb.AppendLine("<html lang=\"en\">");
             sb.AppendLine("<head>");
             sb.AppendLine("<meta charset=\"utf-8\">");
-            sb.AppendLine($"<title>Wireless Security Audit - {project.Name}</title>");
+            sb.AppendLine($"<title>Wireless Security Audit - {E(project.Name)}</title>");
             sb.AppendLine("<style>");
             sb.AppendLine("body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; background: #0f1115; color: #e2e8f0; }");
             sb.AppendLine(".header { border-bottom: 2px solid #3b82f6; padding-bottom: 20px; margin-bottom: 30px; }");
@@ -46,7 +48,7 @@ namespace WinWiFi.Services
 
             sb.AppendLine("<div class=\"header\">");
             sb.AppendLine($"<h1>WinWiFi Executive Wireless Audit Report</h1>");
-            sb.AppendLine($"<div class=\"meta\">Project: <strong>{project.Name}</strong> | Auditor: <strong>{project.AuditorName}</strong> | Generated: <strong>{DateTime.Now:yyyy-MM-dd HH:mm:ss}</strong></div>");
+            sb.AppendLine($"<div class=\"meta\">Project: <strong>{E(project.Name)}</strong> | Auditor: <strong>{E(project.AuditorName)}</strong> | Generated: <strong>{DateTime.Now:yyyy-MM-dd HH:mm:ss}</strong></div>");
             sb.AppendLine("</div>");
 
             sb.AppendLine("<div class=\"metrics\">");
@@ -67,12 +69,12 @@ namespace WinWiFi.Services
                 string scoreClass = ap.SecurityScore < 60 ? "score-bad" : (ap.SecurityScore < 85 ? "score-warn" : "score-good");
                 sb.AppendLine("<tr>");
                 sb.AppendLine($"<td><strong>{System.Net.WebUtility.HtmlEncode(ap.Ssid)}</strong> {(ap.IsRogue ? "<span class=\"badge badge-rogue\">ROGUE</span>" : "")}</td>");
-                sb.AppendLine($"<td style=\"font-family:monospace;\">{ap.Bssid}</td>");
-                sb.AppendLine($"<td>Ch {ap.Channel} ({ap.Band})</td>");
+                sb.AppendLine($"<td style=\"font-family:monospace;\">{E(ap.Bssid)}</td>");
+                sb.AppendLine($"<td>Ch {ap.Channel} ({E(ap.Band)})</td>");
                 sb.AppendLine($"<td>{ap.Rssi} dBm ({ap.SignalQuality}%)</td>");
-                sb.AppendLine($"<td>{ap.Security} ({ap.Cipher})</td>");
+                sb.AppendLine($"<td>{E(ap.Security)} ({E(ap.Cipher)})</td>");
                 sb.AppendLine($"<td class=\"{scoreClass}\">{ap.SecurityScore} / 100</td>");
-                sb.AppendLine($"<td>{string.Join(", ", ap.SecurityIssues.Select(i => i.Title))}</td>");
+                sb.AppendLine($"<td>{E(string.Join(", ", ap.SecurityIssues.Select(i => i.Title)))}</td>");
                 sb.AppendLine("</tr>");
             }
 

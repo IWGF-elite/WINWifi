@@ -71,29 +71,61 @@ export class SqliteDatabaseService {
   public deleteProjectData(projectId: string): void {
     localStorage.removeItem(`${DB_PREFIX}access_points_${projectId}`);
     localStorage.removeItem(`${DB_PREFIX}analyst_overrides_${projectId}`);
-  }
-
-  public getIncidents(): IncidentRecord[] | null {
-    const raw = localStorage.getItem(`${DB_PREFIX}incidents`);
-    if (raw === null) return null;
-    try {
-      return JSON.parse(raw) as IncidentRecord[];
-    } catch {
-      return null;
+    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes']) {
+      localStorage.removeItem(this.scopedKey(kind, projectId));
     }
   }
 
-  public saveIncidents(incidents: IncidentRecord[]): void {
-    localStorage.setItem(`${DB_PREFIX}incidents`, JSON.stringify(incidents));
+  private scopedKey(kind: string, projectId: string): string {
+    return `${DB_PREFIX}${kind}_${projectId}`;
   }
 
-  public getEvidenceItems(): EvidenceItem[] {
-    try { return JSON.parse(localStorage.getItem(`${DB_PREFIX}evidence`) || '[]') as EvidenceItem[]; }
-    catch { return []; }
+  // Early builds stored cases, evidence, logs, and handshakes globally, which
+  // leaked them across projects. Move a legacy global record into the selected
+  // project once so history is preserved without cross-project bleed.
+  private readScoped<T>(kind: string, projectId: string, fallback: T): T {
+    const key = this.scopedKey(kind, projectId);
+    let raw = localStorage.getItem(key);
+    if (raw === null) {
+      const legacyKey = `${DB_PREFIX}${kind}`;
+      const legacy = localStorage.getItem(legacyKey);
+      if (legacy !== null) {
+        localStorage.setItem(key, legacy);
+        localStorage.removeItem(legacyKey);
+        raw = legacy;
+      }
+    }
+    if (raw === null) return fallback;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
   }
 
-  public saveEvidenceItems(items: EvidenceItem[]): void {
-    localStorage.setItem(`${DB_PREFIX}evidence`, JSON.stringify(items));
+  private writeScoped<T>(kind: string, projectId: string, value: T): void {
+    localStorage.setItem(this.scopedKey(kind, projectId), JSON.stringify(value));
+  }
+
+  public getIncidents(projectId: string = this.getCurrentProjectId()): IncidentRecord[] | null {
+    const key = this.scopedKey('incidents', projectId);
+    if (localStorage.getItem(key) === null) {
+      const legacy = localStorage.getItem(`${DB_PREFIX}incidents`);
+      if (legacy === null) return null;
+    }
+    return this.readScoped<IncidentRecord[] | null>('incidents', projectId, null);
+  }
+
+  public saveIncidents(incidents: IncidentRecord[], projectId: string = this.getCurrentProjectId()): void {
+    this.writeScoped('incidents', projectId, incidents);
+  }
+
+  public getEvidenceItems(projectId: string = this.getCurrentProjectId()): EvidenceItem[] {
+    return this.readScoped<EvidenceItem[]>('evidence', projectId, []);
+  }
+
+  public saveEvidenceItems(items: EvidenceItem[], projectId: string = this.getCurrentProjectId()): void {
+    this.writeScoped('evidence', projectId, items);
   }
 
   public getAccessPoints(projectId: string): AccessPoint[] {
@@ -127,52 +159,40 @@ export class SqliteDatabaseService {
   }
 
   // Logs
-  public getLogs(): AuditLog[] {
-    const raw = localStorage.getItem(`${DB_PREFIX}logs`);
-    if (!raw) return [];
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return [];
-    }
+  public getLogs(projectId: string = this.getCurrentProjectId()): AuditLog[] {
+    return this.readScoped<AuditLog[]>('logs', projectId, []);
   }
 
-  public appendLog(log: Omit<AuditLog, 'id' | 'timestamp'>): AuditLog {
+  public appendLog(log: Omit<AuditLog, 'id' | 'timestamp'>, projectId: string = this.getCurrentProjectId()): AuditLog {
     const fullLog: AuditLog = {
       ...log,
       id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       timestamp: new Date().toLocaleTimeString(),
     };
-    const current = this.getLogs();
+    const current = this.getLogs(projectId);
     const updated = [fullLog, ...current].slice(0, 300); // keep last 300
-    localStorage.setItem(`${DB_PREFIX}logs`, JSON.stringify(updated));
+    this.writeScoped('logs', projectId, updated);
     return fullLog;
   }
 
-  public clearLogs(): void {
-    localStorage.removeItem(`${DB_PREFIX}logs`);
+  public clearLogs(projectId: string = this.getCurrentProjectId()): void {
+    localStorage.removeItem(this.scopedKey('logs', projectId));
   }
 
   // Saved Handshakes in SQLite
-  public getSavedHandshakes(): HandshakeInfo[] {
-    const raw = localStorage.getItem(`${DB_PREFIX}handshakes`);
-    if (!raw) return [];
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return [];
-    }
+  public getSavedHandshakes(projectId: string = this.getCurrentProjectId()): HandshakeInfo[] {
+    return this.readScoped<HandshakeInfo[]>('handshakes', projectId, []);
   }
 
-  public saveHandshake(handshake: HandshakeInfo): void {
-    const list = this.getSavedHandshakes();
+  public saveHandshake(handshake: HandshakeInfo, projectId: string = this.getCurrentProjectId()): void {
+    const list = this.getSavedHandshakes(projectId);
     const existingIdx = list.findIndex(h => h.apBssid.toLowerCase() === handshake.apBssid.toLowerCase());
     if (existingIdx >= 0) {
       list[existingIdx] = handshake;
     } else {
       list.unshift(handshake);
     }
-    localStorage.setItem(`${DB_PREFIX}handshakes`, JSON.stringify(list));
+    this.writeScoped('handshakes', projectId, list);
   }
 
   // SQL Query Engine with real filtering, projections, and table support

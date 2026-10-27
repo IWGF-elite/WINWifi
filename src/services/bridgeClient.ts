@@ -31,6 +31,9 @@ export class NativeBridgeClient {
   private sseRetryTimer: any = null;
   private reconnectAttempts = 0;
   private maxReconnectDelayMs = 15000;
+  private projectId = '';
+  private projectName = '';
+  private token = '';
 
   // Event Listeners
   private stateListeners: Set<BridgeEventCallback<BridgeConnectionState>> = new Set();
@@ -42,6 +45,44 @@ export class NativeBridgeClient {
 
   private constructor() {
     this.loadConfig();
+    this.loadToken();
+  }
+
+  // The native shell appends ?token= to the dashboard URL. Session storage keeps
+  // it available after the query string is stripped from the page URL.
+  private loadToken(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      const fromUrl = url.searchParams.get('token') || '';
+      const stored = window.sessionStorage.getItem('winwifi_bridge_token') || '';
+      const fromEnv = String((import.meta as any).env?.VITE_WINWIFI_BRIDGE_TOKEN || '');
+      this.token = (fromUrl || stored || fromEnv).trim();
+      if (this.token) {
+        window.sessionStorage.setItem('winwifi_bridge_token', this.token);
+        if (fromUrl) {
+          url.searchParams.delete('token');
+          window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+        }
+      }
+    } catch {
+      this.token = '';
+    }
+  }
+
+  public getToken(): string {
+    return this.token;
+  }
+
+  public setToken(token: string): void {
+    this.token = (token || '').trim();
+    try {
+      if (typeof window !== 'undefined') {
+        if (this.token) window.sessionStorage.setItem('winwifi_bridge_token', this.token);
+        else window.sessionStorage.removeItem('winwifi_bridge_token');
+      }
+    } catch { /* Session storage may be unavailable; the in-memory token still works. */ }
+    if (this.state === 'CONNECTED') this.initEventSource();
   }
 
   public static getInstance(): NativeBridgeClient {
@@ -113,6 +154,53 @@ export class NativeBridgeClient {
     }
   }
 
+  // ================= Project Scope =================
+
+  /**
+   * Select the audit project that owns every subsequent bridge read and write.
+   * The bridge never falls back to a shared hardcoded project.
+   */
+  public setProject(projectId: string, projectName?: string): void {
+    const nextId = String(projectId || '').trim();
+    const nextName = String(projectName || '').trim();
+    const changed = nextId !== this.projectId;
+    this.projectId = nextId;
+    if (nextName) this.projectName = nextName;
+
+    if (changed && this.state === 'CONNECTED') {
+      // EventSource cannot send custom headers; reconnect the stream so the
+      // projectId query parameter matches the newly selected workspace.
+      this.initEventSource();
+    }
+  }
+
+  public getProjectId(): string {
+    return this.projectId;
+  }
+
+  public async selectProject(projectId: string, projectName?: string): Promise<{ activeProjectId: string; message: string }> {
+    this.setProject(projectId, projectName);
+    return await this.request<{ activeProjectId: string; message: string }>('/api/projects/select', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, projectName })
+    });
+  }
+
+  public async saveProject(project: { id: string; name: string; location?: string; auditorName?: string; createdAt?: string; updatedAt?: string; notes?: string }): Promise<any> {
+    return await this.request('/api/projects', { method: 'POST', body: JSON.stringify(project) });
+  }
+
+  public async getProjects(): Promise<any[]> {
+    return await this.request<any[]>('/api/projects');
+  }
+
+  public async getProjectAccessPoints(projectId?: string): Promise<AccessPoint[]> {
+    const pid = projectId || this.projectId;
+    const query = pid ? `?projectId=${encodeURIComponent(pid)}` : '';
+    const raw = await this.request<any[]>(`/api/access-points${query}`);
+    return this.tagOrigin(Array.isArray(raw) ? raw : [], 'LIVE_WINDOWS');
+  }
+
   // ================= State & Observers =================
 
   public getState(): BridgeConnectionState {
@@ -178,6 +266,11 @@ export class NativeBridgeClient {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
+          ...(this.token ? { 'X-WinWiFi-Token': this.token } : {}),
+          ...(this.projectId ? {
+            'X-WinWiFi-Project': this.projectId,
+            ...(this.projectName ? { 'X-WinWiFi-Project-Name': this.projectName } : {})
+          } : {}),
           ...(options.headers || {})
         },
         signal: controller.signal
@@ -245,7 +338,11 @@ export class NativeBridgeClient {
     const response = await fetch(url, {
       method: 'POST',
       mode: 'cors',
-      headers: { 'Content-Type': 'application/vnd.tcpdump.pcap' },
+      headers: {
+        'Content-Type': 'application/vnd.tcpdump.pcap',
+        ...(this.token ? { 'X-WinWiFi-Token': this.token } : {}),
+        ...(this.projectId ? { 'X-WinWiFi-Project': this.projectId } : {})
+      },
       body: await file.arrayBuffer()
     });
     if (!response.ok) throw new Error(`PCAP import failed: ${await response.text()}`);
@@ -303,8 +400,12 @@ export class NativeBridgeClient {
   /**
    * Historical discrete scan observations from SQLite database
    */
-  public async getObservations(bssid?: string): Promise<{ totalObservationsCount: number; records: any[] }> {
-    const query = bssid ? `?bssid=${encodeURIComponent(bssid)}` : '';
+  public async getObservations(bssid?: string, projectId?: string): Promise<{ totalObservationsCount: number; records: any[] }> {
+    const params = new URLSearchParams();
+    if (bssid) params.set('bssid', bssid);
+    const pid = projectId || this.projectId;
+    if (pid) params.set('projectId', pid);
+    const query = params.toString() ? `?${params.toString()}` : '';
     return await this.request<{ totalObservationsCount: number; records: any[] }>(`/api/observations${query}`);
   }
 
@@ -388,7 +489,11 @@ export class NativeBridgeClient {
   private initEventSource(): void {
     this.closeEventSource();
 
-    const sseUrl = `${this.config.baseUrl.replace(/\/$/, '')}/api/events`;
+    const params = new URLSearchParams();
+    if (this.projectId) params.set('projectId', this.projectId);
+    if (this.token) params.set('token', this.token);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const sseUrl = `${this.config.baseUrl.replace(/\/$/, '')}/api/events${query}`;
     try {
       this.eventSource = new EventSource(sseUrl);
 
@@ -523,6 +628,12 @@ export class NativeBridgeClient {
 
   private formatBridgeError(err: any): string {
     const raw = err.message || String(err);
+    if (raw.includes('401') || /unauthori[sz]ed/i.test(raw)) {
+      return (
+        'The local WinWiFi bridge rejected this dashboard session. ' +
+        'Launch the dashboard from WinWiFi, or set VITE_WINWIFI_BRIDGE_TOKEN from %LOCALAPPDATA%\\WinWiFi\\bridge.token for development.'
+      );
+    }
     if (raw.includes('Failed to fetch') || raw.includes('NetworkError') || raw.includes('ECONNREFUSED')) {
       return (
         `Unable to reach WinWiFi Native Bridge at ${this.config.baseUrl}. ` +
