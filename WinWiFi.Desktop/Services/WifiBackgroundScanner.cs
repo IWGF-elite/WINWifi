@@ -21,6 +21,7 @@ public sealed class WifiBackgroundScanner : BackgroundService
     private readonly SqliteStorageService? _storageService;
     private readonly Action<ScanDiagnostics> _diagHandler;
     private string? _activeAdapterId;
+    private string? _activeProjectId;
     private bool _isScanning;
     private int _scanCycle;
     private ScanTelemetryState _state = ScanTelemetryState.Idle;
@@ -36,6 +37,7 @@ public sealed class WifiBackgroundScanner : BackgroundService
 
     public ScanTelemetryState CurrentState => _state;
     public string? ActiveAdapterId => _activeAdapterId;
+    public string? ActiveProjectId => _activeProjectId;
     public bool IsScanning => _isScanning;
     public string? LastError { get; private set; }
     public TimeSpan Interval { get; private set; } = TimeSpan.FromSeconds(MinimumIntervalSeconds);
@@ -49,6 +51,12 @@ public sealed class WifiBackgroundScanner : BackgroundService
     {
         if (string.IsNullOrWhiteSpace(adapterId)) throw new ArgumentException("An adapter identifier is required.", nameof(adapterId));
         _activeAdapterId = adapterId;
+    }
+
+    /// <summary>Selects the audit project that owns persisted scan telemetry. Null pauses persistence.</summary>
+    public void SetProjectId(string? projectId)
+    {
+        _activeProjectId = string.IsNullOrWhiteSpace(projectId) ? null : projectId.Trim();
     }
 
     public void SetInterval(TimeSpan interval)
@@ -115,10 +123,10 @@ public sealed class WifiBackgroundScanner : BackgroundService
                 }
                 else
                 {
-                    if (_storageService is not null)
+                    if (_storageService is not null && !string.IsNullOrWhiteSpace(_activeProjectId))
                     {
-                        await _storageService.SaveAccessPointsAsync("proj-default", networks);
-                        await _storageService.SaveScanObservationsBatchAsync("proj-default", _activeAdapterId, _scanCycle, networks);
+                        await _storageService.SaveAccessPointsAsync(_activeProjectId!, networks);
+                        await _storageService.SaveScanObservationsBatchAsync(_activeProjectId!, _activeAdapterId, _scanCycle, networks);
                     }
                     var dominantChannel = networks.GroupBy(network => network.Channel).OrderByDescending(group => group.Count()).FirstOrDefault()?.Key ?? 0;
                     if (dominantChannel > 0) ChannelHopped?.Invoke(dominantChannel);

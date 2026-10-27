@@ -23,6 +23,11 @@ import { SqliteDatabaseService } from './services/storage';
 import { PcapService, PcapParseResult } from './services/pcapParser';
 import { ThreatEngine } from './services/threatEngine';
 import { NativeBridgeClient } from './services/bridgeClient';
+import {
+  mapNativeFindingsToIncidents,
+  reconcileLiveIncidents,
+  countOpenIncidents
+} from './services/incidentMapper';
 
 // Components
 import { TitleBar } from './components/TitleBar';
@@ -67,74 +72,9 @@ const applyAnalystOverrides = (
 });
 
 // Convert findings produced by the native SecurityAnalyzer into the UI's
-// investigation records. These records remain tied to a real BSSID and are
-// refreshed on every Windows scan; no placeholder incidents are fabricated.
-const mapNativeFindingsToIncidents = (findings: any[]): IncidentRecord[] => findings
-  .filter(f => f && f.id && f.title)
-  .map(f => {
-    const severity = (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].includes(String(f.severity).toUpperCase())
-      ? String(f.severity).toUpperCase() : 'MEDIUM') as IncidentRecord['severity'];
-    const timestamp = f.detectedAt || new Date().toISOString();
-    return {
-      id: `NATIVE-${f.id}`,
-      title: f.title,
-      severity,
-      confidence: Number(f.confidence) || 0,
-      status: f.status === 'Resolved' ? 'Resolved' : f.status === 'False Positive' ? 'False Positive' : 'Open',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      assignedTo: 'Windows WLAN Security Analyzer',
-      summary: f.explanation || f.evidence || 'Finding reported by the native Windows WLAN security analyzer.',
-      bssidTarget: f.relatedBssid || undefined,
-      ssidTarget: f.relatedSsid || undefined,
-      evidenceIds: [],
-      notes: [{ timestamp, author: 'Native Security Analyzer', text: f.evidence || f.explanation || f.title }],
-      resolution: f.remediation || undefined
-    };
-  });
+// investigation records. Per-AP configuration issues stay on the access point
+// as findings; only threat-level detections become incident cases.
 
-const mapAccessPointIssuesToIncidents = (aps: AccessPoint[]): IncidentRecord[] => aps.flatMap(ap =>
-  (ap.issues || []).filter(issue => issue && issue.id && issue.title).map(issue => {
-    const timestamp = ap.lastSeen || new Date().toISOString();
-    const severity = (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].includes(issue.severity) ? issue.severity : 'MEDIUM') as IncidentRecord['severity'];
-    return {
-      id: `NATIVE-AP-${ap.bssid.replace(/[^A-Z0-9]/gi, '')}-${issue.id}`,
-      title: issue.title,
-      severity,
-      confidence: 100,
-      status: 'Open',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      assignedTo: 'Windows WLAN Security Analyzer',
-      summary: issue.description,
-      bssidTarget: ap.bssid,
-      ssidTarget: ap.ssid,
-      evidenceIds: [],
-      notes: [{ timestamp, author: 'Windows WLAN Security Analyzer', text: issue.description }],
-      resolution: issue.recommendation
-    };
-  })
-);
-
-// A historical browser record is not a live security finding. Retain a manual
-// case in the live view only when its BSSID is currently observed and the
-// analyst has explicitly classified that transmitter as a rogue. This prevents
-// stale browser storage from inflating the live incident count after a restart.
-const isCurrentAnalystCase = (incident: IncidentRecord, aps: AccessPoint[]): boolean => {
-  if (incident.id.startsWith('NATIVE-') || !incident.bssidTarget) return false;
-  const ap = aps.find(candidate => candidate.bssid.toUpperCase() === incident.bssidTarget?.toUpperCase());
-  return Boolean(ap && (ap.classification === 'Rogue' || ap.isRogueCandidate));
-};
-
-const reconcileLiveIncidents = (
-  nativeFindings: IncidentRecord[],
-  aps: AccessPoint[],
-  previous: IncidentRecord[],
-): IncidentRecord[] => [
-  ...nativeFindings,
-  ...mapAccessPointIssuesToIncidents(aps),
-  ...previous.filter(incident => isCurrentAnalystCase(incident, aps)),
-];
 
 // Icons
 import { 
@@ -206,10 +146,15 @@ export default function App() {
 
   // Threats & Incidents
   const [incidents, setIncidents] = useState<IncidentRecord[]>(() => {
-    const saved = db.getIncidents();
-    return (saved ?? []).filter(incident => !['INC-00042', 'INC-00038'].includes(incident.id)).map(incident => ({ ...incident, notes: [...(incident.notes || [])], evidenceIds: [...(incident.evidenceIds || [])] }));
+    const saved = db.getIncidents(db.getCurrentProjectId());
+    return (saved ?? [])
+      .filter(incident => !['INC-00042', 'INC-00038'].includes(incident.id))
+      // Older builds promoted every per-AP configuration issue into a case.
+      // Those findings now stay on the access point; drop the duplicates.
+      .filter(incident => !incident.id.startsWith('NATIVE-AP-'))
+      .map(incident => ({ ...incident, notes: [...(incident.notes || [])], evidenceIds: [...(incident.evidenceIds || [])] }));
   });
-  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(() => db.getEvidenceItems());
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(() => db.getEvidenceItems(db.getCurrentProjectId()));
   const [securityChanges, setSecurityChanges] = useState<SecurityChange[]>(() => threatEngine.getSecurityChanges());
 
   // Projects & Logs
@@ -218,7 +163,7 @@ export default function App() {
   const currentProjectIdRef = useRef(currentProjectId);
   useEffect(() => { currentProjectIdRef.current = currentProjectId; }, [currentProjectId]);
   const [logs, setLogs] = useState<AuditLog[]>(() => {
-    const initialLogs = db.getLogs();
+    const initialLogs = db.getLogs(db.getCurrentProjectId());
     return initialLogs;
   });
 
@@ -247,7 +192,11 @@ export default function App() {
   // Subscribe to Native Windows Bridge events (SSE & Polling)
   useEffect(() => {
     threatEngine.setIncidents(incidents);
-    if (db.getIncidents() === null || db.getIncidents()?.some(incident => ['INC-00042', 'INC-00038'].includes(incident.id))) db.saveIncidents(incidents);
+    const projectId = db.getCurrentProjectId();
+    const stored = db.getIncidents(projectId);
+    const containsLegacyCases = !stored || stored.some(incident =>
+      ['INC-00042', 'INC-00038'].includes(incident.id) || incident.id.startsWith('NATIVE-AP-'));
+    if (containsLegacyCases) db.saveIncidents(incidents, projectId);
   // Keep the incident engine aligned with the user's persisted incident records.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -290,7 +239,7 @@ export default function App() {
         setIncidents(previous => {
           const live = reconcileLiveIncidents([], resolvedAps, previous);
           threatEngine.setIncidents(live);
-          db.saveIncidents(live);
+          db.saveIncidents(live, projectId);
           return live;
         });
         db.saveAccessPoints(projectId, resolvedAps);
@@ -311,16 +260,18 @@ export default function App() {
 
     const applyNativeIncidents = (findings: any[]) => {
       const native = mapNativeFindingsToIncidents(findings);
+      const projectId = currentProjectIdRef.current;
       setIncidents(previous => {
         const merged = reconcileLiveIncidents(native, accessPointsRef.current, previous);
         threatEngine.setIncidents(merged);
-        db.saveIncidents(merged);
+        db.saveIncidents(merged, projectId);
         return merged;
       });
     };
     const unsubIncidents = bridgeClient.onIncidents(applyNativeIncidents);
 
     // Establish the connection and start event/polling updates on mount.
+    bridgeClient.setProject(currentProjectIdRef.current, projects.find(project => project.id === currentProjectIdRef.current)?.name);
     void bridgeClient.connect();
 
     return () => {
@@ -356,6 +307,9 @@ export default function App() {
   const handshakes: HandshakeInfo[] = accessPoints
     .map((a) => a.handshake)
     .filter((h): h is HandshakeInfo => !!h);
+
+  const rogueFindings = accessPoints.filter(a => a.isRogueCandidate || a.classification === 'Rogue' || a.classification === 'Suspicious');
+  const openIncidentCount = countOpenIncidents(incidents);
 
   // Active Project & Selected AP
   const currentProject = projects.find((p) => p.id === currentProjectId) || projects[0];
@@ -698,13 +652,53 @@ export default function App() {
   };
 
   const refreshIncidents = () => {
+    const projectId = currentProjectIdRef.current;
     const next = threatEngine.getIncidents().map(incident => ({
       ...incident,
       notes: [...(incident.notes || [])],
       evidenceIds: [...(incident.evidenceIds || [])]
     }));
-    db.saveIncidents(next);
+    db.saveIncidents(next, projectId);
     setIncidents(next);
+  };
+
+  // Switching projects reloads every scoped entity so the dashboard never shows
+  // a previous site's cases, evidence, or logs.
+  const applyProjectWorkspace = (projectId: string, projectName?: string) => {
+    const savedAps = applyAnalystOverrides(
+      db.getAccessPoints(projectId).filter(ap => ap.dataSourceOrigin !== 'TRAINING'),
+      db.getAnalystOverrides(projectId));
+    const savedIncidents = db.getIncidents(projectId) ?? [];
+    setAccessPoints(savedAps);
+    setIncidents(savedIncidents);
+    threatEngine.setIncidents(savedIncidents);
+    setEvidenceItems(db.getEvidenceItems(projectId));
+    setLogs(db.getLogs(projectId));
+    setPackets([]);
+    setSelectedBssid(null);
+    setInspectedBssid(null);
+    setDataSourceProfile('OFFLINE');
+    setActiveSourceLabel(savedAps.length
+      ? `Saved snapshot (${savedAps.length} access points)`
+      : 'No saved network data in this project');
+
+    bridgeClient.setProject(projectId, projectName);
+    if (bridgeClient.getState() !== 'CONNECTED') return;
+    void bridgeClient.selectProject(projectId, projectName).then(async () => {
+      if (currentProjectIdRef.current !== projectId) return;
+      try {
+        const nativeAps = await bridgeClient.getProjectAccessPoints(projectId);
+        if (currentProjectIdRef.current !== projectId || nativeAps.length === 0) return;
+        const resolved = applyAnalystOverrides(nativeAps, db.getAnalystOverrides(projectId));
+        setAccessPoints(resolved);
+        db.saveAccessPoints(projectId, resolved);
+        setActiveSourceLabel(`SQLite project snapshot (${resolved.length} access points)`);
+      } catch {
+        // Keep the local snapshot already on screen when the bridge is unreachable.
+      }
+    }).catch(() => {
+      // The bridge may have dropped between the state check and the request.
+    });
   };
 
   // Create Project in SQLite
@@ -714,17 +708,17 @@ export default function App() {
     db.saveProjects(updated);
     setCurrentProjectId(newProj.id);
     db.setCurrentProjectId(newProj.id);
-    setAccessPoints([]);
-    setPackets([]);
-    setSelectedBssid(null);
-    setInspectedBssid(null);
-    setDataSourceProfile('OFFLINE');
+    currentProjectIdRef.current = newProj.id;
+    applyProjectWorkspace(newProj.id, newProj.name);
+    void bridgeClient.saveProject(newProj).catch(() => {
+      // The local workspace is still usable while the native bridge is offline.
+    });
 
     const log = db.appendLog({
       level: 'INFO',
       source: 'PROJECT_MGR',
       message: `Created SQLite project session: "${newProj.name}".`,
-    });
+    }, newProj.id);
     setLogs((prev) => [log, ...prev]);
   };
 
@@ -734,6 +728,13 @@ export default function App() {
       : project);
     setProjects(updated);
     db.saveProjects(updated);
+    const renamed = updated.find(project => project.id === projectId);
+    if (renamed) {
+      if (currentProjectIdRef.current === projectId) bridgeClient.setProject(projectId, name);
+      void bridgeClient.saveProject(renamed).catch(() => {
+        // Renaming is persisted locally first; the bridge syncs on reconnect.
+      });
+    }
   };
 
   const handleDeleteProject = (projectId: string) => {
@@ -747,29 +748,25 @@ export default function App() {
       const next = updated[0];
       db.setCurrentProjectId(next.id);
       setCurrentProjectId(next.id);
-      const nextAps = applyAnalystOverrides(db.getAccessPoints(next.id).filter(ap => ap.dataSourceOrigin !== 'TRAINING'), db.getAnalystOverrides(next.id));
-      setAccessPoints(nextAps);
-      setPackets([]);
-      setSelectedBssid(null);
-      setInspectedBssid(null);
-      setDataSourceProfile('OFFLINE');
-      setActiveSourceLabel(nextAps.length ? `Saved snapshot (${nextAps.length} access points)` : 'No saved network data in this project');
+      currentProjectIdRef.current = next.id;
+      applyProjectWorkspace(next.id, next.name);
     }
     const log = db.appendLog({ level: 'INFO', source: 'PROJECT_MGR', message: `Deleted project "${projects.find(project => project.id === projectId)?.name || projectId}" and its saved network observations.` });
     setLogs(previous => [log, ...previous]);
   };
 
   const handleAddEvidence = (incidentId: string, evidence: EvidenceItem) => {
-    const nextEvidence = [evidence, ...db.getEvidenceItems()];
-    db.saveEvidenceItems(nextEvidence);
+    const projectId = currentProjectIdRef.current;
+    const nextEvidence = [evidence, ...db.getEvidenceItems(projectId)];
+    db.saveEvidenceItems(nextEvidence, projectId);
     setEvidenceItems(nextEvidence);
     const nextIncidents = threatEngine.getIncidents().map(incident => incident.id === incidentId
       ? { ...incident, evidenceIds: [...new Set([...(incident.evidenceIds || []), evidence.id])], updatedAt: new Date().toISOString() }
       : { ...incident, notes: [...(incident.notes || [])], evidenceIds: [...(incident.evidenceIds || [])] });
     threatEngine.setIncidents(nextIncidents);
-    db.saveIncidents(nextIncidents);
+    db.saveIncidents(nextIncidents, projectId);
     setIncidents(nextIncidents);
-    const log = db.appendLog({ level: 'INFO', source: 'EVIDENCE', message: `Added evidence ${evidence.id} to incident ${incidentId}.` });
+    const log = db.appendLog({ level: 'INFO', source: 'EVIDENCE', message: `Added evidence ${evidence.id} to incident ${incidentId}.` }, projectId);
     setLogs(previous => [log, ...previous]);
   };
 
@@ -889,9 +886,9 @@ export default function App() {
           >
             <Flame className="w-3.5 h-3.5 text-rose-400" />
             <span>Threats &amp; Rogues</span>
-            {accessPoints.filter(a => a.isRogueCandidate).length > 0 && (
+            {rogueFindings.length > 0 && (
               <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/20 text-rose-400 font-bold">
-                {accessPoints.filter(a => a.isRogueCandidate).length}
+                {rogueFindings.length}
               </span>
             )}
           </button>
@@ -908,7 +905,7 @@ export default function App() {
             <FileText className="w-3.5 h-3.5" />
             <span>Investigations</span>
             <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
-              {incidents.length}
+              {openIncidentCount}
             </span>
           </button>
 
@@ -1185,6 +1182,7 @@ export default function App() {
         {activeTab === 'threats' && (
           <ThreatCenter
             accessPoints={accessPoints}
+            incidents={incidents}
             securityChanges={securityChanges}
             uiMode={uiMode}
             onNavigate={handleNavigate}
@@ -1244,13 +1242,8 @@ export default function App() {
             onSwitchProject={(proj) => {
               setCurrentProjectId(proj.id);
               db.setCurrentProjectId(proj.id);
-              const projectAps = applyAnalystOverrides(db.getAccessPoints(proj.id).filter(ap => ap.dataSourceOrigin !== 'TRAINING'), db.getAnalystOverrides(proj.id));
-              setAccessPoints(projectAps);
-              setPackets([]);
-              setSelectedBssid(null);
-              setInspectedBssid(null);
-              setDataSourceProfile('OFFLINE');
-              setActiveSourceLabel(projectAps.length > 0 ? `Saved snapshot (${projectAps.length} access points)` : 'No saved network data in this project');
+              currentProjectIdRef.current = proj.id;
+              applyProjectWorkspace(proj.id, proj.name);
             }}
             onCreateProject={handleCreateProject}
             onRenameProject={handleRenameProject}

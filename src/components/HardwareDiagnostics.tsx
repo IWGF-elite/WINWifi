@@ -29,6 +29,7 @@ import {
   HardwareCapability 
 } from '../types';
 import { CapabilityMatrixService } from '../services/capabilityMatrix';
+import { isWebView2Host } from '../services/wifiEngine';
 
 interface HardwareDiagnosticsProps {
   adapter?: WifiAdapter;
@@ -158,7 +159,9 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
                   ? bridgeStatus?.activeAdapterName || 'Windows NDIS Wireless Adapter'
                   : dataSourceProfile === 'REAL_PCAP'
                     ? 'Imported 802.11 Packet Forensics Session'
-                    : 'Browser Sandbox Web Container (Bridge Offline)'}
+                    : isWebView2Host()
+                      ? 'Windows Desktop Host (Bridge Offline)'
+                      : 'Browser Sandbox Web Container (Bridge Offline)'}
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
                 {bridgeState === 'CONNECTED' ? (

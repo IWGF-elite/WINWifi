@@ -231,9 +231,6 @@ namespace WinWiFi.Data
                     source TEXT,
                     message TEXT
                 );
-
-                INSERT OR IGNORE INTO projects (id, name, location, auditor_name, created_at, updated_at, notes)
-                VALUES ('proj-default', 'Corporate Wireless Audit Workspace', 'Enterprise Site Alpha', 'Lead Security Auditor', datetime('now'), datetime('now'), 'Production audit project baseline.');
             ";
 
             using var cmd = new SqliteCommand(ddl, conn);
@@ -339,8 +336,7 @@ namespace WinWiFi.Data
         }
 
         public async Task SaveProjectAsync(AuditProject project, CancellationToken cancellationToken = default)
-        {
-            if (project == null) throw new ArgumentNullException(nameof(project));
+        {            if (project == null) throw new ArgumentNullException(nameof(project));
             ValidateProjectId(project.Id);
 
             await _writeLock.WaitAsync(cancellationToken);
@@ -367,6 +363,31 @@ namespace WinWiFi.Data
                 cmd.Parameters.AddWithValue("@updated", DateTime.UtcNow.ToString("o"));
                 cmd.Parameters.AddWithValue("@notes", project.Notes ?? "");
 
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+
+        /// <summary>Create the project row on demand when the dashboard starts persisting scans for it.</summary>
+        public async Task EnsureProjectAsync(string projectId, string? projectName, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            await _writeLock.WaitAsync(cancellationToken);
+            try
+            {
+                using var conn = await OpenConnectionAsync(cancellationToken);
+                const string sql = @"
+                    INSERT INTO projects (id, name, location, auditor_name, created_at, updated_at, notes)
+                    VALUES (@id, @name, '', '', datetime('now'), datetime('now'), '')
+                    ON CONFLICT(id) DO UPDATE SET
+                        name = CASE WHEN excluded.name = '' OR excluded.name IS NULL THEN projects.name ELSE excluded.name END,
+                        updated_at = datetime('now');";
+                using var cmd = new SqliteCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@id", projectId);
+                cmd.Parameters.AddWithValue("@name", string.IsNullOrWhiteSpace(projectName) ? projectId : projectName.Trim());
                 await cmd.ExecuteNonQueryAsync(cancellationToken);
             }
             finally

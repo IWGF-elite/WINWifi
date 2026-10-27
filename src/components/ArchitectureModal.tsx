@@ -163,18 +163,18 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({
                 </div>
               </div>
 
-              {/* Row 6: EAPOL & Hashcat Formatter */}
+              {/* Row 6: EAPOL metadata only */}
               <div className="p-3 flex items-start gap-3">
-                <div className="p-1 rounded bg-emerald-500/10 text-emerald-400 mt-0.5">
-                  <CheckCircle2 className="w-4 h-4" />
+                <div className="p-1 rounded bg-amber-500/10 text-amber-400 mt-0.5">
+                  <AlertTriangle className="w-4 h-4" />
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center justify-between font-semibold text-emerald-300">
-                    <span>EAPOL Cryptographic Validator &amp; Hashcat 22000 Export</span>
-                    <span className="text-[10px] text-emerald-400 uppercase font-mono">Fully Functional</span>
+                  <div className="flex items-center justify-between font-semibold text-amber-300">
+                    <span>EAPOL Forensic Metadata (Hashcat 22000 export not implemented)</span>
+                    <span className="text-[10px] text-amber-400 uppercase font-mono">Metadata only</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Validates ANonce/SNonce synchronization, MIC presence, PMKID key data, and outputs authentic Hashcat mode 22000 strings and binary .cap capture files.
+                    The native importer records EAPOL message steps, replay counter, and key-descriptor version. It does not expose nonce/MIC material or generate Hashcat 22000 hash lines; training-lab fixtures are synthetic and labeled as such.
                   </p>
                 </div>
               </div>

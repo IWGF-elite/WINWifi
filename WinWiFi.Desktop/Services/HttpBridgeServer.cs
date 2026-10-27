@@ -3,8 +3,10 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using WinWiFi.Data;
@@ -31,6 +33,47 @@ namespace WinWiFi.Services
         private Task? _listenerTask;
         private readonly ConcurrentDictionary<string, StreamWriter> _sseClients = new();
         private readonly HashSet<string> _allowedBrowserOrigins;
+        private readonly string _authToken;
+        private const string AuthTokenHeader = "X-WinWiFi-Token";
+
+        /// <summary>Per-process credential the dashboard must present on every /api request.</summary>
+        public string AuthToken => _authToken;
+
+        internal static string GenerateAuthToken()
+        {
+            Span<byte> bytes = stackalloc byte[32];
+            RandomNumberGenerator.Fill(bytes);
+            return Convert.ToHexString(bytes).ToLowerInvariant();
+        }
+
+        internal static bool IsValidAuthToken(string? provided, string expected)
+        {
+            if (string.IsNullOrEmpty(provided) || string.IsNullOrEmpty(expected)) return false;
+            byte[] actual = Encoding.UTF8.GetBytes(provided);
+            byte[] required = Encoding.UTF8.GetBytes(expected);
+            return CryptographicOperations.FixedTimeEquals(actual, required);
+        }
+
+        internal static string BridgeTokenFilePath() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "WinWiFi",
+            "bridge.token");
+
+        private void PersistAuthToken()
+        {
+            try
+            {
+                byte[] bytes = Encoding.ASCII.GetBytes(_authToken);
+                if (bytes.Length != _authToken.Length) throw new InvalidOperationException("Bridge token must be ASCII.");
+                string path = BridgeTokenFilePath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllBytes(path, bytes);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HttpBridgeServer] Unable to write bridge token file: {ex.Message}");
+            }
+        }
 
         internal static HashSet<string> ParseAllowedBrowserOrigins(string? configuredOrigins)
         {
@@ -54,15 +97,50 @@ namespace WinWiFi.Services
         internal static bool RequestsPrivateNetworkAccess(string? requestHeader) =>
             string.Equals(requestHeader, "true", StringComparison.OrdinalIgnoreCase);
 
+        internal static bool IsValidProjectId(string? projectId) =>
+            !string.IsNullOrWhiteSpace(projectId) && ProjectIdPattern.IsMatch(projectId.Trim());
+
+        private static string? NormalizeProjectId(string? projectId) =>
+            IsValidProjectId(projectId) ? projectId!.Trim() : null;
+
+        private string? ResolveProjectId(HttpListenerRequest request)
+        {
+            string? fromHeader = NormalizeProjectId(request.Headers["X-WinWiFi-Project"]);
+            string? fromQuery = NormalizeProjectId(request.QueryString["projectId"]);
+            return fromHeader ?? fromQuery ?? _activeProjectId;
+        }
+
+        private string? ResolveProjectName(HttpListenerRequest request)
+        {
+            string? name = request.Headers["X-WinWiFi-Project-Name"] ?? request.QueryString["projectName"];
+            return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        }
+
+        private void ApplyProjectContext(HttpListenerRequest request)
+        {
+            string? candidate = NormalizeProjectId(request.Headers["X-WinWiFi-Project"])
+                ?? NormalizeProjectId(request.QueryString["projectId"]);
+            if (candidate is null) return;
+
+            string? name = ResolveProjectName(request);
+            _activeProjectId = candidate;
+            if (name is not null) _activeProjectName = name;
+            _scanner.SetProjectId(candidate);
+            _ = _storage.EnsureProjectAsync(candidate, _activeProjectName);
+        }
+
         private List<AccessPoint> _latestAccessPoints = new();
         private List<ThreatFinding> _latestIncidents = new();
         private List<StationClientRecord> _latestClients = new();
         private Dictionary<string, AccessPoint> _previousScanByBssid = new(StringComparer.OrdinalIgnoreCase);
         private string? _activeAdapterId;
+        private string? _activeProjectId;
+        private string? _activeProjectName;
         private int _scanCycleCount = 0;
         private DateTime _lastRefreshUtc = DateTime.MinValue;
         private static readonly TimeSpan MinimumRefreshInterval = TimeSpan.FromSeconds(10);
         private const int MissingScanLimit = 3;
+        private static readonly Regex ProjectIdPattern = new("^[A-Za-z0-9._-]{1,64}$", RegexOptions.Compiled);
 
         public HttpBridgeServer(
             int port = 38989,
@@ -85,6 +163,7 @@ namespace WinWiFi.Services
             _allowedBrowserOrigins.Add($"http://127.0.0.1:{_port}");
             _allowedBrowserOrigins.Add($"http://localhost:{_port}");
             _dashboardRoot = ResolveDashboardRoot(dashboardRoot);
+            _authToken = GenerateAuthToken();
 
             _securityAnalyzer = securityAnalyzer ?? new SecurityAnalyzer();
             _wifiService = wifiService ?? new NativeWifiService(_securityAnalyzer);
@@ -191,6 +270,7 @@ namespace WinWiFi.Services
 
             _cts = new CancellationTokenSource();
             _listener.Start();
+            PersistAuthToken();
 
             try
             {
@@ -224,7 +304,7 @@ namespace WinWiFi.Services
             _ = _scanner.StartAsync(_cts.Token);
 
             _listenerTask = Task.Run(() => ListenLoopAsync(_cts.Token));
-            Console.WriteLine($"[HttpBridgeServer] Listening on http://127.0.0.1:{_port}/");
+            Console.WriteLine($"[HttpBridgeServer] Listening on http://127.0.0.1:{_port}/ (token file: {BridgeTokenFilePath()})");
         }
 
         public async Task StopAsync()
@@ -308,7 +388,7 @@ namespace WinWiFi.Services
                 response.AddHeader("Access-Control-Allow-Origin", origin);
                 response.AddHeader("Vary", "Origin");
                 response.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-                response.AddHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
+                response.AddHeader("Access-Control-Allow-Headers", $"Content-Type, Authorization, Accept, {AuthTokenHeader}, X-WinWiFi-Project, X-WinWiFi-Project-Name");
                 response.AddHeader("Access-Control-Max-Age", "86400");
                 if (RequestsPrivateNetworkAccess(request.Headers["Access-Control-Request-Private-Network"]))
                     response.AddHeader("Access-Control-Allow-Private-Network", "true");
@@ -322,6 +402,26 @@ namespace WinWiFi.Services
             }
 
             string path = request.Url?.AbsolutePath.TrimEnd('/') ?? "";
+            bool isApiRequest = path.Equals("/api", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase);
+            if (isApiRequest)
+            {
+                // EventSource cannot attach headers, so the SSE stream may carry
+                // the token as a query parameter. Everything else uses the header.
+                string? providedToken = request.Headers[AuthTokenHeader];
+                if (string.IsNullOrEmpty(providedToken) && path.Equals("/api/events", StringComparison.OrdinalIgnoreCase))
+                    providedToken = request.QueryString["token"];
+
+                if (!IsValidAuthToken(providedToken, _authToken))
+                {
+                    await WriteJsonErrorAsync(response, HttpStatusCode.Unauthorized, "unauthorized",
+                        "A valid per-launch bridge token is required. Launch the dashboard from WinWiFi or read the token from %LOCALAPPDATA%\\WinWiFi\\bridge.token.");
+                    return;
+                }
+            }
+
+            ApplyProjectContext(request);
+
             try
             {
                 switch (path)
@@ -342,6 +442,18 @@ namespace WinWiFi.Services
 
                     case "/api/observations":
                         await HandleObservationsAsync(request, response);
+                        break;
+
+                    case "/api/projects":
+                        await HandleProjectsAsync(request, response);
+                        break;
+
+                    case "/api/projects/select":
+                        await HandleProjectSelectAsync(request, response);
+                        break;
+
+                    case "/api/access-points":
+                        await HandleProjectAccessPointsAsync(request, response);
                         break;
 
                     case "/api/networks":
@@ -454,7 +566,8 @@ namespace WinWiFi.Services
             var status = new
             {
                 status = "online",
-                version = "3.0.1",
+                version = "3.0.3",
+                authRequired = true,
                 engine = "WinWiFi Native 802.11 Core (.NET 8)",
                 platform = Environment.OSVersion.ToString(),
                 isWindows = OperatingSystem.IsWindows(),
@@ -463,6 +576,8 @@ namespace WinWiFi.Services
                 lastScanError = _scanner.LastError,
                 activeAdapterId = _activeAdapterId,
                 activeAdapterName = _wifiService.GetDiagnostics().ActiveAdapterName,
+                activeProjectId = _activeProjectId,
+                activeProjectName = _activeProjectName,
                 minimumRefreshIntervalSeconds = (int)MinimumRefreshInterval.TotalSeconds,
                 backgroundScanIntervalSeconds = (int)_scanner.Interval.TotalSeconds,
                 telemetryMode = monitor.MonitorModeSupported ? "Windows WLAN discovery with Npcap passive monitor mode available; packet injection is disabled" : "Windows WLAN discovery; passive monitor capture unavailable on the active adapter; packet injection is disabled",
@@ -567,10 +682,106 @@ namespace WinWiFi.Services
 
         private async Task HandleObservationsAsync(HttpListenerRequest request, HttpListenerResponse response)
         {
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "A valid projectId is required to read scan observations.");
+                return;
+            }
+
             string? bssid = request.QueryString["bssid"];
-            var observations = await _storage.GetScanObservationsAsync("proj-default", bssid, 200);
-            int total = await _storage.GetTotalObservationsCountAsync("proj-default");
-            await WriteJsonAsync(response, new { totalObservationsCount = total, records = observations });
+            var observations = await _storage.GetScanObservationsAsync(projectId, bssid, 200);
+            int total = await _storage.GetTotalObservationsCountAsync(projectId);
+            await WriteJsonAsync(response, new { projectId, totalObservationsCount = total, records = observations });
+        }
+
+        private async Task HandleProjectAccessPointsAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "A valid projectId is required to read the saved project inventory.");
+                return;
+            }
+
+            var aps = await _storage.GetAccessPointsAsync(projectId);
+            await WriteJsonAsync(response, aps);
+        }
+
+        private async Task HandleProjectsAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonAsync(response, await _storage.GetProjectsAsync());
+                return;
+            }
+
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use GET or POST for projects.");
+                return;
+            }
+
+            var project = await JsonSerializer.DeserializeAsync<AuditProject>(request.InputStream, JsonOptions);
+            if (project is null || !IsValidProjectId(project.Id))
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_project", "A project with a valid id (letters, digits, dot, dash, underscore; max 64) is required.");
+                return;
+            }
+
+            project.Id = project.Id.Trim();
+            project.Name = string.IsNullOrWhiteSpace(project.Name) ? project.Id : project.Name.Trim();
+            await _storage.SaveProjectAsync(project);
+            await WriteJsonAsync(response, project);
+        }
+
+        private sealed class ProjectSelection
+        {
+            public string ProjectId { get; set; } = string.Empty;
+            public string? ProjectName { get; set; }
+        }
+
+        private async Task HandleProjectSelectAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to select a project.");
+                return;
+            }
+
+            var selection = await JsonSerializer.DeserializeAsync<ProjectSelection>(request.InputStream, JsonOptions)
+                ?? new ProjectSelection();
+            string? projectId = NormalizeProjectId(selection.ProjectId);
+            if (projectId is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_project", "A valid projectId is required.");
+                return;
+            }
+
+            _activeProjectId = projectId;
+            _activeProjectName = string.IsNullOrWhiteSpace(selection.ProjectName) ? _activeProjectName : selection.ProjectName!.Trim();
+            _scanner.SetProjectId(projectId);
+            await _storage.EnsureProjectAsync(projectId, _activeProjectName);
+
+            // Never carry the previous project's live grid or drift baseline into
+            // the newly selected workspace.
+            _latestAccessPoints = new List<AccessPoint>();
+            _latestIncidents = new List<ThreatFinding>();
+            _previousScanByBssid = new Dictionary<string, AccessPoint>(StringComparer.OrdinalIgnoreCase);
+            BroadcastSseEvent("project_changed", new { projectId, projectName = _activeProjectName });
+
+            await WriteJsonAsync(response, new
+            {
+                activeProjectId = projectId,
+                activeProjectName = _activeProjectName,
+                message = "Project selected. Live telemetry will be persisted to this workspace."
+            });
         }
 
         private async Task HandleNetworksAsync(HttpListenerResponse response)
@@ -613,13 +824,17 @@ namespace WinWiFi.Services
             _latestIncidents = threats.Findings;
             _scanCycleCount++;
 
-            // Persist into SQLite storage
-            if (_storage != null && aps.Count > 0)
+            // Persist into the selected project only. Without an active project
+            // the bridge still serves live telemetry but must not invent a
+            // shared write target.
+            string? projectId = ResolveProjectId(request);
+            if (_storage != null && projectId is not null && aps.Count > 0)
             {
                 try
                 {
-                    await _storage.SaveAccessPointsAsync("proj-default", aps);
-                    await _storage.SaveScanObservationsBatchAsync("proj-default", _activeAdapterId ?? "default", _scanCycleCount, aps);
+                    await _storage.EnsureProjectAsync(projectId, _activeProjectName);
+                    await _storage.SaveAccessPointsAsync(projectId, aps);
+                    await _storage.SaveScanObservationsBatchAsync(projectId, _activeAdapterId ?? "default", _scanCycleCount, aps);
                 }
                 catch (Exception dbEx)
                 {
@@ -840,7 +1055,7 @@ namespace WinWiFi.Services
             {
                 metadata = new
                 {
-                    generator = "WinWiFi 3.0.1",
+                    generator = "WinWiFi 3.0.3",
                     exportedAt = DateTime.UtcNow,
                     platform = Environment.OSVersion.ToString()
                 },
@@ -910,7 +1125,8 @@ namespace WinWiFi.Services
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true
         };
 
         private void BroadcastSseEvent(string eventName, object data)

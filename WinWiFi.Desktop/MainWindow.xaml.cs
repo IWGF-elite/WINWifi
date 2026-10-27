@@ -100,7 +100,10 @@ public partial class MainWindow : Window
                     !string.Equals(target.GetLeftPart(UriPartial.Authority), DashboardUri.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
                     args.Cancel = true;
             };
-            Dashboard.Source = DashboardUri;
+            string? bridgeToken = App.BridgeToken;
+            Dashboard.Source = string.IsNullOrWhiteSpace(bridgeToken)
+                ? DashboardUri
+                : new Uri(DashboardUri, $"?token={Uri.EscapeDataString(bridgeToken)}");
         }
         catch (Exception ex)
         {

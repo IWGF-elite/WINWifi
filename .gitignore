@@ -5,12 +5,26 @@ coverage/
 .DS_Store
 work/
 20??-??-??/
+brag-output-*/
+winwifi-walkthrough-*/
 *.log
 *.zip
 *.exe
 *.dll
 .env*
 !.env.example
+
+# Packet captures and evidence bundles may contain real SSIDs and handshakes
+*.pcap
+*.pcapng
+*.cap
+*.pcap.gz
+*.pcapng.gz
+*.key
+*.hccapx
+*.22000
+bridge.token
+
 
 # .NET build output
 bin/

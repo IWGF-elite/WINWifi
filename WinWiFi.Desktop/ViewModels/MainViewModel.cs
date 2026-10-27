@@ -332,11 +332,27 @@ namespace WinWiFi.ViewModels
             InitializationStatus = "Connecting to SQLite audit database...";
             var pSw = System.Diagnostics.Stopwatch.StartNew();
             var projs = await _storage.GetProjectsAsync();
+            if (projs.Count == 0)
+            {
+                // First launch: create a persisted workspace instead of relying on
+                // a hardcoded project identifier shared by every installation.
+                var bootstrap = new AuditProject
+                {
+                    Id = $"proj-{Guid.NewGuid():N}",
+                    Name = "Wireless Security Audit",
+                    Location = "Not specified",
+                    AuditorName = "Not assigned",
+                    CreatedAt = DateTime.UtcNow.ToString("o"),
+                    UpdatedAt = DateTime.UtcNow.ToString("o")
+                };
+                await _storage.SaveProjectAsync(bootstrap);
+                projs = new System.Collections.Generic.List<AuditProject> { bootstrap };
+            }
             pSw.Stop();
             Projects = new ObservableCollection<AuditProject>(projs);
             CurrentProject = Projects.FirstOrDefault() ?? new AuditProject
             {
-                Id = "proj-default",
+                Id = $"proj-{Guid.NewGuid():N}",
                 Name = "Default Wireless Audit Workspace",
                 Location = "HQ Campus",
                 AuditorName = "Senior SecOps Engineer"

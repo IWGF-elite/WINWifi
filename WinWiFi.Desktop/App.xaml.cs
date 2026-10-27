@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Windows;
@@ -13,6 +14,7 @@ namespace WinWiFi;
 public partial class App : Application
 {
     public static IServiceProvider ServiceProvider { get; private set; } = null!;
+    internal static string? BridgeToken { get; private set; }
     private static HttpBridgeServer? _bridgeServer;
 
     private async void Application_Startup(object sender, StartupEventArgs e)
@@ -34,6 +36,7 @@ public partial class App : Application
             reportGenerator: ServiceProvider.GetRequiredService<ReportGenerator>(),
             storage: ServiceProvider.GetRequiredService<SqliteStorageService>(),
             scanner: ServiceProvider.GetRequiredService<WifiBackgroundScanner>());
+        BridgeToken = _bridgeServer.AuthToken;
         try
         {
             await _bridgeServer.StartAsync();
@@ -43,7 +46,12 @@ public partial class App : Application
             // A second desktop window can safely use the already-running local
             // bridge. This happens when the user launches the app again from
             // Explorer, or when a prior instance is still running.
-            if (!await IsExistingWinWiFiBridgeAsync())
+            if (await IsExistingWinWiFiBridgeAsync())
+            {
+                // A second window reuses the first process's bridge and token.
+                BridgeToken = ReadBridgeToken();
+            }
+            else
             {
                 MessageBox.Show(
                     $"WinWiFi could not start its local dashboard bridge.\n\n{ex.Message}",
@@ -91,13 +99,35 @@ public partial class App : Application
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            string status = await client.GetStringAsync("http://127.0.0.1:38989/api/health");
-            return status.Contains("\"status\":\"online\"", StringComparison.OrdinalIgnoreCase) &&
+            using var response = await client.GetAsync("http://127.0.0.1:38989/api/health");
+            // A token-protected WinWiFi bridge answers 401. That still proves the
+            // first instance is running and owns the port.
+            if (response.StatusCode == HttpStatusCode.Unauthorized) return true;
+            string status = await response.Content.ReadAsStringAsync();
+            return response.IsSuccessStatusCode &&
+                   status.Contains("\"status\":\"online\"", StringComparison.OrdinalIgnoreCase) &&
                    status.Contains("WinWiFi Native 802.11 Core", StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
             return false;
+        }
+    }
+
+    private static string? ReadBridgeToken()
+    {
+        try
+        {
+            string path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinWiFi", "bridge.token");
+            if (!File.Exists(path)) return null;
+            string token = File.ReadAllText(path).Trim();
+            return token.Length > 0 ? token : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

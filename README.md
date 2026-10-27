@@ -141,7 +141,16 @@ dotnet run --project WinWiFi.Desktop\WinWiFi.Desktop.csproj -c Release
 & .\publish\win-x64\WinWiFi.exe
 ```
 
-For a headless/CLI build, see `WinWiFi.CLI/`.
+For a headless/CLI build, see `WinWiFi.CLI/`. A one-shot passive scan needs an
+adapter ID from `--adapters` (there is no wildcard adapter):
+
+```powershell
+dotnet run --project WinWiFi.CLI\WinWiFi.CLI.csproj -c Release -- --adapters
+dotnet run --project WinWiFi.CLI\WinWiFi.CLI.csproj -c Release -- --scan <adapterId>
+```
+
+`--scan` reads the Windows WLAN scan cache; it does not inject frames or change
+adapter settings.
 
 ## Running self-tests
 

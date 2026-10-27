@@ -14,10 +14,12 @@ import {
   ChevronUp,
   FileText
 } from 'lucide-react';
-import { AccessPoint, AnalystClassification, SecurityChange, UIMode, ActiveTab } from '../types';
+import { AccessPoint, AnalystClassification, IncidentRecord, SecurityChange, UIMode, ActiveTab } from '../types';
+import { countOpenIncidents } from '../services/incidentMapper';
 
 interface ThreatCenterProps {
   accessPoints: AccessPoint[];
+  incidents?: IncidentRecord[];
   securityChanges: SecurityChange[];
   uiMode: UIMode;
   onNavigate: (tab: ActiveTab, filterParam?: string) => void;
@@ -28,6 +30,7 @@ interface ThreatCenterProps {
 
 export const ThreatCenter: React.FC<ThreatCenterProps> = ({
   accessPoints = [],
+  incidents = [],
   securityChanges = [],
   uiMode,
   onNavigate,
@@ -39,6 +42,7 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
 
   // Filter rogue candidates
   const rogueAPs = accessPoints.filter(a => a.isRogueCandidate || a.classification === 'Rogue' || a.classification === 'Suspicious');
+  const openCases = countOpenIncidents(incidents);
 
   const handleAnalystOverride = (bssid: string, status: 'Trusted' | 'False Positive' | 'Confirmed Rogue') => {
     onClassifyAP(bssid, status);
@@ -72,7 +76,7 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
               onClick={() => onNavigate('investigations')}
               className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5"
             >
-              <FileText className="w-3.5 h-3.5" /> View Active Incident Cases
+              <FileText className="w-3.5 h-3.5" /> View Active Incident Cases ({openCases})
             </button>
           </div>
         </div>
@@ -145,7 +149,7 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
                     <div className="text-right">
                       <div className="text-xs text-slate-400 font-medium">Threat Confidence</div>
                       <div className="text-xl font-bold text-rose-400">
-                        {ap.rogueConfidence || 90}%
+                        {typeof ap.rogueConfidence === 'number' ? `${ap.rogueConfidence}%` : 'Not scored'}
                       </div>
                     </div>
 
@@ -182,10 +186,8 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
                     Multi-Factor Forensic Evidence
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                    {(ap.rogueEvidence || [
-                      `SSID "${ap.ssid}" actively broadcast on unauthorized MAC ${ap.bssid}`,
-                      `Security mode is ${ap.security}, diverging from corporate zero-trust baseline`,
-                      `Transmitting on unexpected channel ${ap.channel}`
+                    {(ap.rogueEvidence && ap.rogueEvidence.length > 0 ? ap.rogueEvidence : [
+                      'No multi-signal evidence was recorded for this transmitter. Review the beacon details before classifying it.'
                     ]).map((ev, idx) => (
                       <div key={idx} className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60 text-slate-300 flex items-start gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-rose-400 mt-1.5 flex-shrink-0" />

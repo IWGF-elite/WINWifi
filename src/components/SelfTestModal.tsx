@@ -14,8 +14,9 @@ import {
   HardDrive
 } from 'lucide-react';
 import { SqliteDatabaseService } from '../services/storage';
-import { WifiEngine } from '../services/wifiEngine';
+import { WifiEngine, isWebView2Host } from '../services/wifiEngine';
 import { PcapService } from '../services/pcapParser';
+import { CapabilityMatrixService } from '../services/capabilityMatrix';
 
 interface TestResult {
   id: string;
@@ -38,11 +39,11 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
   const [tests, setTests] = useState<TestResult[]>([
     {
       id: 'T1',
-      name: 'Runtime Sandbox Boundary & Capabilities Check',
+      name: 'Runtime Host & Capability Boundary Check',
       category: 'Sandbox',
       status: 'PENDING',
       durationMs: 0,
-      details: 'Verifies browser security isolation of wlanapi.dll and validates fallback to PCAP/Netsh dissector.',
+      details: 'Detects WebView2 vs. browser host, confirms no direct wlanapi.dll access, and validates the PCAP/Netsh fallback.',
     },
     {
       id: 'T2',
@@ -62,11 +63,11 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
     },
     {
       id: 'T4',
-      name: 'EAPOL 4-Way Handshake & PMKID Parser + Hashcat 22000',
+      name: 'EAPOL Metadata & Capability Honesty',
       category: 'Crypt',
       status: 'PENDING',
       durationMs: 0,
-      details: 'Dissects EAPOL key frames, tests Nonce/MIC synchronization, and validates Hashcat format.',
+      details: 'Confirms EAPOL sequence metadata is retained while Hashcat 22000 export is reported as not verified.',
     },
     {
       id: 'T5',
@@ -114,12 +115,13 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
         // T1: Sandbox & Capabilities
         if (updated[i].id === 'T1') {
           const caps = WifiEngine.getInstance().getSystemCapabilities();
-          if (caps.environment.includes('Browser') && !caps.nativeWlanApiAccess && caps.pcapDissectorActive) {
+          const expectedHost = isWebView2Host() ? 'Windows Desktop Native Host' : 'Browser Sandboxed DOM (Web Container)';
+          if (caps.environment === expectedHost && !caps.nativeWlanApiAccess && caps.pcapDissectorActive) {
             updated[i].status = 'PASSED';
-            updated[i].details = 'Browser sandbox detected. Native wlanapi.dll restriction confirmed. File dissector active.';
+            updated[i].details = `${expectedHost} detected. Direct wlanapi.dll access unavailable; bridge or file dissector required.`;
           } else {
             updated[i].status = 'FAILED';
-            updated[i].details = 'Failed to accurately detect runtime sandbox environment.';
+            updated[i].details = 'Runtime host detection does not match the actual environment.';
           }
         } 
         // T2: PCAP 2.4 Binary Decapsulator
@@ -161,26 +163,26 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
             updated[i].details = 'Frequency calculation mismatch.';
           }
         } 
-        // T4: EAPOL Handshake & Hashcat 22000
+        // T4: EAPOL metadata and honest capability reporting
         else if (updated[i].id === 'T4') {
-          const benchmarkAps = WifiEngine.getInstance().getBenchmarkAccessPoints();
-          const apWithHandshake = benchmarkAps.find(a => a.handshake);
-          if (apWithHandshake && apWithHandshake.handshake) {
-            const h = apWithHandshake.handshake;
-            const format = h.hashcatFormat ?? '';
-            const hasFormat = format.startsWith('WPA*02*');
-            const hasNonces = h.anonce.length === 64 && h.snonce.length === 64 && h.micHex.length === 32;
+          const hashcatCapability = CapabilityMatrixService.getInstance()
+            .getCapabilities()
+            .find(cap => cap.id === 'CAP_HASHCAT_EXPORT');
+          const benchmarkHandshake = WifiEngine.getInstance()
+            .getBenchmarkAccessPoints()
+            .find(ap => ap.handshake)?.handshake;
+          const metadataRetained = (benchmarkHandshake?.capturedSteps?.length ?? 0) >= 2;
+          const honest = hashcatCapability?.status === 'Not Verified'
+            && /does not emit/i.test(hashcatCapability.technicalDetails);
 
-            if (hasFormat && hasNonces) {
-              updated[i].status = 'PASSED';
-              updated[i].details = `Verified 32-byte ANonce/SNonce, 16-byte MIC, and valid Hashcat 22000 format (${format.slice(0, 32)}...).`;
-            } else {
-              updated[i].status = 'FAILED';
-              updated[i].details = 'Invalid EAPOL handshake parameters.';
-            }
+          if (metadataRetained && honest) {
+            updated[i].status = 'PASSED';
+            updated[i].details = 'EAPOL sequence metadata retained; capability matrix marks Hashcat 22000 export as Not Verified. Training fixtures stay synthetic.';
           } else {
             updated[i].status = 'FAILED';
-            updated[i].details = 'No handshake found in benchmark set.';
+            updated[i].details = metadataRetained
+              ? 'Capability matrix still overstates Hashcat 22000 export.'
+              : 'No EAPOL metadata found in the training fixture.';
           }
         } 
         // T5: Windows Netsh CLI Parser

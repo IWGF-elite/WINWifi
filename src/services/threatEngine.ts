@@ -1,4 +1,5 @@
 import { AccessPoint, IncidentRecord, SecurityChange, TimelineEvent } from '../types';
+import { stableIncidentId } from './incidentMapper';
 
 export class ThreatEngine {
   private static instance: ThreatEngine;
@@ -197,8 +198,12 @@ export class ThreatEngine {
     ssid?: string;
     summary: string;
   }): IncidentRecord {
+    const id = stableIncidentId('THREAT', params.title, params.bssid ?? params.ssid ?? 'CASE');
+    const existing = this.incidents.find(incident => incident.id === id);
+    if (existing) return existing;
+
     const newInc: IncidentRecord = {
-      id: `INC-${String(this.incidents.length + 45).padStart(5, '0')}`,
+      id,
       title: params.title,
       severity: params.severity,
       confidence: params.confidence,

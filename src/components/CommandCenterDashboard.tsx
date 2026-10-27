@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   ShieldAlert, 
   ShieldCheck, 
@@ -88,7 +88,14 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
     .slice(0, 6);
 
   const postureLabel = avgSecurityScore === null ? 'Awaiting observations' : avgSecurityScore >= 80 ? 'Resilient posture' : avgSecurityScore >= 60 ? 'Needs hardening' : 'Priority remediation';
-  const liveAge = lastLiveDataAt === null ? null : Math.max(0, Math.floor((Date.now() - lastLiveDataAt) / 1000));
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (lastLiveDataAt === null) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [lastLiveDataAt]);
+  const liveAge = lastLiveDataAt === null ? null : Math.max(0, Math.floor((now - lastLiveDataAt) / 1000));
   const recentChanges = [...securityChanges]
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, 4);

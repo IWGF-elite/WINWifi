@@ -60,11 +60,11 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
             <div className="flex items-center gap-2">
               <KeyRound className="w-5 h-5 text-emerald-400" />
               <h2 className="text-base font-bold text-slate-100">
-                Cryptographic Handshake Repository &amp; Hashcat/JtR Export
+                Cryptographic Handshake Repository (Forensic Metadata)
               </h2>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              EAPOL 4-Way Pairwise Transient Key (PTK) exchanges &amp; PMKID frames validated for offline defense compliance auditing.
+              EAPOL 4-Way sequence metadata from imported captures. The native importer withholds nonce/MIC material and does not generate Hashcat 22000 hash lines.
             </p>
           </div>
 
@@ -204,15 +204,17 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs font-mono">
                   <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800">
                     <span className="text-[10px] text-slate-500 block uppercase font-semibold">ANonce (AP Random 32B)</span>
-                    <span className="text-amber-400 break-all text-[10px]">{h.anonce}</span>
+                    <span className="text-amber-400 break-all text-[10px]">{h.anonce || 'Not exposed by native importer'}</span>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800">
                     <span className="text-[10px] text-slate-500 block uppercase font-semibold">SNonce (Station Random 32B)</span>
-                    <span className="text-cyan-400 break-all text-[10px]">{h.snonce}</span>
+                    <span className="text-cyan-400 break-all text-[10px]">{h.snonce || 'Not exposed by native importer'}</span>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800">
                     <span className="text-[10px] text-slate-500 block uppercase font-semibold">Key MIC (Message Integrity)</span>
-                    <span className="text-emerald-400 break-all text-[10px] font-bold">{h.micHex} (VALID HMAC)</span>
+                    <span className="text-emerald-400 break-all text-[10px] font-bold">
+                      {h.micHex ? `${h.micHex} (${h.micVerified ? 'MIC present' : 'unverified'})` : 'Not exposed by native importer'}
+                    </span>
                   </div>
                 </div>
 
@@ -220,7 +222,9 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
                 {h.hashcatFormat && (
                   <div>
                     <div className="flex items-center justify-between text-slate-400 text-[11px] mb-1">
-                      <span className="font-semibold text-slate-300">Hashcat Mode 22000 Hashline:</span>
+                      <span className="font-semibold text-slate-300">
+                        {isForensic ? 'Browser-parsed' : 'Synthetic training'} Mode 22000 hashline (not verified by native bridge):
+                      </span>
                       <button
                         onClick={() => handleCopy(h.hashcatFormat!, idx)}
                         className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-xs font-sans font-semibold"
