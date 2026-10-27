@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Search, 
   Filter, 
@@ -17,7 +17,8 @@ import {
   Eye,
   SlidersHorizontal
 } from 'lucide-react';
-import { AccessPoint, AssetClassification, EnterpriseAssetRecord, UIMode } from '../types';
+import { AccessPoint, AssetClassification, EnterpriseAssetRecord, PolicyEvaluationResult, UIMode } from '../types';
+import { PolicyEngine } from '../services/policyEngine';
 import { EnterpriseRegistry, AssetImportSummary } from './EnterpriseRegistry';
 
 interface AssetInventoryProps {
@@ -65,6 +66,11 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
   const [editFloor, setEditFloor] = useState('');
   const [editTags, setEditTags] = useState('');
   const [editNotes, setEditNotes] = useState('');
+
+  const policyResults = useMemo(
+    () => PolicyEngine.getInstance().evaluateAll(accessPoints || []),
+    [accessPoints]
+  );
 
   // Collect all unique tags
   const allTags = Array.from(new Set((accessPoints || []).flatMap(ap => ap.tags || [])));
@@ -156,6 +162,27 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
       default:
         return <span className="flex items-center gap-1 text-[11px] font-medium text-slate-400">Pending Review</span>;
     }
+  };
+
+  const getPolicyBadge = (result?: PolicyEvaluationResult) => {
+    if (!result) {
+      return <span className="text-[11px] text-slate-500">No policy</span>;
+    }
+    const tone =
+      result.status === 'Compliant'
+        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+        : result.status === 'Warning'
+          ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+          : result.status === 'Non-Compliant'
+            ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+            : 'bg-slate-700/60 text-slate-300 border-slate-600';
+    const detail = result.failedRules.length ? result.failedRules.join('\n') : 'No policy violations found.';
+    return (
+      <div title={detail}>
+        <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${tone}`}>{result.status}</span>
+        <div className="text-[10px] text-slate-500 mt-0.5">{result.policyName}</div>
+      </div>
+    );
   };
 
   if (view === 'registry') {
@@ -260,6 +287,7 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
                 <th className="py-3 px-4">Network Identity / SSID</th>
                 <th className="py-3 px-4">Classification</th>
                 <th className="py-3 px-4">Approval Status</th>
+                <th className="py-3 px-4">Policy</th>
                 <th className="py-3 px-4">Location / Site</th>
                 <th className="py-3 px-4">Security Suite</th>
                 <th className="py-3 px-4">Tags</th>
@@ -269,7 +297,7 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
             <tbody className="divide-y divide-slate-800/60 text-slate-200">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
+                  <td colSpan={8} className="py-8 text-center text-slate-500">
                     No wireless assets matched your search filters.
                   </td>
                 </tr>
@@ -304,6 +332,11 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
                       {/* Approval */}
                       <td className="py-3 px-4">
                         {getApprovalBadge(ap.approvedStatus)}
+                      </td>
+
+                      {/* Policy */}
+                      <td className="py-3 px-4">
+                        {getPolicyBadge(policyResults.get(ap.bssid))}
                       </td>
 
                       {/* Location */}

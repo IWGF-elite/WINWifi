@@ -27,7 +27,10 @@ files without any native backend.
   with classification, approval status, site/building/floor, owner, and notes
 - Validated CSV import/export for the asset registry (5,000 rows / 2 MB per
   import, duplicate MACs update in place, formula-leading cells neutralized)
-- Policy compliance scoring and reporting
+- Classification-routed policy compliance: Corporate, Guest, IoT, Suspicious,
+  and Rogue assets are evaluated against their assigned policy, registry
+  approval status is enforced (Unapproved/Rogue fail, review states warn), and
+  results appear in both Settings and the network inventory
 - Connect to networks directly from the app (using a password you provide)
 
 ## Defensive scope

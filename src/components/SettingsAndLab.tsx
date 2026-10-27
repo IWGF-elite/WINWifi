@@ -15,7 +15,7 @@ import {
   Code
 } from 'lucide-react';
 import { UIMode, SecurityPolicy, TrainingLabScenario, AccessPoint } from '../types';
-import { PolicyEngine } from '../services/policyEngine';
+import { PolicyEngine, POLICY_CLASSIFICATION_ROUTES } from '../services/policyEngine';
 import { TRAINING_SCENARIOS } from '../services/offlineLab';
 
 interface SettingsAndLabProps {
@@ -131,7 +131,7 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
             Configurable Wireless Security Policy Engine
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Every discovered network and capture is continuously audited against this baseline.
+            Classified assets are routed to the policy assigned to their class. The selected policy is the default for unclassified and Unknown assets.
           </p>
         </div>
 
@@ -160,6 +160,40 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
               </div>
             );
           })}
+        </div>
+
+        {/* Classification Routing & Approval Enforcement */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
+          <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60 space-y-2">
+            <div className="font-semibold text-slate-200">Classification Routing</div>
+            <p className="text-[11px] text-slate-400">Classified assets are evaluated against their assigned policy, even when another policy is selected as default.</p>
+            <div className="space-y-1.5">
+              {POLICY_CLASSIFICATION_ROUTES.map(route => {
+                const target = policies.find(policy => policy.id === route.policyId);
+                return (
+                  <div key={route.classification} className="flex items-center justify-between gap-2">
+                    <span className="text-slate-300">{route.classification}</span>
+                    <span className="text-slate-400 font-medium">{target?.name ?? route.policyId}</span>
+                  </div>
+                );
+              })}
+              <div className="flex items-center justify-between gap-2 border-t border-slate-700/60 pt-1.5">
+                <span className="text-slate-300">Unknown / unclassified</span>
+                <span className="text-slate-400 font-medium">{currentPolicy.name} (default)</span>
+              </div>
+            </div>
+          </div>
+          <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60 space-y-2">
+            <div className="font-semibold text-slate-200">Registry Approval Enforcement</div>
+            <p className="text-[11px] text-slate-400">Approval status is evaluated alongside the security baseline for enrolled BSSIDs.</p>
+            <div className="space-y-1.5 text-slate-300">
+              <div className="flex justify-between gap-2"><span>Approved</span><span className="text-emerald-400">No finding</span></div>
+              <div className="flex justify-between gap-2"><span>Pending Review</span><span className="text-amber-400">Warning</span></div>
+              <div className="flex justify-between gap-2"><span>Under Investigation</span><span className="text-amber-400">Warning</span></div>
+              <div className="flex justify-between gap-2"><span>Unapproved / Decommissioned</span><span className="text-rose-400">Non-Compliant</span></div>
+              <div className="flex justify-between gap-2 border-t border-slate-700/60 pt-1.5"><span>Rogue classification</span><span className="text-rose-400">Non-Compliant</span></div>
+            </div>
+          </div>
         </div>
 
         {/* Current Active Policy Criteria */}
@@ -208,6 +242,9 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
               {[...policyResults.values()].map(result => (
                 <div key={result.apBssid} className="py-2 text-xs">
                   <div className="flex justify-between gap-3"><span className="font-mono text-slate-200">{result.apBssid}</span><span className={result.status === 'Compliant' ? 'text-emerald-400' : result.status === 'Warning' ? 'text-amber-400' : 'text-rose-400'}>{result.status}</span></div>
+                  <div className="text-slate-500 mt-0.5">
+                    {result.policyName} · {result.classification ?? 'Unclassified'} · {result.approvalStatus ?? 'Not enrolled'}
+                  </div>
                   <div className="text-slate-400 mt-1">{result.failedRules.length ? result.failedRules.join(' · ') : 'No policy violations found.'}</div>
                 </div>
               ))}

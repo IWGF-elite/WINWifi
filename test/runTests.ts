@@ -759,4 +759,73 @@ runTest('T20: Enterprise Asset Registry, MAC Identity & CSV Round-Trip', () => {
   }
 });
 
+// 21. Classification-Routed Policies & Approval Enforcement
+runTest('T21: Classification Routing & Approval Enforcement', () => {
+  const engine = PolicyEngine.getInstance();
+  engine.setActivePolicy('corp-policy');
+
+  const base = (overrides: Record<string, unknown>) => ({
+    bssid: '02:00:00:00:00:01',
+    ssid: 'Policy-Test',
+    security: 'WPA2-Enterprise (802.1X)',
+    cipher: 'CCMP',
+    wpsEnabled: false,
+    pmfRequired: true,
+    classification: 'Corporate',
+    approvedStatus: 'Approved',
+    ...overrides
+  });
+
+  const corporate = engine.evaluateAP(base({}) as any);
+  if (corporate.policyId !== 'corp-policy' || corporate.status !== 'Compliant' || corporate.approvalStatus !== 'Approved') {
+    throw new Error(`Corporate routing failed: ${corporate.policyId}/${corporate.status}`);
+  }
+
+  const guest = engine.evaluateAP(base({ classification: 'Guest', security: 'Open', cipher: 'None', pmfRequired: false, approvedStatus: undefined }) as any);
+  if (guest.policyId !== 'guest-policy' || guest.status !== 'Compliant') {
+    throw new Error(`Guest routing failed: ${guest.policyId}/${guest.status}`);
+  }
+
+  const iot = engine.evaluateAP(base({ classification: 'IoT', security: 'WPA2-Personal (AES)', pmfRequired: false, approvedStatus: undefined }) as any);
+  if (iot.policyId !== 'iot-policy' || iot.status !== 'Compliant') {
+    throw new Error(`IoT routing failed: ${iot.policyId}/${iot.status}`);
+  }
+
+  const rogue = engine.evaluateAP(base({ classification: 'Rogue', approvedStatus: undefined, security: 'WPA3-Enterprise' }) as any);
+  if (rogue.policyId !== 'high-sec-policy' || rogue.status !== 'Non-Compliant' || !rogue.failedRules.some(rule => /rogue/i.test(rule))) {
+    throw new Error(`Rogue classification was not enforced: ${rogue.policyId}/${rogue.status}`);
+  }
+
+  const suspicious = engine.evaluateAP(base({ classification: 'Suspicious', approvedStatus: undefined, security: 'WPA3-Enterprise' }) as any);
+  if (suspicious.policyId !== 'high-sec-policy' || suspicious.status !== 'Warning') {
+    throw new Error(`Suspicious classification was not a warning: ${suspicious.policyId}/${suspicious.status}`);
+  }
+
+  const unapproved = engine.evaluateAP(base({ approvedStatus: 'Unapproved' }) as any);
+  if (unapproved.status !== 'Non-Compliant' || !unapproved.failedRules.some(rule => /Unapproved/.test(rule))) {
+    throw new Error('Unapproved registry status did not fail the policy');
+  }
+
+  for (const status of ['Investigating', 'Pending Review'] as const) {
+    const reviewing = engine.evaluateAP(base({ approvedStatus: status }) as any);
+    if (reviewing.status !== 'Warning' || !reviewing.failedRules.some(rule => rule.includes('Registry approval'))) {
+      throw new Error(`Registry status ${status} was not a warning: ${reviewing.status}`);
+    }
+  }
+
+  engine.setActivePolicy('guest-policy');
+  const unknown = engine.evaluateAP(base({ classification: 'Unknown', security: 'Open', cipher: 'None', pmfRequired: false, approvedStatus: undefined }) as any);
+  if (unknown.policyId !== 'guest-policy' || unknown.status !== 'Compliant') {
+    throw new Error(`Unknown classification did not fall back to the default policy: ${unknown.policyId}/${unknown.status}`);
+  }
+
+  const guestPolicy = engine.getPolicies().find(policy => policy.id === 'guest-policy')!;
+  const explicit = engine.evaluateAP(base({ security: 'Open', cipher: 'None', pmfRequired: false }) as any, guestPolicy);
+  if (explicit.policyId !== 'guest-policy' || explicit.policyName !== 'Guest Policy') {
+    throw new Error('An explicit policy override did not take precedence over classification routing');
+  }
+
+  engine.setActivePolicy('corp-policy');
+});
+
 console.log(`\nResults: ${passedCount}/${totalCount} tests passed.\n`);
