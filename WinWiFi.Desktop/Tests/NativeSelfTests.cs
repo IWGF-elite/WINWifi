@@ -1034,6 +1034,125 @@ SSID 2 : Guest-Open
                 return "Rejected oversized and truncated records, enforced frame/packet limits, skipped malformed radiotap, sanitized SSIDs, honored if_tsresol, and detected PCAPNG trailer corruption.";
             }));
 
+            results.Add(await RunTestAsync("T21-ASSET-REGISTRY", "Enterprise Asset Registry, MAC Identity & CSV Round-Trip", async () =>
+            {
+                if (AssetRegistryCsv.NormalizeMac("aa-bb-cc-dd-ee-ff") != "AA:BB:CC:DD:EE:FF" ||
+                    AssetRegistryCsv.NormalizeMac("02.11.22.33.44.55") != "02:11:22:33:44:55")
+                    throw new Exception("MAC addresses were not canonicalized.");
+                foreach (string invalid in new[] { "", "nope", "AA:BB:CC:DD:EE", "FF:FF:FF:FF:FF:FF", "00:00:00:00:00:00", "GG:11:22:33:44:55" })
+                {
+                    if (AssetRegistryCsv.NormalizeMac(invalid) is not null)
+                        throw new Exception($"Invalid MAC accepted: '{invalid}'");
+                }
+
+                string csv = "macAddress,ssid,classification,approvalStatus,notes\r\n" +
+                             "aa-bb-cc-dd-ee-ff,\"Lab, West\",Corporate,Approved,\"Line one\r\nLine two and \"\"quoted\"\" text\"\r\n" +
+                             "02:11:22:33:44:55,Printer,IoT,Investigating,\"'=HYPERLINK(\"\"http://example.invalid\"\")\"\r\n" +
+                             "not-a-mac,Bad,Corporate,Approved,ignored\r\n" +
+                             "02-11-22-33-44-55,Printer Updated,IoT,Investigating,\"'=HYPERLINK(\"\"http://example.invalid\"\")\"\r\n";
+                var parsed = AssetRegistryCsv.Parse(csv);
+                if (parsed.FatalError is not null || parsed.Rows.Count != 2 || parsed.Rejected.Count != 1)
+                    throw new Exception($"CSV parse mismatch: rows={parsed.Rows.Count}, rejected={parsed.Rejected.Count}, fatal={parsed.FatalError}");
+                var lab = parsed.Rows.First(row => row.Asset.MacAddress == "AA:BB:CC:DD:EE:FF").Asset;
+                if (lab.Ssid != "Lab, West" || !lab.Notes.Contains("Line two and \"quoted\" text"))
+                    throw new Exception("Quoted CSV fields were not parsed correctly.");
+                if (lab.Notes != "Line one\r\nLine two and \"quoted\" text")
+                    throw new Exception($"Multi-line CSV notes changed: {lab.Notes}");
+                var printer = parsed.Rows.First(row => row.Asset.MacAddress == "02:11:22:33:44:55").Asset;
+                if (printer.Ssid != "Printer Updated" || printer.AssetType != "Access Point")
+                    throw new Exception("Duplicate MAC rows did not use the later record.");
+                if (printer.ApprovalStatus != "Under Investigation")
+                    throw new Exception("'Investigating' was not canonicalized to 'Under Investigation'.");
+                if (!printer.Notes.StartsWith("=HYPERLINK", StringComparison.Ordinal))
+                    throw new Exception($"CSV formula payload was not preserved for inspection: {printer.Notes}");
+
+                string exported = AssetRegistryCsv.Serialize(parsed.Rows.Select(row => row.Asset));
+                if (!exported.Contains("\"'=HYPERLINK")) throw new Exception("CSV export did not neutralize a formula-leading cell.");
+                var roundTrip = AssetRegistryCsv.Parse(exported);
+                var roundTripPrinter = roundTrip.Rows.First(row => row.Asset.MacAddress == "02:11:22:33:44:55").Asset;
+                if (roundTrip.Rows.Count != 2 || roundTripPrinter.Notes != printer.Notes || roundTripPrinter.Ssid != printer.Ssid)
+                    throw new Exception("CSV export/import did not round-trip asset data.");
+
+                if (AssetRegistryCsv.NormalizeAsset(new EnterpriseAssetRecord { MacAddress = "02:11:22:33:44:55", Classification = "Made Up" }, out _) is not null)
+                    throw new Exception("An unsupported classification was accepted.");
+                if (AssetRegistryCsv.NormalizeAsset(new EnterpriseAssetRecord { MacAddress = "not-a-mac" }, out _) is not null)
+                    throw new Exception("An invalid MAC was accepted by the asset normalizer.");
+
+                string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_assets_{Guid.NewGuid():N}.db");
+                try
+                {
+                    using var storage = new SqliteStorageService(tempDb);
+                    await storage.EnsureProjectAsync("proj-assets", "Asset Registry Test");
+                    await storage.SaveEnterpriseAssetsAsync("proj-assets", new[]
+                    {
+                        new EnterpriseAssetRecord
+                        {
+                            Id = "AST-ORIGINAL",
+                            MacAddress = "aa-bb-cc-dd-ee-ff",
+                            Ssid = "Lab, West",
+                            Classification = "Corporate",
+                            ApprovalStatus = "Approved",
+                            Site = "Lab",
+                            Notes = "First record"
+                        }
+                    });
+
+                    var stored = await storage.GetEnterpriseAssetsAsync("proj-assets");
+                    if (stored.Count != 1 || stored[0].MacAddress != "AA:BB:CC:DD:EE:FF" || stored[0].Id != "AST-ORIGINAL")
+                        throw new Exception("Asset MAC was not canonicalized or its id changed on insert.");
+
+                    await storage.SaveEnterpriseAssetsAsync("proj-assets", new[]
+                    {
+                        new EnterpriseAssetRecord
+                        {
+                            Id = AssetRegistryCsv.NewAssetId(),
+                            MacAddress = "AA:BB:CC:DD:EE:FF",
+                            Ssid = "Lab, West",
+                            Classification = "Guest",
+                            ApprovalStatus = "Unapproved",
+                            Site = "Lab",
+                            Notes = "Second record"
+                        }
+                    });
+                    stored = await storage.GetEnterpriseAssetsAsync("proj-assets");
+                    if (stored.Count != 1 || stored[0].Id != "AST-ORIGINAL" || stored[0].Classification != "Guest" || stored[0].Notes != "Second record")
+                        throw new Exception("Upsert by MAC created a duplicate or did not update fields in place.");
+                    if ((await storage.GetEnterpriseAssetsAsync("proj-other")).Count != 0)
+                        throw new Exception("An enterprise asset leaked across projects.");
+
+                    bool rejectedInvalid = false;
+                    try
+                    {
+                        await storage.SaveEnterpriseAssetsAsync("proj-assets", new[]
+                        {
+                            new EnterpriseAssetRecord { MacAddress = "not-a-mac" }
+                        });
+                    }
+                    catch (ArgumentException)
+                    {
+                        rejectedInvalid = true;
+                    }
+                    if (!rejectedInvalid) throw new Exception("Storage accepted an invalid MAC address.");
+
+                    await storage.DeleteEnterpriseAssetAsync("proj-assets", "aa-bb-cc-dd-ee-ff");
+                    if ((await storage.GetEnterpriseAssetsAsync("proj-assets")).Count != 0)
+                        throw new Exception("Deleting an asset did not remove it from the project registry.");
+
+                    return "Canonicalized MACs, parsed quoted/multi-line CSV, neutralized formula-leading cells, round-tripped exports, upserted by MAC without duplicates, isolated projects, and deleted by MAC.";
+                }
+                finally
+                {
+                    SqliteStorageService.ReleaseAllPools();
+                    try
+                    {
+                        if (File.Exists(tempDb)) File.Delete(tempDb);
+                        if (File.Exists(tempDb + "-wal")) File.Delete(tempDb + "-wal");
+                        if (File.Exists(tempDb + "-shm")) File.Delete(tempDb + "-shm");
+                    }
+                    catch { }
+                }
+            }));
+
             return results;
         }
 

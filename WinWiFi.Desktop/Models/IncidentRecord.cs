@@ -95,15 +95,15 @@ namespace WinWiFi.Models
         public string Id { get; set; } = string.Empty;
         public string MacAddress { get; set; } = string.Empty;
         public string Ssid { get; set; } = string.Empty;
-        public string AssetType { get; set; } = "Access Point"; // "Access Point", "Client Station", "IoT Gateway", "Sensor"
-        public string Classification { get; set; } = "Corporate"; // "Corporate", "Guest", "IoT", "Unknown", "Suspicious", "Rogue"
-        public string ApprovalStatus { get; set; } = "Approved"; // "Approved", "Unapproved", "Under Investigation", "Decommissioned"
-        public string Site { get; set; } = "HQ Primary Campus";
-        public string Building { get; set; } = "Bldg A";
-        public string AreaFloor { get; set; } = "Floor 2";
-        public string OwnerDepartment { get; set; } = "Enterprise IT / NetOps";
+        public string AssetType { get; set; } = "Access Point"; // "Access Point", "Client Station", "IoT Gateway", "Sensor", "Other"
+        public string Classification { get; set; } = "Unknown"; // "Corporate", "Guest", "IoT", "Unknown", "Suspicious", "Rogue"
+        public string ApprovalStatus { get; set; } = "Pending Review"; // "Approved", "Unapproved", "Under Investigation", "Decommissioned", "Pending Review"
+        public string Site { get; set; } = string.Empty;
+        public string Building { get; set; } = string.Empty;
+        public string AreaFloor { get; set; } = string.Empty;
+        public string OwnerDepartment { get; set; } = string.Empty;
         public string Vendor { get; set; } = "Unknown";
-        public string Model { get; set; } = "Standard Enterprise AP";
+        public string Model { get; set; } = string.Empty;
         public string LastSeen { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
         public string Notes { get; set; } = string.Empty;
     }

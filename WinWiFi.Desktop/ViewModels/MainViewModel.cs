@@ -896,20 +896,20 @@ namespace WinWiFi.ViewModels
             {
                 var asset = new EnterpriseAssetRecord
                 {
-                    Id = $"AST-{EnterpriseAssets.Count + 1:D4}",
+                    Id = AssetRegistryCsv.NewAssetId(),
                     MacAddress = SelectedAccessPoint.Bssid,
                     Ssid = SelectedAccessPoint.Ssid,
                     AssetType = "Access Point",
                     Classification = "Corporate",
                     ApprovalStatus = "Approved",
-                    Site = "HQ Primary Campus",
-                    Building = "Bldg A",
-                    AreaFloor = "Floor 2",
-                    OwnerDepartment = "Enterprise IT / NetOps",
+                    Site = string.Empty,
+                    Building = string.Empty,
+                    AreaFloor = string.Empty,
+                    OwnerDepartment = string.Empty,
                     Vendor = SelectedAccessPoint.Vendor,
                     Model = SelectedAccessPoint.PhyType,
                     LastSeen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
-                    Notes = "Approved infrastructure AP via WinWiFi native manager."
+                    Notes = "Enrolled from a live scan by the operator."
                 };
 
                 EnterpriseAssets.Insert(0, asset);

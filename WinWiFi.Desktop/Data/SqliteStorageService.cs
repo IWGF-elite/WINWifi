@@ -256,6 +256,27 @@ namespace WinWiFi.Data
                 "UPDATE access_points SET first_seen = COALESCE(NULLIF(first_seen, ''), last_seen, datetime('now')) WHERE first_seen IS NULL OR first_seen = '';",
                 conn);
             backfill.ExecuteNonQuery();
+
+            // Asset records are keyed by project + MAC. Normalize legacy casing,
+            // collapse pre-existing duplicates, then enforce the invariant.
+            using (var normalizeAssets = new SqliteCommand(
+                "UPDATE enterprise_assets SET mac_address = upper(trim(mac_address)) WHERE mac_address IS NOT NULL AND mac_address <> upper(trim(mac_address));",
+                conn))
+            {
+                normalizeAssets.ExecuteNonQuery();
+            }
+            using (var dedupeAssets = new SqliteCommand(
+                "DELETE FROM enterprise_assets WHERE rowid NOT IN (SELECT MAX(rowid) FROM enterprise_assets GROUP BY project_id, mac_address);",
+                conn))
+            {
+                dedupeAssets.ExecuteNonQuery();
+            }
+            using (var assetIndex = new SqliteCommand(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_enterprise_assets_project_mac ON enterprise_assets(project_id, mac_address);",
+                conn))
+            {
+                assetIndex.ExecuteNonQuery();
+            }
         }
 
         private static void EnsureColumnExists(SqliteConnection connection, string tableName, string columnName, string columnDeclaration)
@@ -932,6 +953,17 @@ namespace WinWiFi.Data
             ValidateProjectId(projectId);
             if (assets == null) return;
 
+            // Normalize at the storage boundary so no caller can create a
+            // duplicate asset by spelling the same MAC differently.
+            var normalized = new Dictionary<string, EnterpriseAssetRecord>(StringComparer.OrdinalIgnoreCase);
+            foreach (var asset in assets)
+            {
+                var record = AssetRegistryCsv.NormalizeAsset(asset, out string? error)
+                    ?? throw new ArgumentException(error, nameof(assets));
+                normalized[record.MacAddress] = record;
+            }
+            if (normalized.Count == 0) return;
+
             await _writeLock.WaitAsync(cancellationToken);
             try
             {
@@ -941,7 +973,7 @@ namespace WinWiFi.Data
                 string sql = @"
                     INSERT INTO enterprise_assets (id, project_id, mac_address, ssid, asset_type, classification, approval_status, site, building, area_floor, owner_department, vendor, model, last_seen, notes)
                     VALUES (@id, @pid, @mac, @ssid, @type, @class, @status, @site, @bldg, @floor, @dept, @vendor, @model, @seen, @notes)
-                    ON CONFLICT(id) DO UPDATE SET
+                    ON CONFLICT(project_id, mac_address) DO UPDATE SET
                         ssid = excluded.ssid,
                         asset_type = excluded.asset_type,
                         classification = excluded.classification,
@@ -951,10 +983,11 @@ namespace WinWiFi.Data
                         area_floor = excluded.area_floor,
                         owner_department = excluded.owner_department,
                         vendor = excluded.vendor,
+                        model = excluded.model,
                         last_seen = excluded.last_seen,
                         notes = excluded.notes;";
 
-                foreach (var a in assets)
+                foreach (var a in normalized.Values)
                 {
                     using var cmd = new SqliteCommand(sql, conn, trans);
                     cmd.Parameters.AddWithValue("@id", a.Id);
@@ -962,8 +995,8 @@ namespace WinWiFi.Data
                     cmd.Parameters.AddWithValue("@mac", a.MacAddress);
                     cmd.Parameters.AddWithValue("@ssid", a.Ssid ?? "");
                     cmd.Parameters.AddWithValue("@type", a.AssetType ?? "Access Point");
-                    cmd.Parameters.AddWithValue("@class", a.Classification ?? "Corporate");
-                    cmd.Parameters.AddWithValue("@status", a.ApprovalStatus ?? "Approved");
+                    cmd.Parameters.AddWithValue("@class", a.Classification ?? "Unknown");
+                    cmd.Parameters.AddWithValue("@status", a.ApprovalStatus ?? "Pending Review");
                     cmd.Parameters.AddWithValue("@site", a.Site ?? "");
                     cmd.Parameters.AddWithValue("@bldg", a.Building ?? "");
                     cmd.Parameters.AddWithValue("@floor", a.AreaFloor ?? "");
@@ -977,6 +1010,28 @@ namespace WinWiFi.Data
                 }
 
                 trans.Commit();
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+
+        public async Task DeleteEnterpriseAssetAsync(string projectId, string macAddress, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            string? normalizedMac = AssetRegistryCsv.NormalizeMac(macAddress);
+            if (normalizedMac is null) throw new ArgumentException("A valid unicast 48-bit MAC address is required.", nameof(macAddress));
+
+            await _writeLock.WaitAsync(cancellationToken);
+            try
+            {
+                using var conn = await OpenConnectionAsync(cancellationToken);
+                using var cmd = new SqliteCommand(
+                    "DELETE FROM enterprise_assets WHERE project_id = @pid AND mac_address = @mac;", conn);
+                cmd.Parameters.AddWithValue("@pid", projectId);
+                cmd.Parameters.AddWithValue("@mac", normalizedMac);
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
             }
             finally
             {

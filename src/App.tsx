@@ -16,7 +16,8 @@ import {
   EvidenceItem,
   SecurityChange,
   TrainingLabScenario,
-  AnalystClassification
+  AnalystClassification,
+  EnterpriseAssetRecord
 } from './types';
 import { WifiEngine } from './services/wifiEngine';
 import { SqliteDatabaseService } from './services/storage';
@@ -28,6 +29,17 @@ import {
   reconcileLiveIncidents,
   countOpenIncidents
 } from './services/incidentMapper';
+import {
+  applyAssetsToAccessPoints,
+  formatUtcTimestamp,
+  mergeAssetLists,
+  mergeMissingFields,
+  normalizeMac,
+  parseAssetCsv,
+  removeAssetFromAccessPoints,
+  serializeAssetCsv
+} from './services/assetRegistry';
+import type { AssetImportSummary } from './components/EnterpriseRegistry';
 
 // Components
 import { TitleBar } from './components/TitleBar';
@@ -133,10 +145,22 @@ export default function App() {
   // Network Data & Packets
   const [accessPoints, setAccessPoints] = useState<AccessPoint[]>(() => {
     const projectId = db.getCurrentProjectId();
-    return applyAnalystOverrides(db.getAccessPoints(projectId).filter(ap => ap.dataSourceOrigin !== 'TRAINING'), db.getAnalystOverrides(projectId));
+    const resolved = applyAnalystOverrides(db.getAccessPoints(projectId).filter(ap => ap.dataSourceOrigin !== 'TRAINING'), db.getAnalystOverrides(projectId));
+    return applyAssetsToAccessPoints(resolved, db.getEnterpriseAssets(projectId));
   });
   const accessPointsRef = useRef(accessPoints);
   useEffect(() => { accessPointsRef.current = accessPoints; }, [accessPoints]);
+
+  // Enterprise asset registry: one authoritative record per MAC in this project.
+  const [enterpriseAssets, setEnterpriseAssets] = useState<EnterpriseAssetRecord[]>(() => db.getEnterpriseAssets(db.getCurrentProjectId()));
+  const enterpriseAssetsRef = useRef(enterpriseAssets);
+  useEffect(() => { enterpriseAssetsRef.current = enterpriseAssets; }, [enterpriseAssets]);
+  useEffect(() => {
+    setAccessPoints(previous => {
+      const next = applyAssetsToAccessPoints(previous, enterpriseAssets);
+      return next.every((ap, index) => ap === previous[index]) ? previous : next;
+    });
+  }, [enterpriseAssets]);
   const [packets, setPackets] = useState<PcapPacket[]>([]);
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
   // A visual row/focus selection is not permission to open the inspection drawer.
@@ -189,6 +213,34 @@ export default function App() {
 
   const bridgeClient = NativeBridgeClient.getInstance();
 
+  const commitEnterpriseAssets = useCallback((next: EnterpriseAssetRecord[], projectId: string) => {
+    enterpriseAssetsRef.current = next;
+    setEnterpriseAssets(next);
+    db.saveEnterpriseAssets(projectId, next);
+  }, [db]);
+
+  // Native SQLite is authoritative when connected. Local-only records survive
+  // and are replayed to the bridge instead of being silently dropped.
+  const hydrateAssetsFromBridge = useCallback(async (projectId: string) => {
+    if (bridgeClient.getState() !== 'CONNECTED') return;
+    const nativeAssets = await bridgeClient.getEnterpriseAssets();
+    if (currentProjectIdRef.current !== projectId) return;
+    const merged = mergeAssetLists(db.getEnterpriseAssets(projectId), nativeAssets);
+    commitEnterpriseAssets(merged, projectId);
+    setAccessPoints(previous => applyAssetsToAccessPoints(previous, merged));
+
+    const nativeMacs = new Set(nativeAssets.map(asset => normalizeMac(asset.macAddress)).filter((mac): mac is string => Boolean(mac)));
+    for (const asset of merged) {
+      const mac = normalizeMac(asset.macAddress);
+      if (!mac || nativeMacs.has(mac)) continue;
+      try {
+        await bridgeClient.saveEnterpriseAsset(asset);
+      } catch {
+        // Keep the local record; the next reconnect retries the replay.
+      }
+    }
+  }, [bridgeClient, db, commitEnterpriseAssets]);
+
   // Subscribe to Native Windows Bridge events (SSE & Polling)
   useEffect(() => {
     threatEngine.setIncidents(incidents);
@@ -218,6 +270,7 @@ export default function App() {
           setSelectedAdapterId(current => current || adapterId);
           const connection = await bridgeClient.getConnectionStatus(adapterId);
           setConnectedBssid(connection.state === 'Connected' ? connection.bssid : '');
+          void hydrateAssetsFromBridge(currentProjectIdRef.current);
         } catch {
           setActiveSourceLabel('Native Bridge (Port 38989)');
         }
@@ -234,7 +287,9 @@ export default function App() {
     const unsubNetworks = bridgeClient.onNetworks((liveAps) => {
       if (Array.isArray(liveAps)) {
         const projectId = currentProjectIdRef.current;
-        const resolvedAps = applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId));
+        const resolvedAps = applyAssetsToAccessPoints(
+          applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId)),
+          enterpriseAssetsRef.current);
         setAccessPoints(resolvedAps);
         setIncidents(previous => {
           const live = reconcileLiveIncidents([], resolvedAps, previous);
@@ -280,7 +335,7 @@ export default function App() {
       unsubIncidents();
       bridgeClient.disconnect();
     };
-  }, [bridgeClient, db, threatEngine]);
+  }, [bridgeClient, db, threatEngine, hydrateAssetsFromBridge]);
 
   // Association state is independent from radio scanning. Poll it separately
   // so a Windows roam or disconnect immediately removes stale Connected badges.
@@ -389,7 +444,9 @@ export default function App() {
     }
     try {
       const result = await bridgeClient.refreshScan(selectedAdapterId || undefined);
-      const resolvedAps = applyAnalystOverrides(result.accessPoints, db.getAnalystOverrides(currentProjectId));
+      const resolvedAps = applyAssetsToAccessPoints(
+        applyAnalystOverrides(result.accessPoints, db.getAnalystOverrides(currentProjectId)),
+        enterpriseAssetsRef.current);
       setAccessPoints(resolvedAps);
       setDataSourceProfile(resolvedAps.length ? 'LIVE_WINDOWS' : 'OFFLINE');
       setLastLiveDataAt(result.accessPoints.length ? Date.now() : null);
@@ -656,6 +713,176 @@ export default function App() {
     db.saveAccessPoints(currentProjectId, next);
   };
 
+  const handleSaveEnterpriseAsset = async (asset: EnterpriseAssetRecord) => {
+    const projectId = currentProjectIdRef.current;
+    const next = mergeAssetLists(enterpriseAssetsRef.current, [asset]);
+    commitEnterpriseAssets(next, projectId);
+    setAccessPoints(previous => applyAssetsToAccessPoints(previous, next));
+
+    let syncError = '';
+    if (bridgeClient.getState() === 'CONNECTED') {
+      try {
+        const response = await bridgeClient.saveEnterpriseAsset(asset);
+        if (response?.asset) {
+          const synced = mergeAssetLists(enterpriseAssetsRef.current, [response.asset]);
+          commitEnterpriseAssets(synced, projectId);
+          setAccessPoints(previous => applyAssetsToAccessPoints(previous, synced));
+        }
+      } catch (err: any) {
+        syncError = err?.message || 'unknown bridge error';
+      }
+    }
+
+    const log = db.appendLog({
+      level: syncError ? 'WARN' : 'SUCCESS',
+      source: 'ASSET_REGISTRY',
+      message: syncError
+        ? `Saved ${asset.macAddress} to the local project cache; native SQLite sync failed: ${syncError}`
+        : `Saved ${asset.macAddress} (${asset.classification} / ${asset.approvalStatus}) to the project registry.`,
+    });
+    setLogs(previous => [log, ...previous]);
+
+    if (syncError) {
+      throw new Error(`Saved to the local project cache, but native SQLite sync failed: ${syncError}`);
+    }
+  };
+
+  const handleDeleteEnterpriseAsset = async (macAddress: string) => {
+    const mac = normalizeMac(macAddress);
+    if (!mac) throw new Error('A valid MAC address is required to delete a registry record.');
+    const projectId = currentProjectIdRef.current;
+    const next = enterpriseAssetsRef.current.filter(asset => normalizeMac(asset.macAddress) !== mac);
+    commitEnterpriseAssets(next, projectId);
+    setAccessPoints(previous => {
+      const cleaned = applyAnalystOverrides(
+        removeAssetFromAccessPoints(previous, mac),
+        db.getAnalystOverrides(projectId));
+      db.saveAccessPoints(projectId, cleaned);
+      return cleaned;
+    });
+
+    let syncError = '';
+    if (bridgeClient.getState() === 'CONNECTED') {
+      try {
+        await bridgeClient.deleteEnterpriseAsset(mac);
+      } catch (err: any) {
+        syncError = err?.message || 'unknown bridge error';
+      }
+    }
+
+    const log = db.appendLog({
+      level: syncError ? 'WARN' : 'SUCCESS',
+      source: 'ASSET_REGISTRY',
+      message: syncError
+        ? `Removed ${mac} from the local registry; native SQLite delete failed: ${syncError}`
+        : `Removed ${mac} from the project registry. Captured evidence was left untouched.`,
+    });
+    setLogs(previous => [log, ...previous]);
+
+    if (syncError) {
+      throw new Error(`Removed from the local project cache, but native SQLite delete failed: ${syncError}`);
+    }
+  };
+
+  const handleImportEnterpriseAssetsCsv = async (csv: string): Promise<AssetImportSummary> => {
+    const parsed = parseAssetCsv(csv);
+    if (parsed.fatalError) throw new Error(parsed.fatalError);
+    if (parsed.rows.length === 0) {
+      const details = parsed.rejected.slice(0, 5).join(' ');
+      throw new Error(`No valid asset rows were found in the CSV.${details ? ` ${details}` : ''}`);
+    }
+
+    const projectId = currentProjectIdRef.current;
+    const now = formatUtcTimestamp(new Date());
+    let next = [...enterpriseAssetsRef.current];
+    for (const row of parsed.rows) {
+      const mac = normalizeMac(row.asset.macAddress);
+      if (!mac) continue;
+      const prior = next.find(asset => normalizeMac(asset.macAddress) === mac);
+      if (prior) {
+        const merged = mergeMissingFields(prior, row);
+        if (!row.provided.has('lastSeen')) merged.lastSeen = prior.lastSeen;
+        next = mergeAssetLists(next, [merged]);
+      } else {
+        next = mergeAssetLists(next, [{
+          ...row.asset,
+          lastSeen: row.provided.has('lastSeen') ? row.asset.lastSeen : now
+        }]);
+      }
+    }
+    commitEnterpriseAssets(next, projectId);
+    setAccessPoints(previous => applyAssetsToAccessPoints(previous, next));
+
+    const connected = bridgeClient.getState() === 'CONNECTED';
+    let syncError = '';
+    if (connected) {
+      try {
+        await bridgeClient.importEnterpriseAssetsCsv(csv);
+        const nativeAssets = await bridgeClient.getEnterpriseAssets();
+        if (currentProjectIdRef.current === projectId) {
+          commitEnterpriseAssets(nativeAssets, projectId);
+          setAccessPoints(previous => applyAssetsToAccessPoints(previous, nativeAssets));
+        }
+      } catch (err: any) {
+        syncError = err?.message || 'unknown bridge error';
+      }
+    }
+
+    for (const warning of parsed.warnings) {
+      const log = db.appendLog({ level: 'WARN', source: 'ASSET_CSV', message: warning }, projectId);
+      setLogs(previous => [log, ...previous]);
+    }
+    for (const rejection of parsed.rejected) {
+      const log = db.appendLog({ level: 'WARN', source: 'ASSET_CSV', message: rejection }, projectId);
+      setLogs(previous => [log, ...previous]);
+    }
+    const log = db.appendLog({
+      level: syncError ? 'WARN' : 'SUCCESS',
+      source: 'ASSET_CSV',
+      message: `Asset CSV parsed ${parsed.rowsRead} row(s): ${parsed.rows.length} valid, ${parsed.rejected.length} rejected. ${syncError ? `Native sync failed: ${syncError}` : connected ? 'Saved to project SQLite.' : 'Saved to the local project cache.'}`,
+    }, projectId);
+    setLogs(previous => [log, ...previous]);
+
+    const message = [
+      `Read ${parsed.rowsRead} row(s): ${parsed.rows.length} valid record(s), ${parsed.rejected.length} rejected.`,
+      parsed.warnings.length > 0 ? `${parsed.warnings.length} warning(s) written to the audit log.` : '',
+      parsed.rejected.length > 0 ? `${parsed.rejected.length} rejection(s) written to the audit log.` : '',
+      syncError
+        ? `Local cache updated, but native SQLite sync failed: ${syncError}`
+        : connected
+          ? 'Validated records were written to the project SQLite registry.'
+          : 'The Windows bridge is offline; validated records were cached for this project.'
+    ].filter(Boolean).join('\n');
+
+    return {
+      imported: parsed.rows.length,
+      rejected: parsed.rejected.length,
+      warnings: parsed.warnings,
+      message
+    };
+  };
+
+  const handleExportEnterpriseAssetsCsv = () => {
+    const assets = enterpriseAssetsRef.current;
+    if (assets.length === 0) return;
+    const csv = serializeAssetCsv(assets);
+    const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `WinWiFi-Assets-${currentProjectIdRef.current}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    const log = db.appendLog({
+      level: 'INFO',
+      source: 'ASSET_CSV',
+      message: `Exported ${assets.length} enterprise asset record(s) to CSV. Formula-leading cells were neutralized.`,
+    });
+    setLogs(previous => [log, ...previous]);
+  };
+
   const handleClassifyAP = (bssid: string, classification: AnalystClassification) => {
     threatEngine.markAnalystClassification(bssid, classification);
     db.saveAnalystOverride(currentProjectId, bssid, classification);
@@ -693,7 +920,10 @@ export default function App() {
       db.getAccessPoints(projectId).filter(ap => ap.dataSourceOrigin !== 'TRAINING'),
       db.getAnalystOverrides(projectId));
     const savedIncidents = db.getIncidents(projectId) ?? [];
-    setAccessPoints(savedAps);
+    const localAssets = db.getEnterpriseAssets(projectId);
+    enterpriseAssetsRef.current = localAssets;
+    setEnterpriseAssets(localAssets);
+    setAccessPoints(applyAssetsToAccessPoints(savedAps, localAssets));
     setIncidents(savedIncidents);
     threatEngine.setIncidents(savedIncidents);
     setEvidenceItems(db.getEvidenceItems(projectId));
@@ -712,14 +942,20 @@ export default function App() {
       if (currentProjectIdRef.current !== projectId) return;
       try {
         const nativeAps = await bridgeClient.getProjectAccessPoints(projectId);
-        if (currentProjectIdRef.current !== projectId || nativeAps.length === 0) return;
-        const resolved = applyAnalystOverrides(nativeAps, db.getAnalystOverrides(projectId));
-        setAccessPoints(resolved);
-        db.saveAccessPoints(projectId, resolved);
-        setActiveSourceLabel(`SQLite project snapshot (${resolved.length} access points)`);
+        if (currentProjectIdRef.current === projectId && nativeAps.length > 0) {
+          const resolved = applyAssetsToAccessPoints(
+            applyAnalystOverrides(nativeAps, db.getAnalystOverrides(projectId)),
+            enterpriseAssetsRef.current);
+          setAccessPoints(resolved);
+          db.saveAccessPoints(projectId, resolved);
+          setActiveSourceLabel(`SQLite project snapshot (${resolved.length} access points)`);
+        }
       } catch {
         // Keep the local snapshot already on screen when the bridge is unreachable.
       }
+      await hydrateAssetsFromBridge(projectId).catch(() => {
+        // The bridge may have dropped between the state check and the request.
+      });
     }).catch(() => {
       // The bridge may have dropped between the state check and the request.
     });
@@ -1130,10 +1366,17 @@ export default function App() {
             {networkViewMode === 'inventory' ? (
               <AssetInventory
                 accessPoints={accessPoints}
+                enterpriseAssets={enterpriseAssets}
+                bridgeConnected={bridgeState === 'CONNECTED'}
                 uiMode={uiMode}
                 initialFilter={tabFilterParam}
                 onSelectAP={(ap) => setSelectedBssid(ap.bssid)}
                 onUpdateAP={handleUpdateAP}
+                onSaveAsset={handleSaveEnterpriseAsset}
+                onDeleteAsset={handleDeleteEnterpriseAsset}
+                onImportAssetsCsv={handleImportEnterpriseAssetsCsv}
+                onExportAssetsCsv={handleExportEnterpriseAssetsCsv}
+                onManageScope={() => handleNavigate('settings')}
               />
             ) : (
               <NetworkDiscovery

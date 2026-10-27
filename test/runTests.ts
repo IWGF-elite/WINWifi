@@ -14,6 +14,15 @@ import {
   stableIncidentId,
   countOpenIncidents
 } from '../src/services/incidentMapper';
+import {
+  applyAssetsToAccessPoints,
+  mergeAssetLists,
+  mergeMissingFields,
+  normalizeAsset,
+  normalizeMac,
+  parseAssetCsv,
+  serializeAssetCsv
+} from '../src/services/assetRegistry';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -673,6 +682,80 @@ runTest('T19: Browser Capture Parser Limits & Integrity Warnings', () => {
   }
   if (!rejectedNetwork) {
     throw new Error('Browser parser accepted a non-802.11 link type');
+  }
+});
+
+// 20. Enterprise Asset Registry & CSV
+runTest('T20: Enterprise Asset Registry, MAC Identity & CSV Round-Trip', () => {
+  if (normalizeMac('aa-bb-cc-dd-ee-ff') !== 'AA:BB:CC:DD:EE:FF' ||
+      normalizeMac('02.11.22.33.44.55') !== '02:11:22:33:44:55') {
+    throw new Error('MAC canonicalization failed');
+  }
+  for (const invalid of ['', 'nope', 'AA:BB:CC:DD:EE', 'FF:FF:FF:FF:FF:FF', '00:00:00:00:00:00', 'GG:11:22:33:44:55']) {
+    if (normalizeMac(invalid) !== null) throw new Error(`Invalid MAC accepted: ${invalid}`);
+  }
+
+  const csv = 'macAddress,ssid,classification,approvalStatus,notes\r\n' +
+    'aa-bb-cc-dd-ee-ff,"Lab, West",Corporate,Approved,"Line one\r\nLine two and ""quoted"" text"\r\n' +
+    '02:11:22:33:44:55,Printer,IoT,Investigating,"\'=HYPERLINK(""http://example.invalid"")"\r\n' +
+    'not-a-mac,Bad,Corporate,Approved,ignored\r\n' +
+    '02-11-22-33-44-55,Printer Updated,IoT,Investigating,"\'=HYPERLINK(""http://example.invalid"")"\r\n';
+
+  const parsed = parseAssetCsv(csv);
+  if (parsed.fatalError || parsed.rows.length !== 2 || parsed.rejected.length !== 1) {
+    throw new Error(`CSV parse mismatch: rows=${parsed.rows.length}, rejected=${parsed.rejected.length}, fatal=${parsed.fatalError}`);
+  }
+  const lab = parsed.rows.find(row => row.asset.macAddress === 'AA:BB:CC:DD:EE:FF')!.asset;
+  if (lab.ssid !== 'Lab, West' || lab.notes !== 'Line one\r\nLine two and "quoted" text') {
+    throw new Error(`Quoted/multi-line CSV fields were not preserved: ${JSON.stringify(lab.notes)}`);
+  }
+  const printer = parsed.rows.find(row => row.asset.macAddress === '02:11:22:33:44:55')!.asset;
+  if (printer.ssid !== 'Printer Updated' || printer.approvalStatus !== 'Under Investigation') {
+    throw new Error('Duplicate MAC rows did not use the later record with canonical approval status');
+  }
+  if (!printer.notes.startsWith('=HYPERLINK')) {
+    throw new Error(`CSV formula payload was not preserved for inspection: ${printer.notes}`);
+  }
+
+  const exported = serializeAssetCsv(parsed.rows.map(row => row.asset));
+  if (!exported.includes('"\'=HYPERLINK')) {
+    throw new Error('CSV export did not neutralize a formula-leading cell');
+  }
+  const roundTrip = parseAssetCsv(exported);
+  const roundTripPrinter = roundTrip.rows.find(row => row.asset.macAddress === '02:11:22:33:44:55')!.asset;
+  if (roundTrip.rows.length !== 2 || roundTripPrinter.notes !== printer.notes || roundTripPrinter.ssid !== printer.ssid) {
+    throw new Error('CSV export/import did not round-trip asset data');
+  }
+
+  const normalized = normalizeAsset({ macAddress: 'aa-bb-cc-dd-ee-ff', assetType: 'Sensor', classification: 'Guest', approvalStatus: 'Approved', notes: 'ok' });
+  if (!normalized.asset || normalized.asset.macAddress !== 'AA:BB:CC:DD:EE:FF' || normalized.asset.lastSeen.length < 19) {
+    throw new Error('normalizeAsset did not canonicalize a valid record');
+  }
+  if (normalizeAsset({ macAddress: '02:11:22:33:44:55', classification: 'Made Up' as any }).asset) {
+    throw new Error('An unsupported classification was accepted');
+  }
+
+  const original = parsed.rows[0].asset;
+  const merged = mergeMissingFields({ ...original, id: 'AST-ORIGINAL', notes: 'prior' }, {
+    asset: { ...original, notes: 'replaced' },
+    provided: new Set(['notes']),
+    rowNumber: 2
+  });
+  if (merged.id !== 'AST-ORIGINAL' || merged.notes !== 'replaced' || merged.site !== original.site) {
+    throw new Error('mergeMissingFields did not preserve identity and unprovided fields');
+  }
+
+  const updatedList = mergeAssetLists([original], [{ ...original, id: 'AST-REPLACEMENT', classification: 'Guest' }]);
+  if (updatedList.length !== 1 || updatedList[0].id !== 'AST-REPLACEMENT' || updatedList[0].classification !== 'Guest') {
+    throw new Error('mergeAssetLists did not update by MAC');
+  }
+
+  const aps = applyAssetsToAccessPoints([
+    { bssid: '02:11:22:33:44:55' } as any,
+    { bssid: '02:AA:BB:CC:DD:EE' } as any
+  ], [parsed.rows[1].asset]);
+  if (aps[0].approvedStatus !== 'Investigating' || aps[0].classification !== 'IoT' || aps[1].approvedStatus !== undefined) {
+    throw new Error('Registry metadata was not applied to the matching BSSID only');
   }
 });
 

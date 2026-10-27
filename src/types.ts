@@ -26,6 +26,28 @@ export type AssetClassification =
 
 export type AnalystClassification = 'Trusted' | 'False Positive' | 'Confirmed Rogue';
 
+export type EnterpriseAssetType = 'Access Point' | 'Client Station' | 'IoT Gateway' | 'Sensor' | 'Other';
+export type EnterpriseAssetClassification = 'Corporate' | 'Guest' | 'IoT' | 'Unknown' | 'Suspicious' | 'Rogue';
+export type EnterpriseAssetApprovalStatus = 'Approved' | 'Unapproved' | 'Under Investigation' | 'Decommissioned' | 'Pending Review';
+
+/** Authoritative per-project registry record, keyed by canonical MAC address. */
+export interface EnterpriseAssetRecord {
+  id: string;
+  macAddress: string;
+  ssid: string;
+  assetType: EnterpriseAssetType;
+  classification: EnterpriseAssetClassification;
+  approvalStatus: EnterpriseAssetApprovalStatus;
+  site: string;
+  building: string;
+  areaFloor: string;
+  ownerDepartment: string;
+  vendor: string;
+  model: string;
+  lastSeen: string;
+  notes: string;
+}
+
 export interface WifiAdapter {
   id: string;
   name: string;

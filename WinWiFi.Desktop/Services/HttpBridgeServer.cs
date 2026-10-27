@@ -387,7 +387,7 @@ namespace WinWiFi.Services
 
                 response.AddHeader("Access-Control-Allow-Origin", origin);
                 response.AddHeader("Vary", "Origin");
-                response.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+                response.AddHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
                 response.AddHeader("Access-Control-Allow-Headers", $"Content-Type, Authorization, Accept, {AuthTokenHeader}, X-WinWiFi-Project, X-WinWiFi-Project-Name");
                 response.AddHeader("Access-Control-Max-Age", "86400");
                 if (RequestsPrivateNetworkAccess(request.Headers["Access-Control-Request-Private-Network"]))
@@ -454,6 +454,18 @@ namespace WinWiFi.Services
 
                     case "/api/access-points":
                         await HandleProjectAccessPointsAsync(request, response);
+                        break;
+
+                    case "/api/assets":
+                        await HandleEnterpriseAssetsAsync(request, response);
+                        break;
+
+                    case "/api/assets/import":
+                        await HandleEnterpriseAssetsImportAsync(request, response);
+                        break;
+
+                    case "/api/assets/export":
+                        await HandleEnterpriseAssetsExportAsync(request, response);
                         break;
 
                     case "/api/networks":
@@ -534,7 +546,11 @@ namespace WinWiFi.Services
                         break;
 
                     default:
-                        if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+                        if (path.StartsWith("/api/assets/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await HandleEnterpriseAssetByMacAsync(request, response, path);
+                        }
+                        else if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
                         {
                             await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "endpoint_not_found", $"Endpoint '{path}' not found.");
                         }
@@ -708,6 +724,223 @@ namespace WinWiFi.Services
 
             var aps = await _storage.GetAccessPointsAsync(projectId);
             await WriteJsonAsync(response, aps);
+        }
+
+        private async Task HandleEnterpriseAssetsAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "A valid projectId is required to read or update the enterprise asset registry.");
+                return;
+            }
+
+            if (request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonAsync(response, await _storage.GetEnterpriseAssetsAsync(projectId));
+                return;
+            }
+
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use GET or POST for /api/assets.");
+                return;
+            }
+
+            byte[]? body = await ReadBodyAsync(request, response, 256 * 1024, "Asset payload exceeds the 256 KB limit.");
+            if (body is null) return;
+
+            EnterpriseAssetRecord? incoming;
+            try
+            {
+                incoming = JsonSerializer.Deserialize<EnterpriseAssetRecord>(body, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_json", "The asset record is not valid JSON.");
+                return;
+            }
+
+            var normalized = AssetRegistryCsv.NormalizeAsset(incoming, out string? error);
+            if (normalized is null)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_asset", error ?? "The asset record is invalid.");
+                return;
+            }
+
+            await _storage.SaveEnterpriseAssetsAsync(projectId, new[] { normalized });
+            var saved = (await _storage.GetEnterpriseAssetsAsync(projectId))
+                .FirstOrDefault(asset => asset.MacAddress.Equals(normalized.MacAddress, StringComparison.OrdinalIgnoreCase));
+            await WriteJsonAsync(response, new { asset = saved ?? normalized });
+        }
+
+        private async Task HandleEnterpriseAssetByMacAsync(HttpListenerRequest request, HttpListenerResponse response, string path)
+        {
+            if (!request.HttpMethod.Equals("DELETE", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Only DELETE is supported on /api/assets/{mac}.");
+                return;
+            }
+
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "A valid projectId is required to delete an enterprise asset.");
+                return;
+            }
+
+            string rawMac = Uri.UnescapeDataString(path.Substring("/api/assets/".Length));
+            if (rawMac.Contains('/'))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "endpoint_not_found", "Asset endpoints use the form /api/assets/{mac}.");
+                return;
+            }
+
+            string? mac = AssetRegistryCsv.NormalizeMac(rawMac);
+            if (mac is null)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_mac", "A valid unicast 48-bit MAC address is required.");
+                return;
+            }
+
+            var existing = await _storage.GetEnterpriseAssetsAsync(projectId);
+            if (!existing.Any(asset => asset.MacAddress.Equals(mac, StringComparison.OrdinalIgnoreCase)))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "asset_not_found", $"No registry asset with MAC {mac} exists in this project.");
+                return;
+            }
+
+            await _storage.DeleteEnterpriseAssetAsync(projectId, mac);
+            await WriteJsonAsync(response, new { deleted = mac });
+        }
+
+        private async Task HandleEnterpriseAssetsImportAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST for /api/assets/import.");
+                return;
+            }
+
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "A valid projectId is required to import assets.");
+                return;
+            }
+
+            byte[]? body = await ReadBodyAsync(request, response, 2 * 1024 * 1024, "Asset CSV exceeds the 2 MB import limit.");
+            if (body is null) return;
+
+            string csv = Encoding.UTF8.GetString(body);
+            var parsed = AssetRegistryCsv.Parse(csv);
+            if (parsed.FatalError is not null)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonAsync(response, new
+                {
+                    error = new { code = "invalid_asset_csv", message = parsed.FatalError },
+                    rejected = parsed.Rejected,
+                    warnings = parsed.Warnings
+                });
+                return;
+            }
+
+            if (parsed.Rows.Count == 0)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonAsync(response, new
+                {
+                    error = new { code = "no_valid_assets", message = "No valid asset rows were found in the CSV." },
+                    rejected = parsed.Rejected,
+                    warnings = parsed.Warnings
+                });
+                return;
+            }
+
+            var existingByMac = (await _storage.GetEnterpriseAssetsAsync(projectId))
+                .GroupBy(asset => asset.MacAddress, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            var toSave = new List<EnterpriseAssetRecord>(parsed.Rows.Count);
+            string now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+            foreach (var row in parsed.Rows)
+            {
+                if (existingByMac.TryGetValue(row.Asset.MacAddress, out var prior))
+                {
+                    var merged = AssetRegistryCsv.MergeMissingFields(prior, row);
+                    if (row.ProvidedFields.Contains(AssetRegistryCsv.FieldLastSeen)) merged.LastSeen = row.Asset.LastSeen;
+                    else merged.LastSeen = prior.LastSeen;
+                    toSave.Add(merged);
+                }
+                else
+                {
+                    if (!row.ProvidedFields.Contains(AssetRegistryCsv.FieldLastSeen)) row.Asset.LastSeen = now;
+                    toSave.Add(row.Asset);
+                }
+            }
+
+            await _storage.SaveEnterpriseAssetsAsync(projectId, toSave);
+            await WriteJsonAsync(response, new
+            {
+                imported = toSave.Count,
+                rowsRead = parsed.RowsRead,
+                rejected = parsed.Rejected,
+                warnings = parsed.Warnings
+            });
+        }
+
+        private async Task HandleEnterpriseAssetsExportAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use GET for /api/assets/export.");
+                return;
+            }
+
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "A valid projectId is required to export assets.");
+                return;
+            }
+
+            var assets = await _storage.GetEnterpriseAssetsAsync(projectId);
+            string csv = AssetRegistryCsv.Serialize(assets);
+            byte[] payload = Encoding.UTF8.GetBytes(csv);
+            byte[] bom = Encoding.UTF8.GetPreamble();
+
+            response.StatusCode = (int)HttpStatusCode.OK;
+            response.ContentType = "text/csv; charset=utf-8";
+            response.AddHeader("Content-Disposition", $"attachment; filename=\"WinWiFi-Assets-{projectId}.csv\"");
+            response.ContentLength64 = bom.Length + payload.Length;
+            await response.OutputStream.WriteAsync(bom, 0, bom.Length);
+            await response.OutputStream.WriteAsync(payload, 0, payload.Length);
+        }
+
+        private static async Task<byte[]?> ReadBodyAsync(HttpListenerRequest request, HttpListenerResponse response, long maxBytes, string tooLargeMessage)
+        {
+            if (request.ContentLength64 > maxBytes)
+            {
+                await WriteJsonErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "payload_too_large", tooLargeMessage);
+                return null;
+            }
+
+            using var ms = new MemoryStream();
+            byte[] buffer = new byte[81920];
+            int read;
+            long total = 0;
+            while ((read = await request.InputStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            {
+                total += read;
+                if (total > maxBytes)
+                {
+                    await WriteJsonErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "payload_too_large", tooLargeMessage);
+                    return null;
+                }
+                ms.Write(buffer, 0, read);
+            }
+            return ms.ToArray();
         }
 
         private async Task HandleProjectsAsync(HttpListenerRequest request, HttpListenerResponse response)
