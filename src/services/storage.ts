@@ -1,4 +1,4 @@
-import { AccessPoint, AnalystClassification, AuditProject, AuditLog, EvidenceItem, HandshakeInfo, IncidentRecord } from '../types';
+import { AccessPoint, AnalystClassification, AuditProject, AuditLog, EvidenceItem, HandshakeInfo, IncidentRecord, EnterpriseAssetRecord } from '../types';
 
 const DB_PREFIX = 'winwifi_sqlite_';
 
@@ -71,7 +71,7 @@ export class SqliteDatabaseService {
   public deleteProjectData(projectId: string): void {
     localStorage.removeItem(`${DB_PREFIX}access_points_${projectId}`);
     localStorage.removeItem(`${DB_PREFIX}analyst_overrides_${projectId}`);
-    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes']) {
+    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes', 'assets']) {
       localStorage.removeItem(this.scopedKey(kind, projectId));
     }
   }
@@ -177,6 +177,15 @@ export class SqliteDatabaseService {
 
   public clearLogs(projectId: string = this.getCurrentProjectId()): void {
     localStorage.removeItem(this.scopedKey('logs', projectId));
+  }
+
+  // Enterprise asset registry (project-scoped local mirror of native SQLite)
+  public getEnterpriseAssets(projectId: string = this.getCurrentProjectId()): EnterpriseAssetRecord[] {
+    return this.readScoped<EnterpriseAssetRecord[]>('assets', projectId, []);
+  }
+
+  public saveEnterpriseAssets(projectId: string, assets: EnterpriseAssetRecord[]): void {
+    this.writeScoped('assets', projectId, assets);
   }
 
   // Saved Handshakes in SQLite

@@ -6,7 +6,8 @@ import {
   BridgeHealthStatus, 
   BridgeScanStatus, 
   BridgeDiagnostics,
-  DataOrigin
+  DataOrigin,
+  EnterpriseAssetRecord
 } from '../types';
 
 export type BridgeEventCallback<T> = (data: T) => void;
@@ -199,6 +200,37 @@ export class NativeBridgeClient {
     const query = pid ? `?projectId=${encodeURIComponent(pid)}` : '';
     const raw = await this.request<any[]>(`/api/access-points${query}`);
     return this.tagOrigin(Array.isArray(raw) ? raw : [], 'LIVE_WINDOWS');
+  }
+
+  public async getEnterpriseAssets(): Promise<EnterpriseAssetRecord[]> {
+    const raw = await this.request<any[]>('/api/assets');
+    return Array.isArray(raw) ? raw : [];
+  }
+
+  public async saveEnterpriseAsset(asset: EnterpriseAssetRecord): Promise<{ asset: EnterpriseAssetRecord }> {
+    return await this.request<{ asset: EnterpriseAssetRecord }>('/api/assets', {
+      method: 'POST',
+      body: JSON.stringify(asset)
+    });
+  }
+
+  public async deleteEnterpriseAsset(macAddress: string): Promise<{ deleted: string }> {
+    return await this.request<{ deleted: string }>(`/api/assets/${encodeURIComponent(macAddress)}`, {
+      method: 'DELETE'
+    });
+  }
+
+  public async importEnterpriseAssetsCsv(csv: string): Promise<{
+    imported: number;
+    rowsRead: number;
+    rejected: string[];
+    warnings: string[];
+  }> {
+    return await this.request('/api/assets/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv; charset=utf-8' },
+      body: csv
+    });
   }
 
   // ================= State & Observers =================

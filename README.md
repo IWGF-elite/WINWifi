@@ -23,6 +23,10 @@ files without any native backend.
 - A packet-frame inspector (filters, field tree, hex view) for
   imported captures
 - Rogue/evil-twin detection and configuration drift tracking over time
+- A project-scoped enterprise asset registry keyed by canonical MAC address,
+  with classification, approval status, site/building/floor, owner, and notes
+- Validated CSV import/export for the asset registry (5,000 rows / 2 MB per
+  import, duplicate MACs update in place, formula-leading cells neutralized)
 - Policy compliance scoring and reporting
 - Connect to networks directly from the app (using a password you provide)
 

@@ -17,23 +17,39 @@ import {
   Eye,
   SlidersHorizontal
 } from 'lucide-react';
-import { AccessPoint, AssetClassification, UIMode } from '../types';
+import { AccessPoint, AssetClassification, EnterpriseAssetRecord, UIMode } from '../types';
+import { EnterpriseRegistry, AssetImportSummary } from './EnterpriseRegistry';
 
 interface AssetInventoryProps {
   accessPoints: AccessPoint[];
+  enterpriseAssets: EnterpriseAssetRecord[];
+  bridgeConnected: boolean;
   uiMode: UIMode;
   initialFilter?: string;
   onSelectAP: (ap: AccessPoint) => void;
   onUpdateAP: (ap: AccessPoint) => void;
+  onSaveAsset: (asset: EnterpriseAssetRecord) => Promise<void>;
+  onDeleteAsset: (macAddress: string) => Promise<void>;
+  onImportAssetsCsv: (csv: string) => Promise<AssetImportSummary>;
+  onExportAssetsCsv: () => void;
+  onManageScope: () => void;
 }
 
 export const AssetInventory: React.FC<AssetInventoryProps> = ({
   accessPoints = [],
+  enterpriseAssets = [],
+  bridgeConnected,
   uiMode,
   initialFilter = '',
   onSelectAP,
-  onUpdateAP
+  onUpdateAP,
+  onSaveAsset,
+  onDeleteAsset,
+  onImportAssetsCsv,
+  onExportAssetsCsv,
+  onManageScope
 }) => {
+  const [view, setView] = useState<'networks' | 'registry'>('networks');
   const [searchTerm, setSearchTerm] = useState(initialFilter);
   const [classificationFilter, setClassificationFilter] = useState<string>('all');
   const [approvalFilter, setApprovalFilter] = useState<string>('all');
@@ -89,9 +105,9 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
     setEditClassification(ap.classification || 'Unknown');
     setEditApproval(ap.approvedStatus || 'Pending Review');
     setEditOwnership(ap.ownership || '');
-    setEditSite(ap.site || 'HQ Campus');
-    setEditBuilding(ap.building || 'Building A');
-    setEditFloor(ap.floor || 'Floor 1');
+    setEditSite(ap.site || '');
+    setEditBuilding(ap.building || '');
+    setEditFloor(ap.floor || '');
     setEditTags((ap.tags || []).join(', '));
     setEditNotes(ap.notes || '');
   };
@@ -142,10 +158,37 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
     }
   };
 
+  if (view === 'registry') {
+    return (
+      <EnterpriseRegistry
+        assets={enterpriseAssets}
+        bridgeConnected={bridgeConnected}
+        uiMode={uiMode}
+        onSaveAsset={onSaveAsset}
+        onDeleteAsset={onDeleteAsset}
+        onImportCsv={onImportAssetsCsv}
+        onExportCsv={onExportAssetsCsv}
+        onShowNetworks={() => setView('networks')}
+        onManageScope={onManageScope}
+      />
+    );
+  }
+
   return (
     <div className="space-y-5 pb-8">
       {/* Header with Search & Filters */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">
+        <div className="flex items-center gap-1 mb-3 bg-slate-800/70 rounded-lg p-1 w-fit">
+          <button className="px-3 py-1.5 rounded bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5">
+            <Radio className="w-3.5 h-3.5" /> Network Inventory ({accessPoints.length})
+          </button>
+          <button
+            onClick={() => setView('registry')}
+            className="px-3 py-1.5 rounded text-xs font-semibold text-slate-400 hover:text-slate-200 flex items-center gap-1.5"
+          >
+            <Shield className="w-3.5 h-3.5" /> Enterprise Registry ({enterpriseAssets.length})
+          </button>
+        </div>
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -265,9 +308,9 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
 
                       {/* Location */}
                       <td className="py-3 px-4">
-                        <div className="text-slate-300 font-medium">{ap.site || 'HQ Campus'}</div>
+                        <div className="text-slate-300 font-medium">{ap.site || 'Not set'}</div>
                         <div className="text-[11px] text-slate-500">
-                          {ap.building || 'Building A'}{ap.floor ? ` - ${ap.floor}` : ''}
+                          {ap.building || 'Not set'}{ap.floor ? ` - ${ap.floor}` : ''}
                         </div>
                       </td>
 
