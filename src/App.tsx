@@ -94,6 +94,7 @@ import { BridgeConfigModal } from './components/BridgeConfigModal';
 import { LogConsole } from './components/LogConsole';
 import { NativeDesktopPanel } from './components/NativeDesktopPanel';
 import { StartupReadinessOverlay } from './components/StartupReadinessOverlay';
+import { BridgeErrorKind, bridgeStatusView } from './services/bridgeStatus';
 
 const applyAnalystOverrides = (
   accessPoints: AccessPoint[],
@@ -296,6 +297,7 @@ export default function App() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeHealthStatus | null>(null);
   const [networkViewMode, setNetworkViewMode] = useState<'inventory' | 'discovery'>('inventory');
   const [bridgeNotice, setBridgeNotice] = useState('');
+  const [bridgeErrorKind, setBridgeErrorKind] = useState<BridgeErrorKind | null>(null);
 
   // A Windows WLAN scan is periodic, not a continuous frame stream. Keep the
   // source labelled as live while the local bridge is connected; freshness is
@@ -380,6 +382,7 @@ export default function App() {
       setBridgeState(state);
       if (state === 'CONNECTED') {
         setBridgeNotice('');
+        setBridgeErrorKind(null);
         setActiveSourceLabel('Windows bridge connected; waiting for WLAN observations');
         try {
           const health = await bridgeClient.checkHealth();
@@ -402,7 +405,10 @@ export default function App() {
           setAccessPoints([]);
           setDataSourceProfile('OFFLINE');
         }
-        if (state === 'ERROR') setBridgeNotice(bridgeClient.getLastError() || 'Could not connect to the local Windows bridge.');
+        if (state === 'ERROR') {
+          setBridgeErrorKind(bridgeClient.getErrorKind());
+          setBridgeNotice(bridgeClient.getLastError() || 'Could not connect to the local Windows bridge.');
+        }
       }
     });
 
@@ -1404,6 +1410,8 @@ export default function App() {
         dataSourceProfile={dataSourceProfile}
         accessPointCount={accessPoints.length}
         error={bridgeNotice}
+        errorKind={bridgeErrorKind}
+        onRetry={() => void bridgeClient.retryNow()}
         onContinue={() => setShowStartupReadiness(false)}
       />}
       {/* Windows Native Title & Action Bar */}
@@ -1417,6 +1425,7 @@ export default function App() {
         onToggleScan={handleToggleScan}
         onRefreshScan={handleRefreshScan}
         bridgeState={bridgeState}
+        bridgeErrorKind={bridgeErrorKind}
         onOpenBridgeConfig={() => setShowBridgeModal(true)}
         projectName={currentProject.name}
         onOpenReport={() => setShowReportModal(true)}
@@ -1430,14 +1439,39 @@ export default function App() {
         onToggleFullscreen={handleToggleFullscreen}
       />
 
-      {bridgeNotice && (
-        <div role="status" className={`flex items-center justify-between gap-4 border-b px-4 py-2 text-xs ${
-          bridgeState === 'ERROR' ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : 'border-blue-500/30 bg-blue-500/10 text-blue-100'
-        }`}>
-          <span>{bridgeNotice}</span>
-          <button onClick={() => setBridgeNotice('')} className="rounded px-2 py-1 text-slate-300 hover:bg-white/10" aria-label="Dismiss message">Dismiss</button>
-        </div>
-      )}
+      {bridgeNotice && (() => {
+        const view = bridgeStatusView(bridgeState, bridgeErrorKind);
+        const isBridgeFailure = bridgeState === 'ERROR';
+        return (
+          <div
+            role="status"
+            className={`flex items-start justify-between gap-4 border-b px-4 py-2 text-xs ${
+              isBridgeFailure
+                ? view.tone === 'bad'
+                  ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+                  : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+                : 'border-blue-500/30 bg-blue-500/10 text-blue-100'
+            }`}
+          >
+            <div className="min-w-0">
+              <p className="font-semibold">{isBridgeFailure ? `${view.title}.` : 'Bridge notice'}</p>
+              <p className="mt-0.5 leading-relaxed">{isBridgeFailure ? view.description : bridgeNotice}</p>
+              {isBridgeFailure && (
+                <p className="mt-1 text-[11px] opacity-70">
+                  Retrying automatically every few seconds.{' '}
+                  <button
+                    onClick={() => void bridgeClient.retryNow()}
+                    className="underline underline-offset-2 hover:text-white"
+                  >
+                    Retry now
+                  </button>
+                </p>
+              )}
+            </div>
+            <button onClick={() => setBridgeNotice('')} className="shrink-0 rounded px-2 py-1 text-slate-300 hover:bg-white/10" aria-label="Dismiss message">Dismiss</button>
+          </div>
+        );
+      })()}
 
       {/* Navigation Ribbon Bar */}
       <nav className={`winwifi-nav px-3 pt-1 border-b flex items-center justify-between overflow-x-auto text-xs select-none ${

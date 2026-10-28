@@ -151,6 +151,33 @@ This starts the dashboard at `http://127.0.0.1:3000`. It supports offline use
 out of the box — import a `.pcap`/`.cap` file or `netsh wlan show networks
 mode=bssid` output, or explore the built-in training lab.
 
+## One-command dev start (live scanning in the browser)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-dev.ps1
+```
+
+This starts the native bridge (`dotnet run --project WinWiFi.CLI -- --bridge
+--port 38989`, loopback only) and the Vite dev server together, waits until the
+bridge health endpoint answers, and opens the dashboard with the per-launch
+bridge token already supplied. Ctrl+C stops both services. To start the pieces
+manually instead:
+
+```powershell
+# Terminal 1: bridge (prints a dashboard URL that includes the ?token=)
+dotnet run --project WinWiFi.CLI -- --bridge --port 38989
+
+# Terminal 2: dashboard dev server (needs the token from the bridge)
+$env:VITE_WINWIFI_BRIDGE_TOKEN = (Get-Content "$env:LOCALAPPDATA\WinWiFi\bridge.token" -Raw).Trim()
+npm run dev -- --port 5173 --strictPort
+```
+
+Every bridge request (including `/api/health`) requires the per-launch token;
+browser sessions without it see an explicit "Token mismatch" state, and the
+header shows the bridge as Connected / Offline / Token mismatch. When the
+bridge is not running, the dashboard shows an offline panel with the exact
+start command and retries automatically every few seconds.
+
 ## Running the native Windows app from source (live scanning)
 
 **Prerequisites:**

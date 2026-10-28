@@ -1390,8 +1390,8 @@ namespace WinWiFi.Services
                 MicVerified = !string.IsNullOrEmpty(MicHex),
                 CapturedAt = FirstCapturedAt,
                 // Retain event metadata for forensics but never expose credential-auditing material.
-                AnonCe = string.Empty,
-                SnonCe = string.Empty,
+                Anonce = string.Empty,
+                Snonce = string.Empty,
                 MicHex = string.Empty,
                 Pmkid = string.Empty,
                 ReplayCounter = ReplayCounter,

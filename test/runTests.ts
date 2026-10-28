@@ -83,6 +83,7 @@ import {
   reconcileAlerts,
   summarizeAlerts
 } from '../src/services/alerts';
+import { bridgeStatusView, classifyBridgeError } from '../src/services/bridgeStatus';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1497,6 +1498,55 @@ runTest('T25: Alert Rules, Deduplication & Acknowledgement', () => {
   const capped = reconcileAlerts(terminal, [rogue[0]], t2);
   if (capped.records.length !== MAX_ALERTS || !capped.records.some(record => record.ruleId === 'ROGUE_AP' && record.status === 'Open')) {
     throw new Error('The alert cap dropped the new active alert or exceeded the limit');
+  }
+});
+
+// 27. Bridge offline/token status classification used by the header pill and offline panel
+runTest('T26: Bridge Offline & Token-Mismatch Status Views', () => {
+  if (classifyBridgeError('HTTP 401: A valid per-launch bridge token is required.') !== 'token') {
+    throw new Error('A 401 response was not classified as a token problem');
+  }
+  if (classifyBridgeError('The local WinWiFi bridge rejected this dashboard session.') !== 'token') {
+    throw new Error('A token rejection message was not classified as a token problem');
+  }
+  if (classifyBridgeError('Failed to fetch http://127.0.0.1:38989/api/status') !== 'offline') {
+    throw new Error('A network failure was not classified as offline');
+  }
+  if (classifyBridgeError('NetworkError when attempting to fetch resource.') !== 'offline') {
+    throw new Error('A NetworkError was not classified as offline');
+  }
+  if (classifyBridgeError('Bridge timeout: Request to /api/status exceeded 5000ms.') !== 'timeout') {
+    throw new Error('A timeout was not classified as a timeout');
+  }
+  if (classifyBridgeError('Something unexpected happened') !== 'unknown') {
+    throw new Error('An unrecognized error was not classified as unknown');
+  }
+
+  const connected = bridgeStatusView('CONNECTED', null);
+  if (connected.label !== 'Connected' || connected.tone !== 'ok') {
+    throw new Error('The connected status view is not labelled Connected/ok');
+  }
+  const offline = bridgeStatusView('ERROR', 'offline');
+  if (offline.label !== 'Offline' || offline.tone !== 'bad') {
+    throw new Error('The offline status view is not labelled Offline/bad');
+  }
+  if (!offline.description.includes('--bridge --port 38989') || !offline.description.includes('start-dev.ps1')) {
+    throw new Error('The offline description does not tell the operator how to start the bridge');
+  }
+  const tokenMismatch = bridgeStatusView('ERROR', 'token');
+  if (tokenMismatch.label !== 'Token mismatch' || tokenMismatch.tone !== 'bad') {
+    throw new Error('A token mismatch is not labelled in the header view');
+  }
+  if (!tokenMismatch.description.includes('bridge.token')) {
+    throw new Error('The token-mismatch description does not point at the bridge token file');
+  }
+  const connecting = bridgeStatusView('CONNECTING', null);
+  if (connecting.label !== 'Connecting' || connecting.tone !== 'busy') {
+    throw new Error('The connecting status view is not labelled Connecting/busy');
+  }
+  const disconnected = bridgeStatusView('DISCONNECTED', null);
+  if (disconnected.label !== 'Offline') {
+    throw new Error('A disconnected bridge is not shown as Offline');
   }
 });
 
