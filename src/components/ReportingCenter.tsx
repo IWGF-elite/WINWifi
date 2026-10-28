@@ -6,12 +6,7 @@ import {
   Download, 
   ShieldCheck, 
   AlertTriangle, 
-  Building, 
-  Calendar, 
-  Check,
-  Flame,
   ArrowRight,
-  Layers,
   Sparkles
 } from 'lucide-react';
 import { AccessPoint, AuditProject, IncidentRecord, UIMode } from '../types';

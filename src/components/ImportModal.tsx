@@ -1,17 +1,14 @@
 import React, { useState, useRef } from 'react';
 import { 
   Upload, 
-  FileText, 
   Terminal, 
-  Check, 
   AlertCircle, 
   X, 
   HardDrive,
-  FileCode,
-  RefreshCw
+  FileCode
 } from 'lucide-react';
 import { PcapService, PcapParseResult } from '../services/pcapParser';
-import { AccessPoint, PcapPacket, HandshakeInfo, DataSourceProfile } from '../types';
+import { AccessPoint, DataSourceProfile } from '../types';
 
 interface ImportModalProps {
   onClose: () => void;

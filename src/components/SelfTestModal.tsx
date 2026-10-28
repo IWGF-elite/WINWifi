@@ -1,18 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  FlaskConical, 
-  CheckCircle2, 
-  XCircle, 
-  Play, 
-  RotateCw, 
-  X, 
-  Terminal,
-  ShieldCheck,
-  Cpu,
-  Binary,
-  Layers,
-  HardDrive
-} from 'lucide-react';
+import { FlaskConical, CheckCircle2, XCircle, RotateCw, X } from 'lucide-react';
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { NATIVE_TABLES, toNativeTableView } from '../services/nativeDatabaseView';
 import { WifiEngine, isWebView2Host } from '../services/wifiEngine';

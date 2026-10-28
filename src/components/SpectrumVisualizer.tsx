@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AccessPoint, FrequencyBand, DataSourceProfile } from '../types';
-import { Activity, Radio, Info, AlertTriangle, ShieldCheck, Sparkles } from 'lucide-react';
+import { Activity, Radio, Info } from 'lucide-react';
 
 interface SpectrumVisualizerProps {
   accessPoints: AccessPoint[];

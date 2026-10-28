@@ -3,20 +3,16 @@ import React, { useState } from 'react';
 import { 
   Building2, 
   MapPin, 
-  FolderPlus, 
   Database, 
   Download, 
-  Calendar, 
-  Layers, 
   Check, 
   Plus,
   RefreshCw,
   Clock,
-  ArrowRight,
   Pencil,
   Trash2
 } from 'lucide-react';
-import { AuditProject, AccessPoint, EnterpriseScope, DataSourceProfile, EnterpriseAssetRecord, SiteRecord } from '../types';
+import { AuditProject, AccessPoint, DataSourceProfile, EnterpriseAssetRecord, SiteRecord } from '../types';
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { NATIVE_TABLES, MAX_VIEW_ROWS, NativeTableView, toNativeTableView } from '../services/nativeDatabaseView';
 import { SiteDirectory } from './SiteDirectory';

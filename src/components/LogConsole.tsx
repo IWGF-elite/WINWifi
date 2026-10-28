@@ -1,7 +1,7 @@
 import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
 import { AuditLog } from '../types';
-import { Terminal, Trash2, ShieldAlert, CheckCircle2, Info, AlertTriangle, Download } from 'lucide-react';
+import { Terminal, Trash2, Download } from 'lucide-react';
 
 interface LogConsoleProps {
   logs: AuditLog[];

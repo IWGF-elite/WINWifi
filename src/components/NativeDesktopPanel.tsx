@@ -1,16 +1,9 @@
 import React, { useState } from 'react';
 import { 
   Terminal, 
-  Cpu, 
   CheckCircle2, 
-  FileCode, 
-  Download, 
-  Layers, 
-  ShieldCheck, 
-  Database, 
   Copy, 
   Check, 
-  ExternalLink,
   Laptop,
   FolderGit2
 } from 'lucide-react';

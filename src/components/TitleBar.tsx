@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { 
   Radio, 
-  ShieldCheck, 
   Play, 
   Square, 
   Sun, 
@@ -10,13 +9,10 @@ import {
   Minimize2,
   Minus,
   X,
-  CheckCircle2, 
   FileText,
   FlaskConical,
   Upload,
   Cpu,
-  Sparkles,
-  Terminal,
   HardDrive,
   RefreshCw,
   Server,

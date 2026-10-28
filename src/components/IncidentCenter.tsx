@@ -1,17 +1,9 @@
 import React, { useState } from 'react';
 import { 
-  AlertTriangle, 
-  CheckCircle2, 
-  Clock, 
   User, 
-  ShieldAlert, 
   FileText, 
-  Plus, 
   Send, 
-  Check, 
-  ExternalLink,
-  Search,
-  Filter
+  Search
 } from 'lucide-react';
 import { AccessPoint, EvidenceItem, IncidentRecord, UIMode } from '../types';
 import { ThreatEngine } from '../services/threatEngine';

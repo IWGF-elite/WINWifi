@@ -1,8 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { 
   AccessPoint, 
-  FrequencyBand, 
-  SecurityType,
   DataSourceProfile,
   DataOrigin 
 } from '../types';
@@ -10,14 +8,9 @@ import {
   Wifi, 
   Search, 
   ShieldAlert, 
-  ShieldCheck, 
-  KeyRound, 
   Users, 
   HardDrive, 
-  AlertTriangle, 
-  Filter, 
   ArrowUpDown,
-  ExternalLink,
   Lock,
   Unlock,
   Radio,
@@ -28,8 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  FlaskConical,
-  CheckCircle2
+  FlaskConical
 } from 'lucide-react';
 
 interface NetworkDiscoveryProps {

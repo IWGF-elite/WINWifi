@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Radio, 
-  Wifi, 
-  ShieldCheck, 
   RefreshCw, 
   Play, 
   Square, 
@@ -11,12 +8,8 @@ import {
   X, 
   Copy, 
   Check, 
-  ExternalLink, 
-  Cpu, 
-  HardDrive,
   Info,
   Server,
-  Activity,
   Zap
 } from 'lucide-react';
 import { NativeBridgeClient } from '../services/bridgeClient';
