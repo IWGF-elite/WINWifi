@@ -1,5 +1,6 @@
-import { AccessPoint, AnalystClassification, AuditProject, AuditLog, EvidenceItem, HandshakeInfo, IncidentRecord, EnterpriseAssetRecord, SiteRecord } from '../types';
+import { AccessPoint, AnalystClassification, AuditProject, AuditLog, EvidenceItem, HandshakeInfo, IncidentRecord, EnterpriseAssetRecord, MaintenanceApprovalRecord, SiteRecord } from '../types';
 import { normalizeSiteDirectory } from './siteDirectory';
+import { normalizeMaintenanceApprovals } from './maintenanceApproval';
 
 const DB_PREFIX = 'winwifi_sqlite_';
 
@@ -72,7 +73,7 @@ export class SqliteDatabaseService {
   public deleteProjectData(projectId: string): void {
     localStorage.removeItem(`${DB_PREFIX}access_points_${projectId}`);
     localStorage.removeItem(`${DB_PREFIX}analyst_overrides_${projectId}`);
-    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes', 'assets', 'sites']) {
+    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes', 'assets', 'sites', 'maintenance']) {
       localStorage.removeItem(this.scopedKey(kind, projectId));
     }
   }
@@ -187,6 +188,14 @@ export class SqliteDatabaseService {
 
   public saveSiteDirectory(sites: SiteRecord[], projectId: string = this.getCurrentProjectId()): void {
     this.writeScoped('sites', projectId, normalizeSiteDirectory(sites));
+  }
+
+  public getMaintenanceApprovals(projectId: string = this.getCurrentProjectId()): MaintenanceApprovalRecord[] {
+    return normalizeMaintenanceApprovals(this.readScoped<MaintenanceApprovalRecord[]>('maintenance', projectId, []));
+  }
+
+  public saveMaintenanceApprovals(records: MaintenanceApprovalRecord[], projectId: string = this.getCurrentProjectId()): void {
+    this.writeScoped('maintenance', projectId, normalizeMaintenanceApprovals(records));
   }
 
   public getEnterpriseAssets(projectId: string = this.getCurrentProjectId()): EnterpriseAssetRecord[] {

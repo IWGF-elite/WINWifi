@@ -46,6 +46,18 @@ import {
   renameSiteInAssets,
   sanitizeSiteName
 } from '../src/services/siteDirectory';
+import {
+  approveMaintenance,
+  countActiveApprovals,
+  createMaintenanceRequest,
+  findActiveApproval,
+  getApprovalsForBssid,
+  markApprovalUsed,
+  normalizeMaintenanceApprovals,
+  rejectMaintenance,
+  revokeMaintenance,
+  sanitizeMaintenanceText
+} from '../src/services/maintenanceApproval';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -994,6 +1006,160 @@ runTest('T22: Site Directory CRUD, Counts & Rename Propagation', () => {
   for (let index = 0; index < 50; index++) capped = addSite(capped, `Site ${index}`).directory;
   if (!addSite(capped, 'Site 51').error) {
     throw new Error('addSite ignored the 50-site cap');
+  }
+});
+
+// 23. Maintenance Approval: two-person, time-boxed, BSSID-scoped
+runTest('T23: Maintenance Approval Workflow', () => {
+  const base = new Date('2026-10-01T12:00:00.000Z');
+  const baseMs = base.getTime();
+  const bssid = '02:00:00:00:00:AA';
+
+  if (sanitizeMaintenanceText('  \u0000 Alice \n\t Smith  ', 80) !== 'Alice Smith') {
+    throw new Error('sanitizeMaintenanceText did not strip control characters and collapse whitespace');
+  }
+  if (sanitizeMaintenanceText('x'.repeat(500), 400).length !== 400) {
+    throw new Error('sanitizeMaintenanceText did not enforce the length cap');
+  }
+  if (normalizeMaintenanceApprovals('nope').length !== 0 ||
+      normalizeMaintenanceApprovals([null, 42, {}, { action: 'Connect to network' }]).length !== 0) {
+    throw new Error('normalizeMaintenanceApprovals accepted malformed records');
+  }
+
+  const request = {
+    action: 'Connect to network' as const,
+    bssid: '02-00-00-00-00-aa',
+    ssid: 'QA-Lab',
+    adapterId: 'adapter-1',
+    requester: 'Alice',
+    justification: 'Validate the new access point after maintenance.',
+    durationMinutes: 30
+  };
+
+  if (!createMaintenanceRequest([], { ...request, bssid: 'not-a-mac' }, base).error) {
+    throw new Error('createMaintenanceRequest accepted an invalid BSSID');
+  }
+  if (!createMaintenanceRequest([], { ...request, requester: 'A' }, base).error) {
+    throw new Error('createMaintenanceRequest accepted a one-character requester');
+  }
+  if (!createMaintenanceRequest([], { ...request, justification: 'short' }, base).error) {
+    throw new Error('createMaintenanceRequest accepted a short justification');
+  }
+  if (!createMaintenanceRequest([], { ...request, durationMinutes: 5 }, base).error ||
+      !createMaintenanceRequest([], { ...request, durationMinutes: 600 }, base).error) {
+    throw new Error('createMaintenanceRequest accepted a duration outside 15-480 minutes');
+  }
+
+  const created = createMaintenanceRequest([], request, base);
+  if (created.error || !created.record) throw new Error(`Valid request failed: ${created.error}`);
+  if (created.record.bssid !== bssid || created.record.status !== 'Pending' || created.record.requester !== 'Alice') {
+    throw new Error('The request was not canonicalized or initialized as Pending');
+  }
+  if (Date.parse(created.record.expiresAt) !== baseMs + 30 * 60_000) {
+    throw new Error('The approval window did not match the requested duration');
+  }
+  if (findActiveApproval(created.records, '0200000000aa', 'Connect to network', new Date(baseMs + 60_000))) {
+    throw new Error('findActiveApproval returned a Pending request');
+  }
+
+  if (!approveMaintenance(created.records, created.record.id, 'alice', base).error) {
+    throw new Error('The approver was allowed to be the requester');
+  }
+  if (!approveMaintenance(created.records, created.record.id, 'B', base).error) {
+    throw new Error('The approver name was not required');
+  }
+
+  const approved = approveMaintenance(created.records, created.record.id, 'Bob', new Date(baseMs + 60_000));
+  if (approved.error || !approved.record || approved.record.status !== 'Approved' || approved.record.approver !== 'Bob') {
+    throw new Error(`Valid approval failed: ${approved.error}`);
+  }
+  if (!approved.record.approvedAt || !approved.record.decidedAt) {
+    throw new Error('Approval did not record its decision timestamps');
+  }
+  if (!findActiveApproval(approved.records, '02:00:00:00:00:AA', 'Connect to network', new Date(baseMs + 2 * 60_000))) {
+    throw new Error('findActiveApproval did not return the approved record');
+  }
+  if (findActiveApproval(approved.records, bssid, 'Connect to network', new Date(baseMs + 31 * 60_000))) {
+    throw new Error('findActiveApproval returned an expired approval');
+  }
+  if (!approveMaintenance(created.records, created.record.id, 'Bob', new Date(baseMs + 31 * 60_000)).error) {
+    throw new Error('An expired request was approved');
+  }
+  if (!approveMaintenance(approved.records, created.record.id, 'Carol', new Date(baseMs + 2 * 60_000)).error) {
+    throw new Error('An already-approved request was approved again');
+  }
+
+  const used = markApprovalUsed(approved.records, created.record.id, new Date(baseMs + 3 * 60_000));
+  if (used.error || !used.records[0].lastUsedAt) {
+    throw new Error('markApprovalUsed did not record lastUsedAt');
+  }
+  if (used.records[0].status !== 'Approved') {
+    throw new Error('markApprovalUsed consumed the approval');
+  }
+  if (!markApprovalUsed(created.records, created.record.id, new Date(baseMs + 3 * 60_000)).error) {
+    throw new Error('markApprovalUsed accepted a Pending record');
+  }
+
+  if (!rejectMaintenance(created.records, created.record.id, 'Alice', 'no', base).error) {
+    throw new Error('The requester was allowed to reject their own request');
+  }
+  const rejected = rejectMaintenance(created.records, created.record.id, 'Bob', 'Missing change ticket', base);
+  if (rejected.error || !rejected.record || rejected.record.status !== 'Rejected' || rejected.record.decisionNote !== 'Missing change ticket') {
+    throw new Error(`Valid rejection failed: ${rejected.error}`);
+  }
+  if (!rejectMaintenance(rejected.records, created.record.id, 'Carol', '', base).error) {
+    throw new Error('An already-rejected request was rejected again');
+  }
+  if (findActiveApproval(rejected.records, bssid)) {
+    throw new Error('A rejected request still granted an active approval');
+  }
+
+  const revoked = revokeMaintenance(approved.records, created.record.id, new Date(baseMs + 4 * 60_000));
+  if (revoked.error || revoked.record?.status !== 'Revoked') {
+    throw new Error(`Valid revocation failed: ${revoked.error}`);
+  }
+  if (findActiveApproval(revoked.records, bssid, 'Connect to network', new Date(baseMs + 5 * 60_000))) {
+    throw new Error('A revoked approval still granted access');
+  }
+  if (!revokeMaintenance(revoked.records, created.record.id, base).error) {
+    throw new Error('An already-revoked request was revoked again');
+  }
+
+  let many = created.records;
+  for (let index = 1; index < 5; index++) {
+    const next = createMaintenanceRequest(many, { ...request, requester: `Requester ${index}` }, base);
+    if (next.error) throw new Error(`Request ${index} failed: ${next.error}`);
+    many = next.records;
+  }
+  if (!createMaintenanceRequest(many, { ...request, requester: 'Requester 6' }, base).error) {
+    throw new Error('createMaintenanceRequest exceeded the active-per-BSSID cap');
+  }
+  if (getApprovalsForBssid(many, '0200000000AA').length !== 5 || countActiveApprovals(many, base) !== 5) {
+    throw new Error('Approval lookup or active counting is incorrect');
+  }
+
+  const expiredRaw = [{
+    ...created.record,
+    id: 'stale-1',
+    requestedAt: new Date(baseMs - 40 * 24 * 60 * 60 * 1000).toISOString(),
+    expiresAt: new Date(baseMs - 40 * 24 * 60 * 60 * 1000 + 30 * 60_000).toISOString()
+  }, {
+    ...created.record,
+    id: 'stale-1',
+    requestedAt: new Date(baseMs - 40 * 24 * 60 * 60 * 1000).toISOString(),
+    expiresAt: new Date(baseMs - 40 * 24 * 60 * 60 * 1000 + 30 * 60_000).toISOString()
+  }];
+  const normalized = normalizeMaintenanceApprovals(expiredRaw, base);
+  if (normalized.length !== 2 || normalized[0].id === normalized[1].id || normalized[0].status !== 'Expired') {
+    throw new Error('Normalization did not regenerate duplicate IDs or expire stale Pending records');
+  }
+
+  const pruned = createMaintenanceRequest(normalized, { ...request, requester: 'Dana' }, base);
+  if (pruned.error || pruned.records.length !== 1) {
+    throw new Error(`Terminal records were not pruned after 30 days: ${pruned.error}`);
+  }
+  if (!pruned.records[0].id.startsWith('MAINT-')) {
+    throw new Error('Pruning retained the stale records instead of the new request');
   }
 });
 

@@ -350,6 +350,37 @@ export interface EnterpriseScope {
   assessmentId: string;
 }
 
+export type MaintenanceAction = 'Connect to network';
+export type MaintenanceApprovalStatus = 'Pending' | 'Approved' | 'Rejected' | 'Expired' | 'Revoked';
+
+export interface MaintenanceApprovalRecord {
+  id: string;
+  action: MaintenanceAction;
+  bssid: string;
+  ssid: string;
+  adapterId: string;
+  requester: string;
+  approver: string;
+  justification: string;
+  requestedAt: string;
+  approvedAt?: string;
+  expiresAt: string;
+  status: MaintenanceApprovalStatus;
+  decidedAt?: string;
+  decisionNote?: string;
+  lastUsedAt?: string;
+}
+
+export interface MaintenanceRequestInput {
+  action: MaintenanceAction;
+  bssid: string;
+  ssid: string;
+  adapterId?: string;
+  requester: string;
+  justification: string;
+  durationMinutes: number;
+}
+
 export interface AuditProject {
   id: string;
   name: string;

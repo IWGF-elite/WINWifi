@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AccessPoint, HandshakeInfo, SecurityIssue, DataSourceProfile } from '../types';
+import { AccessPoint, HandshakeInfo, SecurityIssue, DataSourceProfile, MaintenanceApprovalRecord } from '../types';
 import { 
   ShieldAlert, 
   ShieldCheck, 
@@ -20,10 +20,18 @@ import {
   HelpCircle,
   Settings,
   Eye,
-  EyeOff
+  EyeOff,
+  KeyRound,
+  Clock,
+  CheckCircle2
 } from 'lucide-react';
 import { AIAdvisor } from '../services/aiAdvisor';
 import { NativeBridgeClient } from '../services/bridgeClient';
+import {
+  MAINTENANCE_DURATIONS,
+  findActiveApproval,
+  getApprovalsForBssid
+} from '../services/maintenanceApproval';
 
 interface NetworkDetailPanelProps {
   ap: AccessPoint | null;
@@ -34,6 +42,9 @@ interface NetworkDetailPanelProps {
   onOpenCaptureGuide?: () => void;
   onOpenImport?: () => void;
   onConnect?: (ap: AccessPoint, password: string, confirmed: boolean) => Promise<string>;
+  maintenanceApprovals?: MaintenanceApprovalRecord[];
+  onRequestMaintenance?: (ap: AccessPoint, requester: string, justification: string, durationMinutes: number) => Promise<void>;
+  onApproveMaintenance?: (id: string, approver: string) => Promise<void>;
 }
 
 export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
@@ -45,6 +56,9 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   onOpenCaptureGuide,
   onOpenImport,
   onConnect,
+  maintenanceApprovals,
+  onRequestMaintenance,
+  onApproveMaintenance,
 }) => {
   const [copiedHashcat, setCopiedHashcat] = useState(false);
   const [copiedBssid, setCopiedBssid] = useState(false);
@@ -55,6 +69,13 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   const [authorizationConfirmed, setAuthorizationConfirmed] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState('');
   const [history, setHistory] = useState<any[]>([]);
+  const [requesterName, setRequesterName] = useState('');
+  const [justification, setJustification] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState(30);
+  const [inlineApprover, setInlineApprover] = useState('');
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState('');
+  const [maintenanceError, setMaintenanceError] = useState('');
 
   useEffect(() => {
     if (dataSourceProfile !== 'LIVE_WINDOWS' || !ap?.bssid) return;
@@ -64,6 +85,43 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   }, [ap?.bssid, dataSourceProfile]);
 
   if (!ap) return null;
+
+  const approvalsForAp = getApprovalsForBssid(maintenanceApprovals ?? [], ap.bssid);
+  const activeApproval = findActiveApproval(maintenanceApprovals ?? [], ap.bssid);
+  const pendingApproval = approvalsForAp.find(record =>
+    record.status === 'Pending' && Date.parse(record.expiresAt) > Date.now()) ?? null;
+
+  const handleRequestApproval = async () => {
+    if (!onRequestMaintenance) return;
+    setMaintenanceBusy(true);
+    setMaintenanceError('');
+    setMaintenanceMessage('');
+    try {
+      await onRequestMaintenance(ap, requesterName, justification, durationMinutes);
+      setMaintenanceMessage('Request recorded. A different analyst must approve it before Connect is enabled.');
+      setJustification('');
+    } catch (error: any) {
+      setMaintenanceError(error?.message || 'The maintenance request could not be created.');
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  };
+
+  const handleInlineApprove = async () => {
+    if (!onApproveMaintenance || !pendingApproval) return;
+    setMaintenanceBusy(true);
+    setMaintenanceError('');
+    setMaintenanceMessage('');
+    try {
+      await onApproveMaintenance(pendingApproval.id, inlineApprover);
+      setMaintenanceMessage('Approval recorded. Connect is unlocked for this BSSID until the window expires.');
+      setInlineApprover('');
+    } catch (error: any) {
+      setMaintenanceError(error?.message || 'The maintenance approval could not be recorded.');
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  };
 
   const aiAdvisor = AIAdvisor.getInstance();
   const postureExplanation = aiAdvisor.explainAccessPointPosture(ap);
@@ -84,13 +142,18 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
   const handleConnect = async () => {
     if (!onConnect) return;
+    if (!activeApproval) {
+      setConnectionMessage('Connection blocked: an active maintenance approval is required for this BSSID.');
+      return;
+    }
     const profileAction = password
       ? 'create or update a Windows WLAN profile using the password you entered'
       : 'use an existing Windows WLAN profile';
     const approved = window.confirm(
       `Connect this PC to "${ap.ssid || '[hidden network]'}" (${ap.bssid})?\n\n` +
       `Windows will ${profileAction} and attempt an association on the selected adapter. ` +
-      'WinWiFi does not store the password. Only continue if you own or are authorized to test this network.'
+      'WinWiFi does not store the password. Only continue if you own or are authorized to test this network.\n\n' +
+      `Maintenance approval ${activeApproval.id} was granted by ${activeApproval.approver} and expires ${new Date(activeApproval.expiresAt).toLocaleString()}.`
     );
     if (!approved) return;
     setConnectionMessage('Requesting Windows connection…');
@@ -195,12 +258,112 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
       {/* Content Grid */}
       <div className="p-4 space-y-5 overflow-y-auto max-h-[580px] text-xs">
+        <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-slate-100 flex items-center gap-1.5"><KeyRound className="h-4 w-4 text-amber-400" /> Connect Maintenance Approval</h3>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Connecting is an active action. It requires a time-boxed approval from a second person for this exact BSSID.
+              </p>
+            </div>
+          </div>
+
+          {activeApproval ? (
+            <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-[11px] text-emerald-200">
+              <div className="flex items-center gap-1.5 font-semibold"><CheckCircle2 className="h-3.5 w-3.5" /> Active approval {activeApproval.id}</div>
+              <div className="mt-1 text-emerald-300/90">
+                Approved by {activeApproval.approver} · expires {new Date(activeApproval.expiresAt).toLocaleString()}
+                {activeApproval.lastUsedAt ? ` · last used ${new Date(activeApproval.lastUsedAt).toLocaleString()}` : ''}
+              </div>
+            </div>
+          ) : pendingApproval ? (
+            <div className="mt-3 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
+              <div className="flex items-center gap-1.5 font-semibold"><Clock className="h-3.5 w-3.5" /> Awaiting a second person</div>
+              <p className="text-amber-200/90">
+                Request {pendingApproval.id} by {pendingApproval.requester}. Justification: {pendingApproval.justification}
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={inlineApprover}
+                  onChange={event => setInlineApprover(event.target.value)}
+                  placeholder="Approving analyst name"
+                  aria-label="Approving analyst name"
+                  className="min-w-0 flex-1 rounded border border-amber-500/40 bg-slate-950 px-2.5 py-1.5 text-slate-100 outline-none focus:border-amber-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleInlineApprove()}
+                  disabled={inlineApprover.trim().length < 2 || maintenanceBusy || !onApproveMaintenance}
+                  className="rounded bg-emerald-600 px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {maintenanceBusy ? 'Recording…' : 'Approve for this BSSID'}
+                </button>
+              </div>
+              <p className="text-[10px] text-amber-200/70">The approver must be a different person from {pendingApproval.requester}. Rejection is available in Settings → Maintenance Approvals.</p>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2">
+              <p className="text-[11px] text-slate-400">
+                Requesting an approval does not connect anything. Nothing is sent to Windows until an approval exists and you confirm the connection prompt.
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Requester</span>
+                  <input
+                    value={requesterName}
+                    onChange={event => setRequesterName(event.target.value)}
+                    placeholder="Your analyst name"
+                    className="w-full rounded border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-slate-100 outline-none focus:border-blue-500"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Window duration</span>
+                  <select
+                    value={durationMinutes}
+                    onChange={event => setDurationMinutes(Number(event.target.value))}
+                    className="w-full rounded border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-slate-100 outline-none focus:border-blue-500"
+                  >
+                    {MAINTENANCE_DURATIONS.map(minutes => (
+                      <option key={minutes} value={minutes}>{minutes} minutes</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <label className="block space-y-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Justification</span>
+                <textarea
+                  value={justification}
+                  onChange={event => setJustification(event.target.value)}
+                  rows={2}
+                  placeholder="Why is this connection needed, and what evidence covers it? (minimum 10 characters)"
+                  className="w-full rounded border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-slate-100 outline-none focus:border-blue-500"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleRequestApproval()}
+                disabled={maintenanceBusy || !onRequestMaintenance}
+                className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 font-semibold text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {maintenanceBusy ? 'Recording…' : 'Request approval'}
+              </button>
+            </div>
+          )}
+
+          {maintenanceMessage && <p className="mt-2 text-[11px] text-emerald-300" role="status">{maintenanceMessage}</p>}
+          {maintenanceError && <p className="mt-2 text-[11px] text-rose-300" role="alert">{maintenanceError}</p>}
+          <p className="mt-2 text-[10px] text-slate-500">
+            Approvals are stored in this project's local workspace. The native bridge independently checks its authorization flag and BSSID allow-list.
+          </p>
+        </section>
+
         {dataSourceProfile === 'LIVE_WINDOWS' && onConnect && (
           <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`}>
             <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-100">Connect on Windows</h3><p className="mt-1 text-[11px] text-slate-400">Uses the Windows WLAN profile store. WinWiFi does not retain the password.</p></div><Radio className="h-4 w-4 text-blue-400" /></div>
             <div className="mt-3 flex overflow-hidden rounded border border-slate-700 bg-slate-950 focus-within:border-blue-500"><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} placeholder="Password, or leave empty for an existing Windows profile" className="min-w-0 flex-1 bg-transparent px-2.5 py-2 text-slate-100 outline-none" /><button type="button" onClick={() => setShowPassword(value => !value)} className="border-l border-slate-700 px-2.5 text-slate-300 hover:bg-slate-800" title={showPassword ? 'Hide password' : 'Show password'} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
             <label className="mt-2 flex items-start gap-2 text-[11px] text-slate-300"><input type="checkbox" checked={authorizationConfirmed} onChange={event => setAuthorizationConfirmed(event.target.checked)} className="mt-0.5" />I own or am authorized to connect to {ap.ssid} ({ap.bssid}) in this audit scope.</label>
-            <button onClick={handleConnect} disabled={!authorizationConfirmed} className="mt-3 rounded bg-blue-600 px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Connect</button>
+            <button onClick={handleConnect} disabled={!authorizationConfirmed || !activeApproval} className="mt-3 rounded bg-blue-600 px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Connect</button>
+            {!activeApproval && <p className="mt-2 text-[11px] text-amber-300">An active maintenance approval for {ap.bssid} is required before Connect is enabled.</p>}
             {connectionMessage && <p className="mt-2 text-[11px] text-slate-300" role="status">{connectionMessage}</p>}
           </section>
         )}

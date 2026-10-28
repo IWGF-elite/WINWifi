@@ -34,6 +34,9 @@ files without any native backend.
   and Rogue assets are evaluated against their assigned policy, registry
   approval status is enforced (Unapproved/Rogue fail, review states warn), and
   results appear in both Settings and the network inventory
+- Two-person, time-boxed maintenance approval (15–480 minutes) scoped to one
+  BSSID; a connect action stays disabled until a different analyst approves the
+  request, every attempt is logged, and approvals are revocable
 - Connect to networks directly from the app (using a password you provide)
 
 ## Defensive scope
