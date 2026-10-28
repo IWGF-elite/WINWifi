@@ -648,7 +648,7 @@ namespace WinWiFi.ViewModels
                     Timestamp = hs.CapturedAt,
                     AssociatedIncidentId = "N/A",
                     Sha256Checksum = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(hs.HashcatFormat ?? hs.ApBssid))).Substring(0, 16),
-                    PayloadSummary = $"ANonce: {(hs.AnonCe != null && hs.AnonCe.Length >= 16 ? hs.AnonCe.Substring(0, 16) : hs.AnonCe)}... MIC: {hs.MicHex}"
+                    PayloadSummary = $"ANonce: {(hs.Anonce != null && hs.Anonce.Length >= 16 ? hs.Anonce.Substring(0, 16) : hs.Anonce)}... MIC: {hs.MicHex}"
                 });
             }
         }

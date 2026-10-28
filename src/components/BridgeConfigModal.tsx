@@ -453,14 +453,14 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
               <span>How to Start the Native Bridge on Windows</span>
             </h4>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              Run either the WinWiFi Windows GUI application or the headless bridge daemon on your Windows machine:
+              Run either the WinWiFi Windows GUI application or the headless bridge daemon on your Windows machine, or use start-dev.ps1 to launch the bridge and the dev server together:
             </p>
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-slate-800 font-mono text-[11px]">
-                <span className="text-emerald-400 select-all">dotnet run --project WinWiFi.Desktop -- --bridge --port 38989</span>
+                <span className="text-emerald-400 select-all">dotnet run --project WinWiFi.CLI -- --bridge --port 38989</span>
                 <button
-                  onClick={() => copyToClipboard('dotnet run --project WinWiFi.Desktop -- --bridge --port 38989', 'cmd-1')}
+                  onClick={() => copyToClipboard('dotnet run --project WinWiFi.CLI -- --bridge --port 38989', 'cmd-1')}
                   className="p-1 rounded text-slate-400 hover:text-white"
                 >
                   {copiedCmd === 'cmd-1' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
@@ -468,15 +468,40 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
               </div>
 
               <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-slate-800 font-mono text-[11px]">
-                <span className="text-blue-400 select-all">winwifi-cli.exe --bridge --port 38989</span>
+                <span className="text-emerald-400 select-all">dotnet run --project WinWiFi.Desktop -- --bridge --port 38989</span>
                 <button
-                  onClick={() => copyToClipboard('winwifi-cli.exe --bridge --port 38989', 'cmd-2')}
+                  onClick={() => copyToClipboard('dotnet run --project WinWiFi.Desktop -- --bridge --port 38989', 'cmd-1b')}
+                  className="p-1 rounded text-slate-400 hover:text-white"
+                >
+                  {copiedCmd === 'cmd-1b' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-slate-800 font-mono text-[11px]">
+                <span className="text-blue-400 select-all">powershell -ExecutionPolicy Bypass -File .\start-dev.ps1</span>
+                <button
+                  onClick={() => copyToClipboard('powershell -ExecutionPolicy Bypass -File .\\start-dev.ps1', 'cmd-2')}
                   className="p-1 rounded text-slate-400 hover:text-white"
                 >
                   {copiedCmd === 'cmd-2' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               </div>
+
+              <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-slate-800 font-mono text-[11px]">
+                <span className="text-blue-400 select-all">winwifi-cli.exe --bridge --port 38989</span>
+                <button
+                  onClick={() => copyToClipboard('winwifi-cli.exe --bridge --port 38989', 'cmd-3')}
+                  className="p-1 rounded text-slate-400 hover:text-white"
+                >
+                  {copiedCmd === 'cmd-3' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
+
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Browser sessions need the per-launch token: open the dashboard from WinWiFi (the token is appended to the URL),
+              use start-dev.ps1, or set VITE_WINWIFI_BRIDGE_TOKEN from %LOCALAPPDATA%\WinWiFi\bridge.token before starting the dev server.
+            </p>
           </div>
         </div>
 

@@ -4,8 +4,12 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using WinWiFi.Data;
@@ -1153,6 +1157,95 @@ SSID 2 : Guest-Open
                 }
             }));
 
+            results.Add(await RunTestAsync("T22-BRIDGE-HEALTH", "Bridge Health Endpoint & Per-Launch Token Enforcement", async () =>
+            {
+                // The health check must be reachable on loopback only, reject
+                // every request without the per-launch token, and answer "online"
+                // once the token is presented. A stub Wi-Fi service with zero
+                // adapters keeps the test off the real radio.
+                int port;
+                var probe = new TcpListener(IPAddress.Loopback, 0);
+                probe.Start();
+                port = ((IPEndPoint)probe.LocalEndpoint).Port;
+                probe.Stop();
+
+                string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_bridge_{Guid.NewGuid():N}.db");
+                using var wifi = new StubWifiService();
+                using var storage = new SqliteStorageService(tempDb);
+                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage);
+                await bridge.StartAsync();
+                try
+                {
+                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+
+                    var anonymous = await http.GetAsync($"http://127.0.0.1:{port}/api/health");
+                    string anonymousBody = await anonymous.Content.ReadAsStringAsync();
+                    if (anonymous.StatusCode != HttpStatusCode.Unauthorized || !anonymousBody.Contains("token", StringComparison.OrdinalIgnoreCase))
+                        throw new Exception($"Health check without a token returned {(int)anonymous.StatusCode} instead of 401 with a token hint.");
+
+                    using var wrong = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/api/health");
+                    wrong.Headers.Add("X-WinWiFi-Token", new string('0', 64));
+                    if ((await http.SendAsync(wrong)).StatusCode != HttpStatusCode.Unauthorized)
+                        throw new Exception("Health check accepted an incorrect bridge token.");
+
+                    using var valid = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/api/health");
+                    valid.Headers.Add("X-WinWiFi-Token", bridge.AuthToken);
+                    var healthy = await http.SendAsync(valid);
+                    string healthJson = await healthy.Content.ReadAsStringAsync();
+                    if (healthy.StatusCode != HttpStatusCode.OK || !healthJson.Contains("\"online\"", StringComparison.Ordinal) || !healthJson.Contains("\"authRequired\":true", StringComparison.Ordinal))
+                        throw new Exception($"Health check with the per-launch token did not report an authenticated online status: {(int)healthy.StatusCode}.");
+
+                    return $"Health endpoint answered 401 without a token, 401 with a wrong token, and 200 (online, authRequired) with the per-launch token on 127.0.0.1:{port}.";
+                }
+                finally
+                {
+                    await bridge.StopAsync();
+                    SqliteStorageService.ReleaseAllPools();
+                    try
+                    {
+                        if (File.Exists(tempDb)) File.Delete(tempDb);
+                        if (File.Exists(tempDb + "-wal")) File.Delete(tempDb + "-wal");
+                        if (File.Exists(tempDb + "-shm")) File.Delete(tempDb + "-shm");
+                    }
+                    catch { }
+                }
+            }));
+
+            results.Add(RunTest("T23-HANDSHAKE-JSON", "Handshake JSON Contract Has No Colliding Property Names", () =>
+            {
+                // The bridge serializes with case-insensitive camelCase; the old
+                // AnonCe/Anonce alias pair made every payload containing a
+                // handshake fail with a property-name collision (HTTP 500).
+                var options = new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    PropertyNameCaseInsensitive = true
+                };
+                var ap = new AccessPoint
+                {
+                    Bssid = "AA:BB:CC:DD:EE:FF",
+                    Ssid = "Collision Check",
+                    Handshake = new HandshakeInfo
+                    {
+                        ApBssid = "AA:BB:CC:DD:EE:FF",
+                        IsComplete = true,
+                        Anonce = "anonce-value",
+                        Snonce = "snounce-value",
+                        MicHex = "mic"
+                    }
+                };
+                string json = System.Text.Json.JsonSerializer.Serialize(new List<AccessPoint> { ap }, options);
+                if (!json.Contains("\"anonce\"", StringComparison.Ordinal) ||
+                    !json.Contains("\"snonce\"", StringComparison.Ordinal) ||
+                    json.Contains("anonCe", StringComparison.Ordinal) ||
+                    json.Contains("snonCe", StringComparison.Ordinal))
+                    throw new Exception("Handshake nonces did not serialize to single camelCase fields: " + json);
+                var roundTrip = System.Text.Json.JsonSerializer.Deserialize<List<AccessPoint>>(json, options);
+                if (roundTrip is null || roundTrip[0].Handshake?.Anonce != "anonce-value" || roundTrip[0].Handshake?.Snonce != "snounce-value")
+                    throw new Exception("Handshake JSON did not round-trip the nonce fields.");
+                return "Serialized an access point with handshake material under the bridge's JSON options without property-name collisions.";
+            }));
+
             return results;
         }
 
@@ -1286,6 +1379,22 @@ SSID 2 : Guest-Open
             writer.Write((uint)packet.Length);
             writer.Write(packet);
             return stream.ToArray();
+        }
+
+        // Zero-adapter Wi-Fi service so bridge tests never touch the real radio.
+        private sealed class StubWifiService : INativeWifiService
+        {
+            public ScanTelemetryState CurrentState => ScanTelemetryState.Idle;
+            public event Action<ScanDiagnostics>? DiagnosticsUpdated { add { } remove { } }
+            public event Action<ScanBatchResult>? ScanCompleted { add { } remove { } }
+            public Task<List<WifiAdapter>> GetAdaptersAsync() => Task.FromResult(new List<WifiAdapter>());
+            public Task<List<AccessPoint>> ScanNetworksAsync(string adapterId, CancellationToken cancellationToken = default) => Task.FromResult(new List<AccessPoint>());
+            public Task<ScanBatchResult> ScanNetworksExAsync(string adapterId, CancellationToken cancellationToken = default) => Task.FromResult<ScanBatchResult>(null!);
+            public Task<Dictionary<string, ScanBatchResult>> ScanAllAdaptersAsync(CancellationToken cancellationToken = default) => Task.FromResult(new Dictionary<string, ScanBatchResult>());
+            public Task TriggerHardwareScanAsync(string adapterId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+            public bool IsNativeWifiAvailable() => false;
+            public ScanDiagnostics GetDiagnostics() => new ScanDiagnostics();
+            public void Dispose() { }
         }
 
         private TestResultItem RunTest(string id, string name, Func<string> action)

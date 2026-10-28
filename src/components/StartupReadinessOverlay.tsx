@@ -1,6 +1,7 @@
 import React from 'react';
-import { CheckCircle2, CircleDashed, ShieldCheck, TriangleAlert, Wifi } from 'lucide-react';
+import { CheckCircle2, CircleDashed, KeyRound, RefreshCw, ShieldCheck, TriangleAlert, Wifi } from 'lucide-react';
 import { BridgeConnectionState, DataSourceProfile, WifiAdapter } from '../types';
+import { BridgeErrorKind, BRIDGE_RETRY_NOTE, bridgeStatusView } from '../services/bridgeStatus';
 import { WinWiFiLogo } from './WinWiFiLogo';
 
 interface StartupReadinessOverlayProps {
@@ -9,17 +10,20 @@ interface StartupReadinessOverlayProps {
   dataSourceProfile: DataSourceProfile;
   accessPointCount: number;
   error?: string;
+  errorKind?: BridgeErrorKind | null;
+  onRetry?: () => void;
   onContinue: () => void;
 }
 
 export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = ({
-  bridgeState, adapters, dataSourceProfile, accessPointCount, error, onContinue
+  bridgeState, adapters, dataSourceProfile, accessPointCount, error, errorKind, onRetry, onContinue
 }) => {
   const bridgeReady = bridgeState === 'CONNECTED';
   const scanReady = dataSourceProfile === 'LIVE_WINDOWS' && accessPointCount >= 0;
   const failed = bridgeState === 'ERROR';
+  const view = bridgeStatusView(bridgeState, errorKind ?? null);
   const steps = [
-    { label: 'Checking Windows WLAN bridge', detail: bridgeReady ? 'Local bridge connected' : failed ? 'Bridge unavailable on this PC' : 'Connecting to localhost', done: bridgeReady, failed },
+    { label: 'Checking Windows WLAN bridge', detail: bridgeReady ? 'Local bridge connected' : failed ? view.label : 'Connecting to localhost', done: bridgeReady, failed },
     { label: 'Detecting Wi-Fi adapters', detail: adapters.length ? `${adapters.length} adapter${adapters.length === 1 ? '' : 's'} available` : bridgeReady ? 'No adapter reported by Windows' : 'Waiting for bridge', done: bridgeReady && adapters.length > 0, failed: bridgeReady && adapters.length === 0 },
     { label: 'Loading authorized audit history', detail: 'Local project data is ready', done: true, failed: false },
     { label: 'Starting live telemetry', detail: scanReady ? `${accessPointCount} current BSSID${accessPointCount === 1 ? '' : 's'} observed` : bridgeReady ? 'Waiting for first WLAN observation' : 'Requires local bridge', done: scanReady, failed: false }
@@ -42,7 +46,27 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
               <div className="min-w-0"><p className="text-sm font-semibold text-slate-200">{step.label}</p><p className="mt-0.5 text-xs text-slate-500">{step.detail}</p></div>
             </div>)}
           </div>
-          {failed && <div className="mt-5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">{error || 'The local bridge could not be reached. You can continue to review imported data or configure the bridge.'}</div>}
+          {failed && (
+            <div className="mt-5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+              <div className="flex items-center gap-1.5 font-semibold">
+                {errorKind === 'token' ? <KeyRound className="h-3.5 w-3.5 text-amber-400" /> : <TriangleAlert className="h-3.5 w-3.5 text-amber-400" />}
+                <span>{view.title}.</span>
+              </div>
+              <p className="mt-1 leading-relaxed">{view.description}</p>
+              {error && <p className="mt-1 text-[11px] opacity-70">{error}</p>}
+              <div className="mt-2.5 flex items-center gap-2">
+                {onRetry && (
+                  <button
+                    onClick={onRetry}
+                    className="flex items-center gap-1.5 rounded-lg bg-amber-500/20 px-3 py-1.5 font-semibold text-amber-100 transition hover:bg-amber-500/30"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> Retry connection
+                  </button>
+                )}
+                <span className="text-[11px] opacity-70">{BRIDGE_RETRY_NOTE}</span>
+              </div>
+            </div>
+          )}
           <div className="mt-7 flex items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-xs text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-400" /> Passive, defensive, authorized-scope workflow</div>
             {(ready || failed) && <button onClick={onContinue} className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-sky-400">{ready ? 'Open Command Center' : 'Continue to desktop'}</button>}

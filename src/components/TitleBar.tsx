@@ -24,6 +24,7 @@ import {
   Database
 } from 'lucide-react';
 import { DataSourceProfile, BridgeConnectionState, WifiAdapter } from '../types';
+import { BridgeErrorKind, bridgeStatusView } from '../services/bridgeStatus';
 import { WinWiFiLogo } from './WinWiFiLogo';
 
 interface TitleBarProps {
@@ -36,6 +37,7 @@ interface TitleBarProps {
   onToggleScan: () => void;
   onRefreshScan?: () => void;
   bridgeState?: BridgeConnectionState;
+  bridgeErrorKind?: BridgeErrorKind | null;
   onOpenBridgeConfig?: () => void;
   projectName: string;
   onOpenReport: () => void;
@@ -59,6 +61,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onToggleScan,
   onRefreshScan,
   bridgeState = 'DISCONNECTED',
+  bridgeErrorKind = null,
   onOpenBridgeConfig,
   projectName,
   onOpenReport,
@@ -234,22 +237,27 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           </span>
 
           {/* Native Bridge Pill */}
-          {onOpenBridgeConfig && (
-            <button
-              onClick={onOpenBridgeConfig}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] font-mono transition-colors ${
-                bridgeState === 'CONNECTED'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                  : bridgeState === 'CONNECTING'
-                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
-                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700/50'
-              }`}
-              title="Windows Bridge Daemon (Click to Configure)"
-            >
-              <Server className="w-3 h-3" />
-              <span>Bridge: {bridgeState}</span>
-            </button>
-          )}
+          {onOpenBridgeConfig && (() => {
+            const view = bridgeStatusView(bridgeState, bridgeErrorKind);
+            return (
+              <button
+                onClick={onOpenBridgeConfig}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] font-mono transition-colors ${
+                  view.tone === 'ok'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                    : view.tone === 'busy'
+                      ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
+                      : view.tone === 'bad'
+                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700/50'
+                }`}
+                title={`Windows Bridge Daemon (${view.label}) — click to configure`}
+              >
+                <Server className="w-3 h-3" />
+                <span>Bridge: {view.label}</span>
+              </button>
+            );
+          })()}
 
           {/* Import Data Button */}
           <button

@@ -1,14 +1,15 @@
-import { 
-  AccessPoint, 
-  WifiAdapter, 
-  BridgeConfig, 
-  BridgeConnectionState, 
-  BridgeHealthStatus, 
-  BridgeScanStatus, 
+import {
+  AccessPoint,
+  WifiAdapter,
+  BridgeConfig,
+  BridgeConnectionState,
+  BridgeHealthStatus,
+  BridgeScanStatus,
   BridgeDiagnostics,
   DataOrigin,
   EnterpriseAssetRecord
 } from '../types';
+import { BridgeErrorKind, classifyBridgeError } from './bridgeStatus';
 
 export type BridgeEventCallback<T> = (data: T) => void;
 
@@ -26,12 +27,13 @@ export class NativeBridgeClient {
   private config: BridgeConfig = { ...DEFAULT_CONFIG };
   private state: BridgeConnectionState = 'DISCONNECTED';
   private lastError: string | null = null;
+  private lastErrorKind: BridgeErrorKind | null = null;
   private eventSource: EventSource | null = null;
   private pollTimer: any = null;
   private reconnectTimer: any = null;
   private sseRetryTimer: any = null;
   private reconnectAttempts = 0;
-  private maxReconnectDelayMs = 15000;
+  private maxReconnectDelayMs = 5000;
   private projectId = '';
   private projectName = '';
   private token = '';
@@ -243,6 +245,10 @@ export class NativeBridgeClient {
     return this.lastError;
   }
 
+  public getErrorKind(): BridgeErrorKind | null {
+    return this.lastErrorKind;
+  }
+
   public onStateChange(cb: BridgeEventCallback<BridgeConnectionState>): () => void {
     this.stateListeners.add(cb);
     return () => this.stateListeners.delete(cb);
@@ -273,14 +279,19 @@ export class NativeBridgeClient {
     return () => this.errorListeners.delete(cb);
   }
 
-  private setState(newState: BridgeConnectionState, errorMsg?: string): void {
+  private setState(newState: BridgeConnectionState, errorMsg?: string, errorKind?: BridgeErrorKind): void {
     this.state = newState;
     if (errorMsg !== undefined) {
       this.lastError = errorMsg;
+      // Prefer the caller's kind: it is derived from the raw transport error,
+      // while errorMsg may be a reworded message that no longer matches the
+      // classification patterns.
+      this.lastErrorKind = errorKind ?? (errorMsg ? classifyBridgeError(errorMsg) : null);
       if (errorMsg) {
         this.errorListeners.forEach(cb => cb(errorMsg));
       }
     }
+    if (newState === 'CONNECTED') this.lastErrorKind = null;
     this.stateListeners.forEach(cb => cb(this.state));
   }
 
@@ -466,6 +477,7 @@ export class NativeBridgeClient {
       this.reconnectAttempts = 0;
       this.setState('CONNECTED');
       this.lastError = null;
+      this.lastErrorKind = null;
 
       // Start SSE stream for real-time observation updates
       this.initEventSource();
@@ -481,7 +493,7 @@ export class NativeBridgeClient {
       return true;
     } catch (err: any) {
       const msg = this.formatBridgeError(err);
-      this.setState('ERROR', msg);
+      this.setState('ERROR', msg, classifyBridgeError(err.message || String(err)));
 
       if (this.config.autoReconnect) {
         this.scheduleReconnect();
@@ -504,11 +516,24 @@ export class NativeBridgeClient {
     this.setState('DISCONNECTED');
   }
 
+  /** Immediate reconnect attempt from the UI's Retry button; resets the backoff. */
+  public retryNow(): Promise<boolean> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
+    if (this.state === 'CONNECTING') return Promise.resolve(false);
+    return this.connect();
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
     this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), this.maxReconnectDelayMs);
+    // Keep the retry cadence at a few seconds so a bridge started moments later
+    // is picked up quickly instead of after a 15s backoff tail.
+    const delay = Math.min(1000 * this.reconnectAttempts, this.maxReconnectDelayMs);
     console.log(`[BridgeClient] Reconnecting to ${this.config.baseUrl} in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})...`);
 
     this.reconnectTimer = setTimeout(() => {
@@ -660,19 +685,20 @@ export class NativeBridgeClient {
 
   private formatBridgeError(err: any): string {
     const raw = err.message || String(err);
-    if (raw.includes('401') || /unauthori[sz]ed/i.test(raw)) {
+    const kind = classifyBridgeError(raw);
+    if (kind === 'token') {
       return (
         'The local WinWiFi bridge rejected this dashboard session. ' +
         'Launch the dashboard from WinWiFi, or set VITE_WINWIFI_BRIDGE_TOKEN from %LOCALAPPDATA%\\WinWiFi\\bridge.token for development.'
       );
     }
-    if (raw.includes('Failed to fetch') || raw.includes('NetworkError') || raw.includes('ECONNREFUSED')) {
+    if (kind === 'offline') {
       return (
-        `Unable to reach WinWiFi Native Bridge at ${this.config.baseUrl}. ` +
-        `Ensure WinWiFi.Desktop or WinWiFi.CLI daemon is running on your Windows host with '--bridge --port 38989'.`
+        'Native bridge offline. Start WinWiFi.Desktop or run the CLI with --bridge --port 38989 ' +
+        '(dotnet run --project WinWiFi.CLI -- --bridge --port 38989), or use start-dev.ps1 to launch both together.'
       );
     }
-    if (raw.includes('timeout')) {
+    if (kind === 'timeout') {
       return `Connection to ${this.config.baseUrl} timed out. The native scanner process may be busy or unresponsive.`;
     }
     return raw;

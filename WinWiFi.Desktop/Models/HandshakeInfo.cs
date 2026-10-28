@@ -15,11 +15,11 @@ namespace WinWiFi.Models
         public bool MicVerified { get; set; }
         public string CapturedAt { get; set; } = string.Empty;
 
-        // Cryptographic fields
-        public string? AnonCe { get; set; }
-        public string? SnonCe { get; set; }
-        public string? Anonce { get => AnonCe; set => AnonCe = value; }
-        public string? Snonce { get => SnonCe; set => SnonCe = value; }
+        // Cryptographic fields. Exactly one property per JSON name: the bridge
+        // serializes with case-insensitive camelCase, so old PascalCase aliases
+        // (AnonCe/SnonCe) collided with these and broke /api/networks.
+        public string? Anonce { get; set; }
+        public string? Snonce { get; set; }
         public string? MicHex { get; set; }
         public ulong ReplayCounter { get; set; }
         public int KeyDescriptorVersion { get; set; } = 2; // 1 = RC4, 2 = HMAC-SHA1/AES, 3 = AES-128-CMAC (WPA3/802.11w)
