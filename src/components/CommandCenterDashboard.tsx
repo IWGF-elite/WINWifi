@@ -30,7 +30,6 @@ interface CommandCenterDashboardProps {
   securityChanges: SecurityChange[];
   uiMode: UIMode;
   isScanning: boolean;
-  currentChannel: number;
   dataSourceProfile?: DataSourceProfile;
   bridgeState?: BridgeConnectionState;
   lastLiveDataAt?: number | null;
@@ -46,7 +45,6 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
   securityChanges = [],
   uiMode,
   isScanning = false,
-  currentChannel = 6,
   dataSourceProfile = 'BENCHMARK',
   bridgeState = 'DISCONNECTED',
   lastLiveDataAt = null,
@@ -174,15 +172,13 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
             <div className="px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-700/60 text-xs">
               <div className="text-slate-400 flex items-center gap-1.5 font-medium">
                 <Radio className="w-3.5 h-3.5 text-blue-400" />
-                {dataSourceProfile === 'LIVE_WINDOWS' ? 'Windows WLAN Scan' : dataSourceProfile === 'REAL_PCAP' ? 'PCAP Forensics' : dataSourceProfile === 'REAL_NETSH' ? 'Netsh Import' : dataSourceProfile === 'TRAINING' || dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB' ? 'Training Lab' : 'No live observation'}
+                {dataSourceProfile === 'LIVE_WINDOWS' ? 'Windows WLAN Scan' : dataSourceProfile === 'REAL_PCAP' ? 'Capture Import' : dataSourceProfile === 'REAL_NETSH' ? 'Netsh Import' : 'No live observation'}
               </div>
               <div className="text-slate-200 font-bold mt-0.5">
-                {dataSourceProfile === 'LIVE_WINDOWS' 
+                {dataSourceProfile === 'LIVE_WINDOWS'
                   ? (isScanning ? 'Windows WLAN Discovery' : 'Scan Paused')
                   : dataSourceProfile === 'REAL_PCAP'
-                    ? 'Static Capture Ingested'
-                  : dataSourceProfile === 'TRAINING' || dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB'
-                    ? isScanning ? `Ch ${currentChannel} (Simulated)` : 'Training paused'
+                    ? 'Capture Ingested'
                     : dataSourceProfile === 'REAL_NETSH' ? 'Imported snapshot' : 'Waiting for data'}
               </div>
             </div>

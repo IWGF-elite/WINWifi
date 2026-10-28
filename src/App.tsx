@@ -172,7 +172,6 @@ export default function App() {
   const [selectedAdapterId, setSelectedAdapterId] = useState<string>('');
   const [connectedBssid, setConnectedBssid] = useState<string>('');
   const [isScanning, setIsScanning] = useState<boolean>(false);
-  const [currentChannel, setCurrentChannel] = useState<number>(6);
 
   // Network Data & Packets
   const [accessPoints, setAccessPoints] = useState<AccessPoint[]>(() => {
@@ -859,45 +858,6 @@ export default function App() {
     setLogs((prev) => [log, ...prev]);
   };
 
-  // Channel hopping loop: only active in BENCHMARK / OFFLINE_LAB training simulation
-  useEffect(() => {
-    if (!isScanning) return;
-    if (dataSourceProfile !== 'BENCHMARK' && dataSourceProfile !== 'OFFLINE_LAB') {
-      // In LIVE_WINDOWS or REAL_PCAP mode, we do NOT simulate fake channel hopping
-      return;
-    }
-
-    const hoppingChannels = [1, 6, 11, 36, 40, 48, 149, 69];
-    let hopIndex = 0;
-
-    const interval = setInterval(() => {
-      hopIndex = (hopIndex + 1) % hoppingChannels.length;
-      const nextCh = hoppingChannels[hopIndex];
-      setCurrentChannel(nextCh);
-
-      if (dataSourceProfile === 'BENCHMARK') {
-        setAccessPoints((prev) =>
-          prev.map((ap) => {
-            if (ap.channel === nextCh || Math.random() > 0.5) {
-              const jitter = (Math.random() - 0.5) * 1.5;
-              const newRssi = Math.min(-30, Math.max(-92, Math.round(ap.rssi + jitter)));
-              return {
-                ...ap,
-                rssi: newRssi,
-                beaconCount: ap.beaconCount + Math.floor(Math.random() * 5 + 1),
-                dataPacketCount: ap.dataPacketCount + Math.floor(Math.random() * 12 + 2),
-                lastSeen: 'Just now',
-              };
-            }
-            return ap;
-          })
-        );
-      }
-    }, 1800);
-
-    return () => clearInterval(interval);
-  }, [isScanning, dataSourceProfile]);
-
   // Capture Handshake: Strictly gated to Training Labs only. Never fakes handshakes in production mode.
   const handleCaptureHandshake = useCallback((ap: AccessPoint) => {
     if (dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'REAL_PCAP') {
@@ -1421,7 +1381,6 @@ export default function App() {
         onOpenSelfTest={() => setShowSelfTestModal(true)}
         onOpenImport={() => setShowImportModal(true)}
         onOpenArchitecture={() => setShowArchitectureModal(true)}
-        currentChannel={currentChannel}
         adapters={adapters}
         selectedAdapterId={selectedAdapterId}
         onSelectAdapter={setSelectedAdapterId}
@@ -1705,7 +1664,6 @@ export default function App() {
             securityChanges={securityChanges}
             uiMode={uiMode}
             isScanning={isScanning}
-            currentChannel={currentChannel}
             dataSourceProfile={dataSourceProfile}
             bridgeState={bridgeState}
             lastLiveDataAt={lastLiveDataAt}

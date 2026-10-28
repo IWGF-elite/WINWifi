@@ -4,7 +4,6 @@ import {
   ShieldCheck, 
   Play, 
   Square, 
-  RotateCw, 
   Sun, 
   Moon, 
   Maximize2,
@@ -44,7 +43,6 @@ interface TitleBarProps {
   onOpenSelfTest: () => void;
   onOpenImport: () => void;
   onOpenArchitecture: () => void;
-  currentChannel: number;
   adapters: WifiAdapter[];
   selectedAdapterId: string;
   onSelectAdapter: (adapterId: string) => void;
@@ -68,7 +66,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onOpenSelfTest,
   onOpenImport,
   onOpenArchitecture,
-  currentChannel,
   adapters,
   selectedAdapterId,
   onSelectAdapter,
@@ -272,12 +269,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             <Upload className="w-3 h-3 text-blue-400" />
             <span>Import</span>
           </button>
-
-          {/* Current Hopping Channel Status */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 font-mono text-[11px]">
-            <RotateCw className={`w-3 h-3 ${isScanning ? 'animate-spin' : ''}`} />
-            <span>CH: {currentChannel}</span>
-          </div>
         </div>
 
         {/* Right Tools: Self-Test & Reports */}
