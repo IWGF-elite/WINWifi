@@ -495,6 +495,10 @@ namespace WinWiFi.Services
                         await WriteJsonAsync(response, await LocalNetworkActivityService.GetAsync(_cts?.Token ?? CancellationToken.None));
                         break;
 
+                    case "/api/network-doctor/check":
+                        await HandleNetworkDoctorCheckAsync(request, response);
+                        break;
+
                     case "/api/local-network/scan":
                         await HandleLocalNetworkScanAsync(request, response);
                         break;
@@ -1467,6 +1471,90 @@ namespace WinWiFi.Services
                 await WriteJsonAsync(response, native.GetConnectionStatus(adapterId));
             else
                 await WriteJsonAsync(response, new NetworkConnectionStatus { State = "Unavailable", Reason = "Native Windows WLAN service is unavailable." });
+        }
+
+        private async Task HandleNetworkDoctorCheckAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to check the currently connected Wi-Fi network.");
+                return;
+            }
+
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "Select a project before saving a network fingerprint.");
+                return;
+            }
+
+            NetworkDoctorRequest checkRequest;
+            try { checkRequest = await JsonSerializer.DeserializeAsync<NetworkDoctorRequest>(request.InputStream, JsonOptions) ?? new(); }
+            catch (JsonException)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_request", "Network check request is invalid.");
+                return;
+            }
+
+            string adapterId = string.IsNullOrWhiteSpace(checkRequest.AdapterId) ? _activeAdapterId ?? string.Empty : checkRequest.AdapterId;
+            if (_wifiService is not NativeWifiService native)
+            {
+                await WriteJsonAsync(response, new NetworkDoctorCheck { Status = "Unavailable", Reason = "Windows WLAN connection status is unavailable in this runtime." });
+                return;
+            }
+
+            var connection = native.GetConnectionStatus(adapterId);
+            if (!string.Equals(connection.State, "Connected", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonAsync(response, new NetworkDoctorCheck { Status = "Unavailable", AdapterId = adapterId, Reason = string.IsNullOrWhiteSpace(connection.Reason) ? "Connect to a Wi-Fi network before checking it." : connection.Reason });
+                return;
+            }
+
+            var network = LocalNetworkService.GetNetworkInfo(adapterId);
+            var connectedAp = _latestAccessPoints.FirstOrDefault(ap => string.Equals(ap.Bssid, connection.Bssid, StringComparison.OrdinalIgnoreCase));
+            var approvedAssets = (await _storage.GetEnterpriseAssetsAsync(projectId, _cts?.Token ?? CancellationToken.None))
+                .Where(asset => string.Equals(asset.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+                .Select(asset => asset.MacAddress)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var scopedAps = _latestAccessPoints
+                .Where(ap => ap.IsActiveInCurrentScan && (string.Equals(ap.ApprovedStatus, "Approved", StringComparison.OrdinalIgnoreCase)
+                    || approvedAssets.Contains(ap.Bssid)
+                    || string.Equals(ap.Bssid, connection.Bssid, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            if (connectedAp is not null && scopedAps.All(ap => !string.Equals(ap.Bssid, connectedAp.Bssid, StringComparison.OrdinalIgnoreCase)))
+                scopedAps.Add(connectedAp);
+
+            NetworkFingerprint? baseline = await _storage.GetNetworkFingerprintAsync(projectId, connection.Ssid, _cts?.Token ?? CancellationToken.None);
+            var check = await NetworkDoctorService.CheckAsync(adapterId, connection, network, connectedAp, scopedAps, baseline,
+                checkRequest.ReplaceFingerprint, _cts?.Token ?? CancellationToken.None);
+
+            bool recordable = check.FingerprintVerdict == "first-seen" || check.FingerprintVerdict == "matches"
+                || checkRequest.ReplaceFingerprint && check.FingerprintVerdict == "changed";
+            if (recordable && !string.IsNullOrWhiteSpace(check.Security) && check.Security != "Unknown" && !string.IsNullOrWhiteSpace(check.GatewayIp))
+            {
+                string now = DateTimeOffset.UtcNow.ToString("O");
+                await _storage.SaveNetworkFingerprintAsync(new NetworkFingerprint
+                {
+                    ProjectId = projectId,
+                    Ssid = check.Ssid,
+                    Bssid = check.Bssid,
+                    GatewayIp = check.GatewayIp,
+                    GatewayMac = check.GatewayMac,
+                    DnsServers = check.DnsServers,
+                    Security = check.Security,
+                    Cipher = check.Cipher,
+                    AuthorizedApPattern = scopedAps.Where(ap => string.Equals(ap.Ssid, connection.Ssid, StringComparison.Ordinal))
+                        .Select(ap => ap.Bssid).Append(connection.Bssid).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList(),
+                    FirstSeenAt = baseline?.FirstSeenAt ?? now,
+                    LastSeenAt = now
+                }, _cts?.Token ?? CancellationToken.None);
+                if (checkRequest.ReplaceFingerprint && check.FingerprintVerdict == "changed")
+                    NetworkDoctorService.MarkFingerprintReplaced(check);
+            }
+            await WriteJsonAsync(response, check);
         }
 
         private sealed class ConnectRequest

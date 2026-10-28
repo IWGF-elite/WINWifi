@@ -85,6 +85,41 @@ export interface LocalNetworkInfo {
   devices?: LanDeviceRecord[];
 }
 
+export interface NetworkDoctorFinding {
+  name: string;
+  status: 'PASS' | 'WARN' | 'ALERT' | 'INFO';
+  evidence: string;
+}
+
+export interface NetworkDoctorCheck {
+  status: 'Complete' | 'Partial' | 'Unavailable';
+  reason: string;
+  checkedAt: string;
+  adapterId: string;
+  ssid: string;
+  bssid: string;
+  signal: string;
+  signalDbm?: number | null;
+  channel?: number | null;
+  band: string;
+  security: string;
+  cipher: string;
+  gatewayIp: string;
+  gatewayMac: string;
+  dnsServers: string[];
+  gatewayMedianMs?: number | null;
+  gatewayPacketLossPercent?: number | null;
+  dnsLookupMs?: number | null;
+  authorizedNeighborCount: number;
+  observedAuthorizedChannels: number[];
+  recommendedObservedChannel?: number | null;
+  fingerprintVerdict: 'first-seen' | 'matches' | 'changed' | 'unavailable';
+  fingerprintDifferences: string[];
+  safeChecks: NetworkDoctorFinding[];
+  conclusion: string;
+  recommendation: string;
+}
+
 export interface LocalConnectionRecord {
   protocol: 'TCP' | 'UDP' | string;
   localAddress: string;
@@ -492,6 +527,7 @@ export interface AuditLog {
 
 export type ActiveTab = 
   | 'dashboard'
+  | 'doctor'
   | 'discover'
   | 'discovery'
   | 'networks'

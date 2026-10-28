@@ -96,6 +96,7 @@ import { ImportModal } from './components/ImportModal';
 import { BridgeConfigModal } from './components/BridgeConfigModal';
 import { LogConsole } from './components/LogConsole';
 import { NativeDesktopPanel } from './components/NativeDesktopPanel';
+import { NetworkDoctorPanel } from './components/NetworkDoctorPanel';
 import { StartupReadinessOverlay } from './components/StartupReadinessOverlay';
 import { BridgeErrorKind, bridgeStatusView, isEmbeddedDashboard } from './services/bridgeStatus';
 
@@ -1449,6 +1450,18 @@ export default function App() {
             </span>
           </button>
 
+          <button
+            onClick={() => handleNavigate('doctor')}
+            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'doctor'
+                ? 'border-cyan-500 text-cyan-300 bg-cyan-500/5'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>Network Doctor</span>
+          </button>
+
           {/* TAB 3: Clients */}
           <button
             onClick={() => handleNavigate('clients')}
@@ -1670,6 +1683,14 @@ export default function App() {
             }}
           />
 
+        )}
+
+        {activeTab === 'doctor' && (
+          <NetworkDoctorPanel
+            adapterId={selectedAdapterId}
+            bridgeConnected={bridgeState === 'CONNECTED'}
+            isDarkMode={isDarkMode}
+          />
         )}
 
         {/* TAB 2: Asset Inventory / Networks / Discovery */}

@@ -260,6 +260,21 @@ namespace WinWiFi.Data
                     imported_at TEXT NOT NULL,
                     PRIMARY KEY (import_id, storage_key)
                 );
+
+                CREATE TABLE IF NOT EXISTS network_fingerprints (
+                    project_id TEXT NOT NULL,
+                    ssid TEXT NOT NULL,
+                    bssid TEXT NOT NULL,
+                    gateway_ip TEXT NOT NULL,
+                    gateway_mac TEXT NOT NULL DEFAULT '',
+                    dns_servers_json TEXT NOT NULL,
+                    security TEXT NOT NULL,
+                    cipher TEXT NOT NULL,
+                    authorized_ap_pattern_json TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    PRIMARY KEY (project_id, ssid)
+                );
             ";
 
             using var cmd = new SqliteCommand(ddl, conn);
@@ -1245,6 +1260,72 @@ namespace WinWiFi.Data
             }
 
             return list;
+        }
+
+        public async Task<NetworkFingerprint?> GetNetworkFingerprintAsync(string projectId, string ssid, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            if (string.IsNullOrWhiteSpace(ssid)) return null;
+            using var conn = await OpenConnectionAsync(cancellationToken);
+            using var cmd = new SqliteCommand(@"SELECT project_id, ssid, bssid, gateway_ip, gateway_mac, dns_servers_json, security, cipher, authorized_ap_pattern_json, first_seen_at, last_seen_at
+                FROM network_fingerprints WHERE project_id = @pid AND ssid = @ssid COLLATE NOCASE LIMIT 1;", conn);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@ssid", ssid);
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)) return null;
+            return new NetworkFingerprint
+            {
+                ProjectId = reader.GetString(0),
+                Ssid = reader.GetString(1),
+                Bssid = reader.GetString(2),
+                GatewayIp = reader.GetString(3),
+                GatewayMac = reader.GetString(4),
+                DnsServers = JsonSerializer.Deserialize<List<string>>(reader.GetString(5)) ?? new List<string>(),
+                Security = reader.GetString(6),
+                Cipher = reader.GetString(7),
+                AuthorizedApPattern = JsonSerializer.Deserialize<List<string>>(reader.GetString(8)) ?? new List<string>(),
+                FirstSeenAt = reader.GetString(9),
+                LastSeenAt = reader.GetString(10)
+            };
+        }
+
+        public async Task SaveNetworkFingerprintAsync(NetworkFingerprint fingerprint, CancellationToken cancellationToken = default)
+        {
+            if (fingerprint is null) throw new ArgumentNullException(nameof(fingerprint));
+            ValidateProjectId(fingerprint.ProjectId);
+            if (string.IsNullOrWhiteSpace(fingerprint.Ssid) || string.IsNullOrWhiteSpace(fingerprint.Bssid)
+                || string.IsNullOrWhiteSpace(fingerprint.GatewayIp) || string.IsNullOrWhiteSpace(fingerprint.Security)
+                || string.Equals(fingerprint.Security, "Unknown", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("A fingerprint requires live SSID, BSSID, gateway, and security values.", nameof(fingerprint));
+
+            await _writeLock.WaitAsync(cancellationToken);
+            try
+            {
+                using var conn = await OpenConnectionAsync(cancellationToken);
+                using var cmd = new SqliteCommand(@"INSERT INTO network_fingerprints
+                    (project_id, ssid, bssid, gateway_ip, gateway_mac, dns_servers_json, security, cipher, authorized_ap_pattern_json, first_seen_at, last_seen_at)
+                    VALUES (@pid, @ssid, @bssid, @gateway, @gatewayMac, @dns, @security, @cipher, @pattern, @firstSeen, @lastSeen)
+                    ON CONFLICT(project_id, ssid) DO UPDATE SET bssid = excluded.bssid, gateway_ip = excluded.gateway_ip,
+                    gateway_mac = excluded.gateway_mac, dns_servers_json = excluded.dns_servers_json, security = excluded.security,
+                    cipher = excluded.cipher, authorized_ap_pattern_json = excluded.authorized_ap_pattern_json,
+                    last_seen_at = excluded.last_seen_at;", conn);
+                cmd.Parameters.AddWithValue("@pid", fingerprint.ProjectId);
+                cmd.Parameters.AddWithValue("@ssid", fingerprint.Ssid);
+                cmd.Parameters.AddWithValue("@bssid", fingerprint.Bssid);
+                cmd.Parameters.AddWithValue("@gateway", fingerprint.GatewayIp);
+                cmd.Parameters.AddWithValue("@gatewayMac", fingerprint.GatewayMac ?? string.Empty);
+                cmd.Parameters.AddWithValue("@dns", JsonSerializer.Serialize(fingerprint.DnsServers));
+                cmd.Parameters.AddWithValue("@security", fingerprint.Security);
+                cmd.Parameters.AddWithValue("@cipher", fingerprint.Cipher ?? string.Empty);
+                cmd.Parameters.AddWithValue("@pattern", JsonSerializer.Serialize(fingerprint.AuthorizedApPattern));
+                cmd.Parameters.AddWithValue("@firstSeen", string.IsNullOrWhiteSpace(fingerprint.FirstSeenAt) ? DateTimeOffset.UtcNow.ToString("O") : fingerprint.FirstSeenAt);
+                cmd.Parameters.AddWithValue("@lastSeen", string.IsNullOrWhiteSpace(fingerprint.LastSeenAt) ? DateTimeOffset.UtcNow.ToString("O") : fingerprint.LastSeenAt);
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
         }
 
         public async Task SaveHandshakeAsync(string projectId, HandshakeInfo hs, CancellationToken cancellationToken = default)

@@ -10,7 +10,8 @@ import {
   EnterpriseAssetRecord,
   SecurityChange,
   LocalNetworkInfo,
-  LocalNetworkActivity
+  LocalNetworkActivity,
+  NetworkDoctorCheck
 } from '../types';
 import {
   BridgeErrorKind,
@@ -424,6 +425,13 @@ export class NativeBridgeClient {
   public async getLocalNetworkInfo(adapterId: string): Promise<LocalNetworkInfo> {
     const query = adapterId ? '?adapterId=' + encodeURIComponent(adapterId) : '';
     return await this.request<LocalNetworkInfo>('/api/local-network' + query);
+  }
+
+  public async checkCurrentNetwork(adapterId: string, replaceFingerprint = false): Promise<NetworkDoctorCheck> {
+    return await this.request<NetworkDoctorCheck>('/api/network-doctor/check', {
+      method: 'POST',
+      body: JSON.stringify({ adapterId, replaceFingerprint })
+    }, 12_000);
   }
 
   public async getLocalNetworkActivity(): Promise<LocalNetworkActivity> {

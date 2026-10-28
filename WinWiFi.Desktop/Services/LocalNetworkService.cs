@@ -69,7 +69,7 @@ public static class LocalNetworkService
             .Where(reply => reply is not null && IsDiscoverableHost(reply.Address.ToString(), result.LocalIp, result.PrefixLength))
             .ToDictionary(reply => reply!.Address.ToString(), reply => reply!, StringComparer.OrdinalIgnoreCase);
         await Task.Delay(150, cancellationToken).ConfigureAwait(false);
-        var neighbors = ReadArpTable()
+        var neighbors = ReadArpTableSnapshot()
             .Where(pair => IsDiscoverableHost(pair.Key, result.LocalIp, result.PrefixLength)
                 && !IsNonUnicastMac(pair.Value))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
@@ -242,7 +242,7 @@ public static class LocalNetworkService
             || (first & 0x01) != 0;
     }
 
-    private static Dictionary<string, string> ReadArpTable()
+    public static Dictionary<string, string> ReadArpTableSnapshot()
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
