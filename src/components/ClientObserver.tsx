@@ -20,6 +20,7 @@ import { AccessPoint, ClientDevice, UIMode, DataSourceProfile } from '../types';
 
 interface ClientObserverProps {
   accessPoints: AccessPoint[];
+  stationClients?: ClientDevice[];
   uiMode: UIMode;
   dataSourceProfile?: DataSourceProfile;
   onSelectAP: (ap: AccessPoint) => void;
@@ -28,6 +29,7 @@ interface ClientObserverProps {
 
 export const ClientObserver: React.FC<ClientObserverProps> = ({
   accessPoints = [],
+  stationClients = [],
   uiMode,
   dataSourceProfile = 'BENCHMARK',
   onSelectAP,
@@ -48,6 +50,23 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
       });
     });
   });
+
+  // Station records dissected by the native analyzer are joined to the access
+  // point they were seen on; an unproven association still belongs in the table,
+  // it just has no access point row to join against.
+  const merged = new Map<string, ClientDevice & { apSsid: string; apChannel: number; apSecurity: string }>();
+  (stationClients || []).forEach(cl => {
+    const key = `${cl.macAddress}|${cl.apBssid}`;
+    if (allClients.some(row => `${row.macAddress}|${row.apBssid}` === key)) return;
+    const ap = (accessPoints || []).find(candidate => candidate.bssid?.toLowerCase() === cl.apBssid?.toLowerCase());
+    merged.set(key, {
+      ...cl,
+      apSsid: ap?.ssid || cl.connectedSsid || (cl.apBssid ? '' : 'Not observed'),
+      apChannel: ap?.channel ?? 0,
+      apSecurity: ap?.security || ''
+    });
+  });
+  allClients.push(...merged.values());
 
   // Filter clients
   const filtered = allClients.filter(cl => {
@@ -272,7 +291,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
 
                     {/* Rate */}
                     <td className="py-3 px-4 font-mono text-slate-300">
-                      {cl.dataRateMbps} Mbps
+                      {cl.dataRateMbps > 0 ? `${cl.dataRateMbps} Mbps` : '—'}
                     </td>
 
                     {/* Packets */}

@@ -14,6 +14,7 @@ import {
   stableIncidentId,
   countOpenIncidents
 } from '../src/services/incidentMapper';
+import { mapStationClients } from '../src/services/stationClientMapper';
 import {
   applyAssetsToAccessPoints,
   mergeAssetLists,
@@ -1778,6 +1779,72 @@ runTest('T30: Native Configuration Drift Reaches The Dashboard', () => {
   } finally {
     client.disconnect();
     (globalThis as any).EventSource = NativeEventSource;
+  }
+});
+
+runTest('T31: Station Client Records Map Without Inventing An Association', () => {
+  const native = {
+    macAddress: '02:11:22:33:44:55',
+    vendor: 'Test Fixture',
+    associatedApBssid: '10:20:30:40:50:60',
+    associatedApSsid: 'Client Fixture',
+    rssi: -65,
+    channel: 6,
+    packetsCount: 3,
+    firstSeen: '2026-10-28 09:00:00',
+    lastSeen: '2026-10-28 09:00:05',
+    probeRequests: ['Office'],
+    isAssociated: true,
+    isRandomizedMac: true
+  };
+  const mapped = mapStationClients([native]);
+  if (mapped.length !== 1) throw new Error('A native station record was not mapped to a client device');
+  const client = mapped[0];
+  if (client.apBssid !== '10:20:30:40:50:60' || client.connectedSsid !== 'Client Fixture') {
+    throw new Error(`The native association was not carried over: ${JSON.stringify(client)}`);
+  }
+  if (client.packetsSent !== 3 || client.probes[0] !== 'Office' || !client.isAssociated) {
+    throw new Error(`Native counters and probes were dropped: ${JSON.stringify(client)}`);
+  }
+  // Windows never reports a station rate, so nothing may claim one.
+  if (client.dataRateMbps !== 0) throw new Error('A station data rate was invented for a record that has none');
+
+  // A scan-derived placeholder is not an association and must not render as one.
+  const unproven = mapStationClients([{
+    macAddress: '02:AA:AA:AA:AA:AA',
+    vendor: 'Unknown',
+    associatedApBssid: 'Not Associated (Active Probing)',
+    associatedApSsid: 'Searching...',
+    packetsCount: 1,
+    isAssociated: false
+  }]);
+  if (unproven.length !== 1 || unproven[0].apBssid !== '' || unproven[0].isAssociated) {
+    throw new Error(`An unproven association was rendered as a real access point: ${JSON.stringify(unproven[0])}`);
+  }
+
+  const dashboardShaped = mapStationClients([{
+    macAddress: '02:BB:BB:BB:BB:BB',
+    vendor: 'Unknown',
+    apBssid: '10:20:30:40:50:60',
+    connectedSsid: 'Client Fixture',
+    rssi: -50,
+    packetsSent: 7,
+    dataRateMbps: 0,
+    lastSeen: '2026-10-28 09:00:05',
+    probes: []
+  }]);
+  if (dashboardShaped.length !== 1 || dashboardShaped[0].packetsSent !== 7) {
+    throw new Error('The dashboard-shaped client record no longer round-trips through the mapper');
+  }
+
+  const duplicated = mapStationClients([native, { ...native }, { macAddress: 'not-a-mac' }]);
+  if (duplicated.length !== 1) {
+    throw new Error(`Duplicate and malformed station records were not collapsed to one client (${duplicated.length})`);
+  }
+
+  const appSource = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf8');
+  if (!/bridgeClient\.onClients\(/.test(appSource)) {
+    throw new Error('App.tsx never subscribes to the native station client stream');
   }
 });
 

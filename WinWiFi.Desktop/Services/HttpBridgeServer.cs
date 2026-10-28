@@ -559,7 +559,7 @@ namespace WinWiFi.Services
                         break;
 
                     case "/api/clients":
-                        await HandleClientsAsync(response);
+                        await HandleClientsAsync(request, response);
                         break;
 
                     case "/api/connection/status":
@@ -1205,8 +1205,33 @@ namespace WinWiFi.Services
             await WriteJsonAsync(response, _latestDrifts);
         }
 
-        private async Task HandleClientsAsync(HttpListenerResponse response)
+        private async Task HandleClientsAsync(HttpListenerRequest request, HttpListenerResponse response)
         {
+            // Station records dissected from a capture imported during this
+            // session come first; after a restart the same records are read back
+            // from the project database. Windows' WLAN API lists BSS entries only
+            // and never names the stations attached to a neighbouring access
+            // point, so an empty list means no capture was dissected, not no client.
+            if (_latestClients.Count > 0)
+            {
+                await WriteJsonAsync(response, _latestClients);
+                return;
+            }
+
+            string? projectId = ResolveProjectId(request);
+            if (_storage is not null && projectId is not null)
+            {
+                try
+                {
+                    await WriteJsonAsync(response, await _storage.GetStationClientsAsync(projectId));
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[HttpBridgeServer] Station client read error: {ex.Message}");
+                }
+            }
+
             await WriteJsonAsync(response, _latestClients);
         }
 
@@ -1341,6 +1366,24 @@ namespace WinWiFi.Services
             // Analyze without the live baseline so an import cannot alter drift
             // comparisons for the next real scan.
             result.Incidents = _securityAnalyzer.AnalyzeThreatsAndDrift(result.AccessPoints, null).Findings;
+
+            // The dissected capture is the only real source of station records, so
+            // they are held for this session and saved to the project database to
+            // survive a restart.
+            _latestClients = result.Clients;
+            string? stationProjectId = ResolveProjectId(request);
+            if (_storage is not null && stationProjectId is not null && result.Clients.Count > 0)
+            {
+                try
+                {
+                    await _storage.SaveStationClientsAsync(stationProjectId, result.Clients);
+                }
+                catch (Exception dbEx)
+                {
+                    Console.WriteLine($"[HttpBridgeServer] Station client save error: {dbEx.Message}");
+                }
+            }
+
             await WriteJsonAsync(response, result);
         }
 

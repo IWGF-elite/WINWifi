@@ -203,6 +203,9 @@ export class NativeBridgeClient {
       // EventSource cannot send custom headers; reconnect the stream so the
       // projectId query parameter matches the newly selected workspace.
       this.initEventSource();
+      void this.refreshSnapshots().catch((err) => {
+        console.warn('[BridgeClient] Snapshot refresh after a project switch failed:', messageOf(err));
+      });
     }
   }
 
@@ -524,18 +527,7 @@ export class NativeBridgeClient {
       // Initial network fetch
       const networks = await this.getNetworks();
       this.networkListeners.forEach(cb => cb(networks));
-      const incidents = await this.getIncidents();
-      this.incidentListeners.forEach(cb => cb(Array.isArray(incidents) ? incidents : []));
-      // Drift is an additive surface: a bridge that predates /api/drifts must
-      // not fail the whole connection, so its absence leaves the last state.
-      try {
-        const drifts = await this.getDrifts();
-        if (Array.isArray(drifts)) this.driftListeners.forEach(cb => cb(drifts));
-      } catch {
-        console.warn('[BridgeClient] Bridge does not expose /api/drifts; change intelligence stays idle.');
-      }
-      const clients = await this.getClients();
-      this.clientListeners.forEach(cb => cb(Array.isArray(clients) ? clients : []));
+      await this.refreshSnapshots();
 
       return true;
     } catch (err: any) {
@@ -547,6 +539,28 @@ export class NativeBridgeClient {
       }
       return false;
     }
+  }
+
+  /**
+   * Pulls the snapshots the SSE stream does not carry. Used on connect and after
+   * a project switch, otherwise station clients would keep showing the records of
+   * the workspace that was selected when the bridge was first reached.
+   */
+  private async refreshSnapshots(): Promise<void> {
+    const incidents = await this.getIncidents();
+    this.incidentListeners.forEach(cb => cb(Array.isArray(incidents) ? incidents : []));
+
+    // Drift is an additive surface: a bridge that predates /api/drifts must not
+    // fail the whole connection, so its absence leaves the last state.
+    try {
+      const drifts = await this.getDrifts();
+      if (Array.isArray(drifts)) this.driftListeners.forEach(cb => cb(drifts));
+    } catch {
+      console.warn('[BridgeClient] Bridge does not expose /api/drifts; change intelligence stays idle.');
+    }
+
+    const clients = await this.getClients();
+    this.clientListeners.forEach(cb => cb(Array.isArray(clients) ? clients : []));
   }
 
   public disconnect(): void {

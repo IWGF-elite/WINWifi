@@ -1457,6 +1457,64 @@ SSID 2 : Guest-Open
                 }
             }));
 
+            results.Add(await RunTestAsync("T29-CLIENT-SURFACE", "Dissected Station Clients Reach The Bridge And Database", async () =>
+            {
+                // Windows names BSS entries only, so a capture is the real source
+                // for associated stations. The dissected records used to be
+                // returned to the caller and then dropped: /api/clients was
+                // structurally empty and nothing was ever saved.
+                int port;
+                var probe = new TcpListener(IPAddress.Loopback, 0);
+                probe.Start();
+                port = ((IPEndPoint)probe.LocalEndpoint).Port;
+                probe.Stop();
+
+                string stationMac = "02:11:22:33:44:55";
+                string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_clients_{Guid.NewGuid():N}.db");
+                string projectId = $"drift-test-{Guid.NewGuid():N}";
+                using var wifi = new StubWifiService();
+                using var storage = new SqliteStorageService(tempDb);
+                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage);
+                await bridge.StartAsync();
+
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                try
+                {
+                    byte[] capture = BuildPcap(127, BuildBeaconFrame("Client Fixture"), BuildAssociatedDataFrame(stationMac));
+                    using var importRequest = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{port}/api/import/pcap?projectId={projectId}");
+                    importRequest.Headers.Add("X-WinWiFi-Token", bridge.AuthToken);
+                    importRequest.Content = new ByteArrayContent(capture);
+                    var importResponse = await http.SendAsync(importRequest);
+                    string importJson = await importResponse.Content.ReadAsStringAsync();
+                    if (importResponse.StatusCode != HttpStatusCode.OK)
+                        throw new Exception($"PCAP import returned {(int)importResponse.StatusCode}: {importJson}");
+
+                    using var clientsRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/api/clients?projectId={projectId}");
+                    clientsRequest.Headers.Add("X-WinWiFi-Token", bridge.AuthToken);
+                    var clientsResponse = await http.SendAsync(clientsRequest);
+                    string clientsJson = await clientsResponse.Content.ReadAsStringAsync();
+                    if (clientsResponse.StatusCode != HttpStatusCode.OK)
+                        throw new Exception($"GET /api/clients returned {(int)clientsResponse.StatusCode} instead of 200.");
+                    if (!clientsJson.Contains(stationMac, StringComparison.OrdinalIgnoreCase))
+                        throw new Exception($"The station dissected from the capture was not served by /api/clients: {clientsJson}");
+                    if (!clientsJson.Contains("\"isAssociated\":true", StringComparison.Ordinal))
+                        throw new Exception($"The served station lost the association proven in the capture: {clientsJson}");
+
+                    var stored = await storage.GetStationClientsAsync(projectId);
+                    var saved = stored.FirstOrDefault(c => c.MacAddress.Equals(stationMac, StringComparison.OrdinalIgnoreCase));
+                    if (saved is null)
+                        throw new Exception("The dissected station was never saved to the project database, so it would vanish on the next launch.");
+
+                    return $"/api/clients served {saved.MacAddress} associated to {saved.AssociatedApBssid} and the same record was read back from the project database.";
+                }
+                finally
+                {
+                    await bridge.StopAsync();
+                    SqliteStorageService.ReleaseAllPools();
+                    TryDeleteScanDatabase(tempDb);
+                }
+            }));
+
             return results;
         }
 
@@ -1553,6 +1611,32 @@ SSID 2 : Guest-Open
             writer.Write((byte)0);
             writer.Write((byte)ssidBytes.Length);
             writer.Write(ssidBytes);
+            return stream.ToArray();
+        }
+
+        /// <summary>
+        /// One 802.11 data frame sent by a station to the beacon's BSSID (ToDS),
+        /// which is the only evidence that proves an association on Windows.
+        /// </summary>
+        private static byte[] BuildAssociatedDataFrame(string stationMac)
+        {
+            byte[] mac = stationMac.Split(':').Select(part => Convert.ToByte(part, 16)).ToArray();
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((ushort)8);
+            writer.Write(0u);
+            // Frame control: type 2 (Data) with the ToDS bit set.
+            writer.Write((byte)0x08);
+            writer.Write((byte)0x01);
+            writer.Write((ushort)0);
+            writer.Write(new byte[] { 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 });
+            writer.Write(mac);
+            writer.Write(new byte[] { 0x10, 0x20, 0x30, 0x40, 0x50, 0x70 });
+            writer.Write((ushort)0);
+            writer.Write(new byte[] { 0xAA, 0xAA, 0x03, 0x00, 0x00, 0x00, 0x08, 0x00 });
+            writer.Write(new byte[8]);
             return stream.ToArray();
         }
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   AccessPoint, 
+  ClientDevice,
   WifiAdapter, 
   PcapPacket, 
   AuditProject, 
@@ -32,6 +33,7 @@ import {
   reconcileLiveIncidents,
   countOpenIncidents
 } from './services/incidentMapper';
+import { mapStationClients } from './services/stationClientMapper';
 import {
   applyAssetsToAccessPoints,
   formatUtcTimestamp,
@@ -272,6 +274,7 @@ export default function App() {
   });
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(() => db.getEvidenceItems(db.getCurrentProjectId()));
   const [securityChanges, setSecurityChanges] = useState<SecurityChange[]>(() => threatEngine.getSecurityChanges());
+  const [stationClients, setStationClients] = useState<ClientDevice[]>([]);
 
   // Projects & Logs
   const [projects, setProjects] = useState<AuditProject[]>(() => db.getProjects());
@@ -474,6 +477,14 @@ export default function App() {
       if (Array.isArray(drifts)) setSecurityChanges(drifts as SecurityChange[]);
     });
 
+    // Station clients are the one surface the scan stream never carries: Windows
+    // exposes BSS entries only, so these records come from dissected captures and
+    // from the project database behind /api/clients. Subscribed before connect()
+    // so the initial snapshot reaches it.
+    const unsubClients = bridgeClient.onClients((clients) => {
+      setStationClients(mapStationClients(clients));
+    });
+
     // Establish the connection and start event/polling updates on mount.
     bridgeClient.setProject(currentProjectIdRef.current, projects.find(project => project.id === currentProjectIdRef.current)?.name);
     void bridgeClient.connect();
@@ -483,6 +494,7 @@ export default function App() {
       unsubNetworks();
       unsubIncidents();
       unsubDrifts();
+      unsubClients();
       bridgeClient.disconnect();
     };
   }, [bridgeClient, db, threatEngine, hydrateAssetsFromBridge]);
@@ -782,6 +794,7 @@ export default function App() {
       return;
     }
     const native = await bridgeClient.importPcap(file);
+    setStationClients(mapStationClients(native.clients));
     const parsed: PcapParseResult = {
       packets: native.packets || [],
       accessPoints: (native.accessPoints || []).map((ap: any) => ({
@@ -1866,6 +1879,7 @@ export default function App() {
         {activeTab === 'clients' && (
           <ClientObserver
             accessPoints={accessPoints}
+            stationClients={stationClients}
             uiMode={uiMode}
             dataSourceProfile={dataSourceProfile}
             onOpenImport={() => setShowImportModal(true)}

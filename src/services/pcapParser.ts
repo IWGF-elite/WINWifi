@@ -823,7 +823,7 @@ export class PcapService {
         apBssid,
         rssi: rssi - 4,
         packetsSent: 1,
-        dataRateMbps: 144,
+        dataRateMbps: 0,
         lastSeen: 'Just now',
         probes: [ap.ssid]
       });
