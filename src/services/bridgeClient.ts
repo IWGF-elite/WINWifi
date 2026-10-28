@@ -8,7 +8,8 @@ import {
   BridgeDiagnostics,
   DataOrigin,
   EnterpriseAssetRecord,
-  SecurityChange
+  SecurityChange,
+  LocalNetworkInfo
 } from '../types';
 import {
   BridgeErrorKind,
@@ -393,6 +394,28 @@ export class NativeBridgeClient {
    */
   public async getAdapters(): Promise<WifiAdapter[]> {
     return await this.request<WifiAdapter[]>('/api/adapters');
+  }
+
+  public async getLocalNetworkInfo(adapterId: string): Promise<LocalNetworkInfo> {
+    const query = adapterId ? '?adapterId=' + encodeURIComponent(adapterId) : '';
+    return await this.request<LocalNetworkInfo>('/api/local-network' + query);
+  }
+
+  public async getLocalNetworkDevices(adapterId: string): Promise<LocalNetworkInfo> {
+    const query = adapterId ? '?adapterId=' + encodeURIComponent(adapterId) : '';
+    return await this.request<LocalNetworkInfo>('/api/local-network/devices' + query);
+  }
+
+  public async scanLocalNetwork(adapterId: string): Promise<LocalNetworkInfo> {
+    const query = adapterId ? '?adapterId=' + encodeURIComponent(adapterId) : '';
+    return await this.request<LocalNetworkInfo>('/api/local-network/scan' + query, { method: 'POST' });
+  }
+
+  public async setLanDeviceKnown(networkId: string, ipAddress: string, isKnown: boolean): Promise<void> {
+    await this.request('/api/local-network/devices/known', {
+      method: 'POST',
+      body: JSON.stringify({ networkId, ipAddress, isKnown })
+    });
   }
 
   /**

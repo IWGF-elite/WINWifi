@@ -67,6 +67,48 @@ export interface WifiAdapter {
   npcapStatus?: 'Installed' | 'Not Installed' | 'Unknown';
 }
 
+export interface LocalNetworkInfo {
+  adapterId: string;
+  interfaceName: string;
+  networkId: string;
+  localIp: string;
+  prefixLength: number;
+  gatewayIp: string;
+  dnsServers: string[];
+  status: 'Available' | 'Unavailable';
+  reason: string;
+  scannedAt?: string;
+  devices?: LanDeviceRecord[];
+}
+
+export interface LanOpenPort {
+  port: number;
+  protocol: string;
+  service: string;
+  riskFlag: boolean;
+  riskReason: string;
+  banner: string;
+}
+
+export interface LanDeviceRecord {
+  networkId: string;
+  ipAddress: string;
+  macAddress: string;
+  vendor: string;
+  hostname: string;
+  deviceType: string;
+  evidence: string[];
+  openPorts: LanOpenPort[];
+  isOnline: boolean;
+  isNew: boolean;
+  isKnown: boolean;
+  isRandomizedMac: boolean;
+  pingTtl?: number;
+  osGuess: string;
+  firstSeen: string;
+  lastSeen: string;
+}
+
 export interface ClientDevice {
   macAddress: string;
   vendor: string;

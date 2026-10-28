@@ -231,10 +231,32 @@ namespace WinWiFi.Data
                     source TEXT,
                     message TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS lan_devices (
+                    project_id TEXT NOT NULL,
+                    network_id TEXT NOT NULL,
+                    ip_address TEXT NOT NULL,
+                    mac_address TEXT NOT NULL DEFAULT '',
+                    hostname TEXT NOT NULL DEFAULT '',
+                    vendor TEXT NOT NULL DEFAULT 'Unknown',
+                    device_type TEXT NOT NULL DEFAULT 'Unknown',
+                    evidence_json TEXT NOT NULL DEFAULT '[]',
+                    ports_json TEXT NOT NULL DEFAULT '[]',
+                    is_online INTEGER NOT NULL DEFAULT 0,
+                    is_known INTEGER NOT NULL DEFAULT 0,
+                    is_randomized_mac INTEGER NOT NULL DEFAULT 0,
+                    ping_ttl INTEGER,
+                    os_guess TEXT NOT NULL DEFAULT 'Unknown',
+                    first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (project_id, network_id, ip_address)
+                );
             ";
 
             using var cmd = new SqliteCommand(ddl, conn);
             cmd.ExecuteNonQuery();
+            EnsureColumnExists(conn, "lan_devices", "ping_ttl", "INTEGER");
+            EnsureColumnExists(conn, "lan_devices", "os_guess", "TEXT NOT NULL DEFAULT 'Unknown'");
 
             // Older installations may already have an access_points table. CREATE TABLE IF NOT EXISTS
             // does not add columns to it, so migrate newer fields in place and keep existing audit data.
@@ -744,6 +766,97 @@ namespace WinWiFi.Data
             {
                 _writeLock.Release();
             }
+        }
+
+        public async Task<List<LanDeviceRecord>> GetLanDevicesAsync(string projectId, string networkId, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            var records = new List<LanDeviceRecord>();
+            using var conn = await OpenConnectionAsync(cancellationToken);
+            using var cmd = new SqliteCommand(@"SELECT ip_address, mac_address, hostname, vendor, device_type, evidence_json, ports_json, is_online, is_known, is_randomized_mac, ping_ttl, os_guess, first_seen, last_seen
+                FROM lan_devices WHERE project_id = @pid AND network_id = @network ORDER BY is_online DESC, ip_address;", conn);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@network", networkId);
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                records.Add(new LanDeviceRecord
+                {
+                    NetworkId = networkId,
+                    IpAddress = reader.GetString(0),
+                    MacAddress = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                    Hostname = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                    Vendor = reader.IsDBNull(3) ? "Unknown" : reader.GetString(3),
+                    DeviceType = reader.IsDBNull(4) ? "Unknown" : reader.GetString(4),
+                    Evidence = reader.IsDBNull(5) ? new() : JsonSerializer.Deserialize<List<string>>(reader.GetString(5)) ?? new(),
+                    OpenPorts = reader.IsDBNull(6) ? new() : JsonSerializer.Deserialize<List<LanOpenPort>>(reader.GetString(6)) ?? new(),
+                    IsOnline = reader.GetInt32(7) != 0,
+                    IsKnown = reader.GetInt32(8) != 0,
+                    IsRandomizedMac = reader.GetInt32(9) != 0,
+                    PingTtl = reader.IsDBNull(10) ? null : reader.GetInt32(10),
+                    OsGuess = reader.IsDBNull(11) ? "Unknown" : reader.GetString(11),
+                    FirstSeen = reader.IsDBNull(12) ? "" : reader.GetString(12),
+                    LastSeen = reader.IsDBNull(13) ? "" : reader.GetString(13)
+                });
+            }
+            return records;
+        }
+
+        public async Task SaveLanDevicesAsync(string projectId, string networkId, IEnumerable<LanDeviceRecord> devices, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            await _writeLock.WaitAsync(cancellationToken);
+            try
+            {
+                using var conn = await OpenConnectionAsync(cancellationToken);
+                using var trans = conn.BeginTransaction();
+                const string sql = @"INSERT INTO lan_devices (
+                    project_id, network_id, ip_address, mac_address, hostname, vendor, device_type,
+                    evidence_json, ports_json, is_online, is_randomized_mac, ping_ttl, os_guess, first_seen, last_seen
+                ) VALUES (@pid,@network,@ip,@mac,@hostname,@vendor,@type,@evidence,@ports,@online,@randomized,@ttl,@os,@first,@last)
+                ON CONFLICT(project_id, network_id, ip_address) DO UPDATE SET
+                    mac_address=excluded.mac_address, hostname=excluded.hostname, vendor=excluded.vendor,
+                    device_type=excluded.device_type, evidence_json=excluded.evidence_json, ports_json=excluded.ports_json,
+                    is_online=excluded.is_online, is_randomized_mac=excluded.is_randomized_mac,
+                    ping_ttl=excluded.ping_ttl, os_guess=excluded.os_guess,
+                    first_seen=CASE WHEN lan_devices.first_seen='' THEN excluded.first_seen ELSE lan_devices.first_seen END,
+                    last_seen=CASE WHEN excluded.is_online=1 THEN excluded.last_seen ELSE lan_devices.last_seen END;";
+                foreach (var device in devices)
+                {
+                    if (string.IsNullOrWhiteSpace(device.IpAddress)) continue;
+                    using var cmd = new SqliteCommand(sql, conn, trans);
+                    cmd.Parameters.AddWithValue("@pid", projectId);
+                    cmd.Parameters.AddWithValue("@network", networkId);
+                    cmd.Parameters.AddWithValue("@ip", device.IpAddress);
+                    cmd.Parameters.AddWithValue("@mac", device.MacAddress ?? "");
+                    cmd.Parameters.AddWithValue("@hostname", device.Hostname ?? "");
+                    cmd.Parameters.AddWithValue("@vendor", device.Vendor ?? "Unknown");
+                    cmd.Parameters.AddWithValue("@type", device.DeviceType ?? "Unknown");
+                    cmd.Parameters.AddWithValue("@evidence", JsonSerializer.Serialize(device.Evidence));
+                    cmd.Parameters.AddWithValue("@ports", JsonSerializer.Serialize(device.OpenPorts));
+                    cmd.Parameters.AddWithValue("@online", device.IsOnline ? 1 : 0);
+                    cmd.Parameters.AddWithValue("@randomized", device.IsRandomizedMac ? 1 : 0);
+                    cmd.Parameters.AddWithValue("@ttl", (object?)device.PingTtl ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("@os", device.OsGuess ?? "Unknown");
+                    cmd.Parameters.AddWithValue("@first", device.FirstSeen ?? DateTimeOffset.UtcNow.ToString("O"));
+                    cmd.Parameters.AddWithValue("@last", device.LastSeen ?? "");
+                    await cmd.ExecuteNonQueryAsync(cancellationToken);
+                }
+                trans.Commit();
+            }
+            finally { _writeLock.Release(); }
+        }
+
+        public async Task SetLanDeviceKnownAsync(string projectId, string networkId, string ipAddress, bool isKnown, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            using var conn = await OpenConnectionAsync(cancellationToken);
+            using var cmd = new SqliteCommand("UPDATE lan_devices SET is_known=@known WHERE project_id=@pid AND network_id=@network AND ip_address=@ip;", conn);
+            cmd.Parameters.AddWithValue("@known", isKnown ? 1 : 0);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@network", networkId);
+            cmd.Parameters.AddWithValue("@ip", ipAddress);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
         public async Task<List<StationClientRecord>> GetStationClientsAsync(string projectId, CancellationToken cancellationToken = default)

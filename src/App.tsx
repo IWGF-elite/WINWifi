@@ -1789,6 +1789,7 @@ export default function App() {
             stationClients={stationClients}
             uiMode={uiMode}
             dataSourceProfile={dataSourceProfile}
+            selectedAdapterId={selectedAdapterId}
             onOpenImport={() => setShowImportModal(true)}
             onSelectAP={(ap) => {
               setSelectedBssid(ap.bssid);

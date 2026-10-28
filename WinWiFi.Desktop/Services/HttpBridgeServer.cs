@@ -484,6 +484,23 @@ namespace WinWiFi.Services
                         await HandleAdaptersAsync(response);
                         break;
 
+                    case "/api/local-network":
+                        await WriteJsonAsync(response, LocalNetworkService.GetNetworkInfo(
+                            request.QueryString["adapterId"] ?? _activeAdapterId));
+                        break;
+
+                    case "/api/local-network/scan":
+                        await HandleLocalNetworkScanAsync(request, response);
+                        break;
+
+                    case "/api/local-network/devices":
+                        await HandleLocalNetworkDevicesAsync(request, response);
+                        break;
+
+                    case "/api/local-network/devices/known":
+                        await HandleLocalDeviceKnownAsync(request, response);
+                        break;
+
                     case "/api/diagnostics":
                         await HandleDiagnosticsAsync(response);
                         break;
@@ -730,6 +747,91 @@ namespace WinWiFi.Services
             ".woff2" => "font/woff2",
             _ => "application/octet-stream"
         };
+
+        private sealed class LanDeviceKnownRequest
+        {
+            public string IpAddress { get; set; } = string.Empty;
+            public string NetworkId { get; set; } = string.Empty;
+            public bool IsKnown { get; set; }
+        }
+
+        private async Task HandleLocalNetworkScanAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to scan the selected local network.");
+                return;
+            }
+
+            string adapterId = request.QueryString["adapterId"] ?? _activeAdapterId ?? string.Empty;
+            string projectId = ResolveProjectId(request) ?? _activeProjectId ?? "proj-001";
+            var snapshot = await LocalNetworkService.ScanAsync(adapterId);
+            if (snapshot.Status != "Available" || string.IsNullOrWhiteSpace(snapshot.NetworkId))
+            {
+                await WriteJsonAsync(response, snapshot);
+                return;
+            }
+
+            var previous = (await _storage.GetLanDevicesAsync(projectId, snapshot.NetworkId))
+                .Where(d => LocalNetworkService.IsDiscoverableHost(d.IpAddress, snapshot.LocalIp, snapshot.PrefixLength))
+                .ToList();
+            var byIp = previous.ToDictionary(d => d.IpAddress, StringComparer.OrdinalIgnoreCase);
+            foreach (var device in snapshot.Devices)
+            {
+                if (byIp.TryGetValue(device.IpAddress, out var old))
+                {
+                    device.IsNew = false;
+                    device.IsKnown = old.IsKnown;
+                    device.FirstSeen = old.FirstSeen;
+                }
+            }
+
+            var currentIps = snapshot.Devices.Select(d => d.IpAddress).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var old in previous.Where(d => !currentIps.Contains(d.IpAddress)))
+            {
+                old.IsOnline = false;
+                old.IsNew = false;
+                if (!old.Evidence.Contains("Not observed in the latest scan"))
+                    old.Evidence.Add("Not observed in the latest scan");
+                snapshot.Devices.Add(old);
+            }
+
+            await _storage.SaveLanDevicesAsync(projectId, snapshot.NetworkId, snapshot.Devices);
+            await WriteJsonAsync(response, snapshot);
+        }
+
+        private async Task HandleLocalNetworkDevicesAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            string adapterId = request.QueryString["adapterId"] ?? _activeAdapterId ?? string.Empty;
+            string projectId = ResolveProjectId(request) ?? _activeProjectId ?? "proj-001";
+            var snapshot = LocalNetworkService.GetNetworkInfo(adapterId);
+            if (snapshot.Status == "Available")
+                snapshot.Devices = (await _storage.GetLanDevicesAsync(projectId, snapshot.NetworkId))
+                    .Where(d => LocalNetworkService.IsDiscoverableHost(d.IpAddress, snapshot.LocalIp, snapshot.PrefixLength))
+                    .ToList();
+            await WriteJsonAsync(response, snapshot);
+        }
+
+        private async Task HandleLocalDeviceKnownAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to update a device review status.");
+                return;
+            }
+            var body = await JsonSerializer.DeserializeAsync<LanDeviceKnownRequest>(request.InputStream, JsonOptions) ?? new();
+            if (!IPAddress.TryParse(body.IpAddress, out _) || string.IsNullOrWhiteSpace(body.NetworkId))
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_device", "A valid device IP and network are required.");
+                return;
+            }
+            string projectId = ResolveProjectId(request) ?? _activeProjectId ?? "proj-001";
+            await _storage.SetLanDeviceKnownAsync(projectId, body.NetworkId, body.IpAddress, body.IsKnown);
+            await WriteJsonAsync(response, new { status = "updated", body.IpAddress, body.IsKnown });
+        }
 
         private async Task HandleAdaptersAsync(HttpListenerResponse response)
         {

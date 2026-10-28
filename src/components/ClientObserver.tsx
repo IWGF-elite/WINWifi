@@ -2,27 +2,24 @@ import React, { useState } from 'react';
 import { 
   Laptop, 
   Smartphone, 
-  Radio, 
   Search, 
-  ArrowRight, 
   ShieldCheck, 
   Wifi, 
-  Activity, 
-  ArrowUpRight,
   Filter,
   Lock,
   AlertCircle,
-  FileCode,
   Info,
   Download
 } from 'lucide-react';
 import { AccessPoint, ClientDevice, UIMode, DataSourceProfile } from '../types';
+import { LanDeviceInventory } from './LanDeviceInventory';
 
 interface ClientObserverProps {
   accessPoints: AccessPoint[];
   stationClients?: ClientDevice[];
   uiMode: UIMode;
   dataSourceProfile?: DataSourceProfile;
+  selectedAdapterId?: string;
   onSelectAP: (ap: AccessPoint) => void;
   onOpenImport?: () => void;
 }
@@ -32,6 +29,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
   stationClients = [],
   uiMode,
   dataSourceProfile = 'OFFLINE',
+  selectedAdapterId = '',
   onSelectAP,
   onOpenImport
 }) => {
@@ -99,6 +97,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
 
   return (
     <div className="space-y-5 pb-8">
+      {isLiveMode && <LanDeviceInventory adapterId={selectedAdapterId} />}
       {/* Operating Mode & Provenance Banner */}
       {isLiveMode ? (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-xs text-amber-200">
