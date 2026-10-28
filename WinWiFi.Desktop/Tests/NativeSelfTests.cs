@@ -1246,7 +1246,139 @@ SSID 2 : Guest-Open
                 return "Serialized an access point with handshake material under the bridge's JSON options without property-name collisions.";
             }));
 
+            results.Add(RunTest("T24-SINGLE-INSTANCE", "Second Desktop Launch Activates the First Window", () =>
+            {
+                string suffix = Guid.NewGuid().ToString("N");
+                string mutexName = $@"Local\WinWiFi.Test.Mutex.{suffix}";
+                string eventName = $@"Local\WinWiFi.Test.Event.{suffix}";
+
+                using var first = SingleInstanceGuard.TryAcquire(mutexName, eventName);
+                if (first is null) throw new Exception("The first launch could not acquire the single-instance guard.");
+                using var second = SingleInstanceGuard.TryAcquire(mutexName, eventName);
+                if (second is not null) throw new Exception("A second launch was allowed to start a second instance.");
+
+                int activations = 0;
+                first.StartActivationListener(() => activations++);
+                SingleInstanceGuard.ActivateExistingInstance(eventName);
+                var deadline = DateTime.UtcNow.AddSeconds(3);
+                while (activations == 0 && DateTime.UtcNow < deadline) Thread.Sleep(20);
+                if (activations == 0) throw new Exception("Signalling from a second launch did not activate the first window.");
+
+                SingleInstanceGuard.ActivateExistingInstance(eventName);
+                deadline = DateTime.UtcNow.AddSeconds(3);
+                int seen = activations;
+                while (activations == seen && DateTime.UtcNow < deadline) Thread.Sleep(20);
+                if (activations <= seen) throw new Exception("The activation listener stopped responding after the first signal.");
+                first.StopActivationListener();
+                return "A second launch cannot start a second instance and reliably brings the first window forward.";
+            }));
+
+            results.Add(RunTest("T25-PORT-SELECTOR", "Bridge Port Fallback Skips Occupied Ports", () =>
+            {
+                var probe = new TcpListener(IPAddress.Loopback, 0);
+                probe.Start();
+                int occupied = ((IPEndPoint)probe.LocalEndpoint).Port;
+                try
+                {
+                    if (BridgePortSelector.IsPortAvailable(occupied))
+                        throw new Exception("An occupied port was reported as available.");
+                    int? selected = BridgePortSelector.FindAvailablePort(occupied, attempts: 5);
+                    if (selected is null || selected <= occupied || selected >= occupied + 5)
+                        throw new Exception($"Fallback did not pick a free port after the busy one (got {selected}).");
+                    if (!BridgePortSelector.IsPortAvailable(selected.Value))
+                        throw new Exception("The selected fallback port is not actually free.");
+                }
+                finally
+                {
+                    probe.Stop();
+                }
+                return "The bridge port selector skips ports held by other local listeners and returns a verified-free port.";
+            }));
+
+            results.Add(RunTest("T26-SSE-ESCAPING", "SSE Payloads Escape Control Characters", () =>
+            {
+                // SSE frames are JSON serialized with the same options the bridge
+                // uses; control characters inside adapter names or error text must
+                // never leak as raw bytes or a browser-side JSON.parse fails with
+                // "Bad control character in string literal".
+                var options = new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    PropertyNameCaseInsensitive = true
+                };
+                var diag = new ScanDiagnostics
+                {
+                    ActiveAdapterName = "Intel \u0001 AC 8260",
+                    LastError = "line1\nline2\ttab\u0002"
+                };
+                diag.StatusMessages.Add("status with control chars \u0003");
+                string json = System.Text.Json.JsonSerializer.Serialize(new { diagnostics = diag }, options);
+                if (json.IndexOf('\n') >= 0 || json.IndexOf('\r') >= 0 || json.IndexOf('\u0001') >= 0 || json.IndexOf('\u0002') >= 0 || json.IndexOf('\u0003') >= 0)
+                    throw new Exception("Raw control characters leaked into the SSE JSON payload.");
+                if (!json.Contains("\\u0001", StringComparison.Ordinal) || !json.Contains("\\n", StringComparison.Ordinal))
+                    throw new Exception("Control characters were not emitted as JSON escape sequences.");
+                return "Diagnostics payloads keep control characters escaped so every SSE frame stays parseable.";
+            }));
+
+            results.Add(await RunTestAsync("T27-BRIDGE-SHUTDOWN", "Bridge Shutdown Survives a Blocked UI Context", async () =>
+            {
+                // The desktop shell stops its bridge from the WPF UI thread and
+                // waits for that call to finish. If any await inside StopAsync
+                // resumed on the captured UI context, the wait would deadlock and
+                // the process would linger holding the single-instance lock.
+                int port;
+                var probe = new TcpListener(IPAddress.Loopback, 0);
+                probe.Start();
+                port = ((IPEndPoint)probe.LocalEndpoint).Port;
+                probe.Stop();
+
+                string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_stop_{Guid.NewGuid():N}.db");
+                using var wifi = new StubWifiService();
+                using var storage = new SqliteStorageService(tempDb);
+                var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage);
+                await bridge.StartAsync();
+
+                var previousContext = SynchronizationContext.Current;
+                Task stopping;
+                SynchronizationContext.SetSynchronizationContext(new DroppingSynchronizationContext());
+                try
+                {
+                    stopping = bridge.StopAsync();
+                }
+                finally
+                {
+                    SynchronizationContext.SetSynchronizationContext(previousContext);
+                }
+
+                var finished = await Task.WhenAny(stopping, Task.Delay(TimeSpan.FromSeconds(5)));
+                try { await bridge.DisposeAsync(); } catch { }
+                SqliteStorageService.ReleaseAllPools();
+                TryDeleteScanDatabase(tempDb);
+
+                if (finished != stopping || !stopping.IsCompletedSuccessfully)
+                    throw new Exception("Bridge shutdown stalled on its own captured synchronization context; the desktop process would never exit.");
+                return "StopAsync finished in under 5 seconds while its captured context discarded every continuation, so the shell can always close.";
+            }));
+
             return results;
+        }
+
+        /// <summary>Stands in for a UI thread that is blocked inside a wait.</summary>
+        private sealed class DroppingSynchronizationContext : SynchronizationContext
+        {
+            public override void Post(SendOrPostCallback d, object? state) { }
+            public override void Send(SendOrPostCallback d, object? state) { }
+        }
+
+        private static void TryDeleteScanDatabase(string path)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+                if (File.Exists(path + "-wal")) File.Delete(path + "-wal");
+                if (File.Exists(path + "-shm")) File.Delete(path + "-shm");
+            }
+            catch { }
         }
 
 #if WINDOWS_DESKTOP

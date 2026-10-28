@@ -1,20 +1,28 @@
 using System;
-using System.IO;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
-using System.Net.Http;
+using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
-using System.Diagnostics;
 using WinWiFi.Data;
 using WinWiFi.Services;
 
 namespace WinWiFi;
 
-/// <summary>Native shell startup. Hardware telemetry is always started explicitly through the local bridge.</summary>
+/// <summary>Native shell startup. The desktop owns its local bridge and hands the per-launch token to its own WebView2 window; the user never sees it.</summary>
 public partial class App : Application
 {
+    private const int PreferredBridgePort = 38989;
+    private const int BridgePortAttempts = 10;
+
     public static IServiceProvider ServiceProvider { get; private set; } = null!;
     internal static string? BridgeToken { get; private set; }
+    internal static int BridgePort { get; private set; } = PreferredBridgePort;
+    internal static string? BridgeStartupError { get; private set; }
+
+    internal static SingleInstanceGuard? InstanceGuard { get; set; }
+
     private static HttpBridgeServer? _bridgeServer;
 
     private async void Application_Startup(object sender, StartupEventArgs e)
@@ -29,46 +37,7 @@ public partial class App : Application
         services.AddSingleton<MainWindow>();
 
         ServiceProvider = services.BuildServiceProvider();
-        _bridgeServer = new HttpBridgeServer(
-            wifiService: ServiceProvider.GetRequiredService<INativeWifiService>(),
-            securityAnalyzer: ServiceProvider.GetRequiredService<SecurityAnalyzer>(),
-            pcapDissector: ServiceProvider.GetRequiredService<PcapDissector>(),
-            reportGenerator: ServiceProvider.GetRequiredService<ReportGenerator>(),
-            storage: ServiceProvider.GetRequiredService<SqliteStorageService>(),
-            scanner: ServiceProvider.GetRequiredService<WifiBackgroundScanner>());
-        BridgeToken = _bridgeServer.AuthToken;
-        try
-        {
-            await _bridgeServer.StartAsync();
-        }
-        catch (HttpListenerException ex)
-        {
-            // A second desktop window can safely use the already-running local
-            // bridge. This happens when the user launches the app again from
-            // Explorer, or when a prior instance is still running.
-            if (await IsExistingWinWiFiBridgeAsync())
-            {
-                // A second window reuses the first process's bridge and token.
-                BridgeToken = ReadBridgeToken();
-            }
-            else
-            {
-                MessageBox.Show(
-                    $"WinWiFi could not start its local dashboard bridge.\n\n{ex.Message}",
-                    "WinWiFi local bridge",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-            }
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceError($"Unable to start the localhost dashboard bridge: {ex}");
-            MessageBox.Show(
-                $"WinWiFi could not start its local dashboard bridge.\n\n{ex.Message}",
-                "WinWiFi local bridge",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-        }
+        await StartBridgeAsync();
 
         // Application_Startup is async because bridge initialization is async.
         // With WPF's default OnLastWindowClose policy, an await here can leave
@@ -81,6 +50,7 @@ public partial class App : Application
             MainWindow = mainWindow;
             mainWindow.Show();
             ShutdownMode = ShutdownMode.OnMainWindowClose;
+            InstanceGuard?.StartActivationListener(() => Dispatcher.Invoke(mainWindow.ActivateWindow));
         }
         catch (Exception ex)
         {
@@ -94,52 +64,99 @@ public partial class App : Application
         }
     }
 
-    private static async Task<bool> IsExistingWinWiFiBridgeAsync()
+    /// <summary>
+    /// The desktop always starts its own bridge. The preferred port is 38989;
+    /// when another local process holds it (for example a CLI bridge left
+    /// running from a terminal), the app quietly binds the next free port and
+    /// the embedded window is pointed at whichever port was actually used. The
+    /// user never sees a raw listener error, a port number, or a token.
+    /// </summary>
+    private static async Task StartBridgeAsync()
     {
-        try
+        var wifi = ServiceProvider.GetRequiredService<INativeWifiService>();
+        var analyzer = ServiceProvider.GetRequiredService<SecurityAnalyzer>();
+        var pcap = ServiceProvider.GetRequiredService<PcapDissector>();
+        var reports = ServiceProvider.GetRequiredService<ReportGenerator>();
+        var storage = ServiceProvider.GetRequiredService<SqliteStorageService>();
+        var scanner = ServiceProvider.GetRequiredService<WifiBackgroundScanner>();
+
+        foreach (int candidate in CandidatePorts())
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            using var response = await client.GetAsync("http://127.0.0.1:38989/api/health");
-            // A token-protected WinWiFi bridge answers 401. That still proves the
-            // first instance is running and owns the port.
-            if (response.StatusCode == HttpStatusCode.Unauthorized) return true;
-            string status = await response.Content.ReadAsStringAsync();
-            return response.IsSuccessStatusCode &&
-                   status.Contains("\"status\":\"online\"", StringComparison.OrdinalIgnoreCase) &&
-                   status.Contains("WinWiFi Native 802.11 Core", StringComparison.OrdinalIgnoreCase);
+            var server = new HttpBridgeServer(candidate, wifi, analyzer, pcap, reports, storage, scanner);
+            try
+            {
+                await server.StartAsync();
+                _bridgeServer = server;
+                BridgeToken = server.AuthToken;
+                BridgePort = candidate;
+                BridgeStartupError = null;
+                Trace.TraceInformation($"Local Wi-Fi bridge is listening on port {candidate}.");
+                if (candidate != PreferredBridgePort)
+                {
+                    Trace.TraceInformation($"Port {PreferredBridgePort} was already in use by another local WinWiFi bridge; this window uses port {candidate} instead.");
+                }
+                return;
+            }
+            catch (HttpListenerException)
+            {
+                // The port was claimed between the availability probe and the
+                // bind (or by a stale HTTP.sys registration); try the next one.
+                await server.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceError($"Unable to start the localhost dashboard bridge on port {candidate}: {ex}");
+                await server.DisposeAsync();
+            }
         }
-        catch
-        {
-            return false;
-        }
+
+        BridgeToken = null;
+        BridgeStartupError =
+            "WinWiFi could not start its local Wi-Fi bridge.\n\n" +
+            "Close any other WinWiFi windows and start the app again.";
     }
 
-    private static string? ReadBridgeToken()
+    private static IEnumerable<int> CandidatePorts()
     {
-        try
+        for (int port = PreferredBridgePort; port < PreferredBridgePort + BridgePortAttempts; port++)
         {
-            string path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "WinWiFi", "bridge.token");
-            if (!File.Exists(path)) return null;
-            string token = File.ReadAllText(path).Trim();
-            return token.Length > 0 ? token : null;
-        }
-        catch
-        {
-            return null;
+            if (BridgePortSelector.IsPortAvailable(port)) yield return port;
         }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        // Shutdown must never hold the process open: a step that does not finish
+        // within a few seconds is logged and skipped, so the window closes, the
+        // bridge port is released, and the next launch is not blocked by a
+        // half-dead instance holding the single-instance lock.
+        Trace.TraceInformation("WinWiFi desktop is shutting down.");
         try
         {
-            _bridgeServer?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            (ServiceProvider as IDisposable)?.Dispose();
-            SqliteStorageService.ReleaseAllPools();
+            RunBounded("stop the local Wi-Fi bridge", () => _bridgeServer is null ? null : Task.Run(async () => await _bridgeServer.DisposeAsync()));
+            RunBounded("release registered services", () => Task.Run(() => (ServiceProvider as IDisposable)?.Dispose()));
+            RunBounded("close local audit storage", () => Task.Run(SqliteStorageService.ReleaseAllPools));
+            InstanceGuard?.Dispose();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"WinWiFi shutdown failed: {ex}");
+        }
         base.OnExit(e);
+    }
+
+    private static void RunBounded(string step, Func<Task?> action)
+    {
+        try
+        {
+            Task? task = action();
+            if (task is null) return;
+            if (!task.Wait(TimeSpan.FromSeconds(3)))
+                Trace.TraceWarning($"Shutdown step '{step}' did not finish within 3 seconds; exiting anyway.");
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Shutdown step '{step}' failed: {ex.Message}");
+        }
     }
 }

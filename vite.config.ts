@@ -8,8 +8,11 @@ export default defineConfig({
   server: {
     // The dev server sits in the same tree as the .NET projects; watching
     // obj/bin crashes with EBUSY whenever dotnet build locks apphost.exe.
+    // RegExp (not globs): picomatch does not reliably match backslash paths.
     watch: {
-      ignored: ['**/obj/**', '**/bin/**', '**/node_modules/**', '**/dist/**', '**/publish/**'],
+      ignored: [
+        /[\\/](obj|bin|node_modules|dist|publish)[\\/]/,
+      ],
     },
   },
   build: {

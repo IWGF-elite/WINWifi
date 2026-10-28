@@ -94,7 +94,7 @@ import { BridgeConfigModal } from './components/BridgeConfigModal';
 import { LogConsole } from './components/LogConsole';
 import { NativeDesktopPanel } from './components/NativeDesktopPanel';
 import { StartupReadinessOverlay } from './components/StartupReadinessOverlay';
-import { BridgeErrorKind, bridgeStatusView } from './services/bridgeStatus';
+import { BridgeErrorKind, bridgeStatusView, isEmbeddedDashboard } from './services/bridgeStatus';
 
 const applyAnalystOverrides = (
   accessPoints: AccessPoint[],
@@ -289,7 +289,8 @@ export default function App() {
   const [showArchitectureModal, setShowArchitectureModal] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showBridgeModal, setShowBridgeModal] = useState<boolean>(false);
-  // This gate only closes when the operator explicitly opens the dashboard.
+  // Shown until live data is flowing (then it dismisses itself) or until the
+  // operator continues past it while the bridge is still reporting a problem.
   const [showStartupReadiness, setShowStartupReadiness] = useState<boolean>(true);
 
   // Native Windows Bridge State
@@ -298,6 +299,19 @@ export default function App() {
   const [networkViewMode, setNetworkViewMode] = useState<'inventory' | 'discovery'>('inventory');
   const [bridgeNotice, setBridgeNotice] = useState('');
   const [bridgeErrorKind, setBridgeErrorKind] = useState<BridgeErrorKind | null>(null);
+  // The desktop shell serves this page and owns its own data connection, so the
+  // bridge settings dialog — address, port, token — has nothing for a user to do.
+  const embeddedShell = isEmbeddedDashboard();
+
+  // The readiness checklist is a status screen, not a permission gate: once the
+  // bridge is connected and live Windows data is flowing, it dismisses itself so
+  // a double-click lands the operator directly on the Command Center.
+  useEffect(() => {
+    if (!showStartupReadiness) return;
+    if (bridgeState !== 'CONNECTED' || dataSourceProfile !== 'LIVE_WINDOWS') return;
+    const timer = setTimeout(() => setShowStartupReadiness(false), 900);
+    return () => clearTimeout(timer);
+  }, [showStartupReadiness, bridgeState, dataSourceProfile]);
 
   // A Windows WLAN scan is periodic, not a continuous frame stream. Keep the
   // source labelled as live while the local bridge is connected; freshness is
@@ -397,7 +411,7 @@ export default function App() {
           setConnectedBssid(connection.state === 'Connected' ? connection.bssid : '');
           void hydrateAssetsFromBridge(currentProjectIdRef.current);
         } catch {
-          setActiveSourceLabel('Native Bridge (Port 38989)');
+          setActiveSourceLabel('Native Windows Bridge');
         }
       } else if (state === 'DISCONNECTED' || state === 'ERROR') {
         setLastLiveDataAt(null);
@@ -1426,7 +1440,7 @@ export default function App() {
         onRefreshScan={handleRefreshScan}
         bridgeState={bridgeState}
         bridgeErrorKind={bridgeErrorKind}
-        onOpenBridgeConfig={() => setShowBridgeModal(true)}
+        onOpenBridgeConfig={embeddedShell ? undefined : () => setShowBridgeModal(true)}
         projectName={currentProject.name}
         onOpenReport={() => setShowReportModal(true)}
         onOpenSelfTest={() => setShowSelfTestModal(true)}
@@ -1720,7 +1734,7 @@ export default function App() {
             dataSourceProfile={dataSourceProfile}
             bridgeState={bridgeState}
             lastLiveDataAt={lastLiveDataAt}
-            onOpenBridgeConfig={() => setShowBridgeModal(true)}
+            onOpenBridgeConfig={embeddedShell ? undefined : () => setShowBridgeModal(true)}
             onOpenImport={() => setShowImportModal(true)}
             onLoadBenchmark={handleLoadBenchmark}
             onNavigate={handleNavigate}
@@ -1812,7 +1826,7 @@ export default function App() {
                 onOpenImport={() => setShowImportModal(true)}
                 onLoadBenchmark={handleLoadBenchmark}
                 onRefreshScan={handleRefreshScan}
-                onOpenBridgeConfig={() => setShowBridgeModal(true)}
+                onOpenBridgeConfig={embeddedShell ? undefined : () => setShowBridgeModal(true)}
                 isDarkMode={isDarkMode}
                 connectedBssid={connectedBssid}
               />
@@ -1975,7 +1989,7 @@ export default function App() {
             dataSourceProfile={dataSourceProfile}
             bridgeState={bridgeState}
             bridgeStatus={bridgeStatus}
-            onOpenBridgeConfig={() => setShowBridgeModal(true)}
+            onOpenBridgeConfig={embeddedShell ? undefined : () => setShowBridgeModal(true)}
             onOpenImport={() => setShowImportModal(true)}
           />
         )}
@@ -2065,7 +2079,7 @@ export default function App() {
       )}
 
       {/* Windows Native Bridge Configuration Modal */}
-      {showBridgeModal && (
+      {showBridgeModal && !embeddedShell && (
         <BridgeConfigModal
           isOpen={showBridgeModal}
           onClose={() => setShowBridgeModal(false)}

@@ -83,7 +83,7 @@ import {
   reconcileAlerts,
   summarizeAlerts
 } from '../src/services/alerts';
-import { bridgeStatusView, classifyBridgeError } from '../src/services/bridgeStatus';
+import { bridgeStatusView, classifyBridgeError, isEmbeddedDashboard, resolveBridgeBaseUrl } from '../src/services/bridgeStatus';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -637,7 +637,8 @@ runTest('T18: Per-Launch Bridge Token Wiring', () => {
 
     const source = fs.readFileSync(path.join(__dirname, '../src/services/bridgeClient.ts'), 'utf8');
     if (!source.includes("'X-WinWiFi-Token'")) throw new Error('REST requests do not send the bridge token header');
-    if (!/rejected this dashboard session/i.test(source)) throw new Error('Bridge client does not explain token rejection');
+    const explained = (client as any).formatBridgeError(new Error('HTTP 401 Unauthorized'));
+    if (!/token/i.test(explained)) throw new Error('Bridge client does not explain token rejection');
   } finally {
     client.disconnect();
     (globalThis as any).EventSource = NativeEventSource;
@@ -1547,6 +1548,83 @@ runTest('T26: Bridge Offline & Token-Mismatch Status Views', () => {
   const disconnected = bridgeStatusView('DISCONNECTED', null);
   if (disconnected.label !== 'Offline') {
     throw new Error('A disconnected bridge is not shown as Offline');
+  }
+});
+
+// 28. Embedded bridge base URL resolution (desktop WebView2 / daemon-hosted tab)
+runTest('T27: Embedded Bridge Base URL Resolution', () => {
+  const fallback = 'http://127.0.0.1:38989';
+
+  // Page served by the bridge itself on a dynamically chosen port: the serving
+  // origin must win over any stale saved config.
+  if (resolveBridgeBaseUrl('127.0.0.1', '38991', '', fallback) !== 'http://127.0.0.1:38991') {
+    throw new Error('An embedded page did not adopt the serving bridge origin');
+  }
+  if (resolveBridgeBaseUrl('localhost', '38992', '?token=abc', fallback) !== 'http://localhost:38992') {
+    throw new Error('An embedded page with a token did not adopt the serving origin');
+  }
+
+  // Vite dev-server pages keep the default/saved bridge URL.
+  if (resolveBridgeBaseUrl('localhost', '5173', '', fallback) !== fallback) {
+    throw new Error('A Vite dev page must keep the configured bridge URL');
+  }
+  if (resolveBridgeBaseUrl('127.0.0.1', '3000', '', fallback) !== fallback) {
+    throw new Error('A port-3000 dev page must keep the configured bridge URL');
+  }
+
+  // An explicit port parameter (start-dev.ps1) overrides everything.
+  if (resolveBridgeBaseUrl('localhost', '5173', '?port=39123&x=1', fallback) !== 'http://127.0.0.1:39123') {
+    throw new Error('A port query parameter did not override the bridge URL');
+  }
+  if (resolveBridgeBaseUrl('localhost', '5173', '?port=not-a-port', fallback) !== fallback) {
+    throw new Error('A malformed port parameter was accepted');
+  }
+
+  // Non-loopback hosts never adopt the page origin as a bridge.
+  if (resolveBridgeBaseUrl('example.com', '8080', '', fallback) !== fallback) {
+    throw new Error('A non-loopback page origin was treated as the bridge');
+  }
+  // Empty port (default http/https) is not a bridge origin.
+  if (resolveBridgeBaseUrl('localhost', '', '', fallback) !== fallback) {
+    throw new Error('A page without an explicit port was treated as the bridge');
+  }
+});
+
+// 29. The desktop shell never shows bridge internals the user would have to type
+runTest('T28: Desktop Shell Wording Hides Bridge Internals', () => {
+  const forbidden = ['38989', 'token', 'vite_winwifi', 'bridge.token', 'http://', 'start-dev.ps1', 'dotnet run', '--port'];
+  const states: Array<[Parameters<typeof bridgeStatusView>[0], Parameters<typeof bridgeStatusView>[1]]> = [
+    ['CONNECTED', null],
+    ['CONNECTING', null],
+    ['DISCONNECTED', null],
+    ['ERROR', 'offline'],
+    ['ERROR', 'token'],
+    ['ERROR', 'timeout'],
+    ['ERROR', 'unknown']
+  ];
+  for (const [state, kind] of states) {
+    const shell = bridgeStatusView(state, kind, true);
+    const text = `${shell.label} ${shell.title} ${shell.description}`.toLowerCase();
+    for (const needle of forbidden) {
+      if (text.includes(needle)) {
+        throw new Error(`The desktop shell exposed "${needle}" while ${state}/${kind ?? 'none'}: ${shell.description}`);
+      }
+    }
+  }
+
+  // A developer running the dashboard in a browser still gets the exact command.
+  const devOffline = bridgeStatusView('ERROR', 'offline', false);
+  if (!devOffline.description.includes('--bridge --port 38989') || !devOffline.description.includes('start-dev.ps1')) {
+    throw new Error('The developer offline description no longer explains how to start the bridge');
+  }
+  const devToken = bridgeStatusView('ERROR', 'token', false);
+  if (!devToken.description.includes('VITE_WINWIFI_BRIDGE_TOKEN')) {
+    throw new Error('The developer token description no longer points at the dev token');
+  }
+
+  // Without a browser window (Node test host) the shell flag stays false.
+  if (isEmbeddedDashboard()) {
+    throw new Error('isEmbeddedDashboard must be false when no window.location exists');
   }
 });
 

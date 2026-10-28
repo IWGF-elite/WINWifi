@@ -158,7 +158,7 @@ export class CapabilityMatrixService {
         category: 'Discovery & Ingestion',
         status: isBridgeConnected ? 'Supported' : 'Available',
         technicalDetails: 'Enumerates physical and virtual 802.11 interfaces via Windows WLAN API (WlanEnumInterfaces) and NetworkInterface.GetAllNetworkInterfaces().',
-        windowsRestriction: 'Requires WinWiFi.Desktop local bridge server running on the Windows host on localhost:38989.',
+        windowsRestriction: 'Requires the WinWiFi desktop app (its local bridge) running on this Windows host.',
         prerequisite: 'Localhost bridge server execution.',
         dataOriginMapping: 'LIVE_WINDOWS',
       },

@@ -174,7 +174,7 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
                   <>Decoded offline Libpcap/PCAPNG capture stream. Full promiscuous frame dissector active.</>
                 ) : (
                   <>
-                    Native Windows WLAN API (wlanapi.dll) requires the <span className="text-blue-400 font-semibold">WinWiFi.Desktop bridge</span> on localhost:38989.
+                    Native Windows WLAN API (wlanapi.dll) requires the <span className="text-blue-400 font-semibold">WinWiFi.Desktop bridge</span> running on this PC.
                   </>
                 )}
               </p>
