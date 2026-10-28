@@ -172,6 +172,7 @@ export class SqliteDatabaseService {
       ...log,
       id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       timestamp: new Date().toLocaleTimeString(),
+      occurredAt: new Date().toISOString(),
     };
     const current = this.getLogs(projectId);
     const updated = [fullLog, ...current].slice(0, 300); // keep last 300

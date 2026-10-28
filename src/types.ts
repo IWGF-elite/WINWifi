@@ -398,6 +398,7 @@ export interface AuditProject {
 export interface AuditLog {
   id: string;
   timestamp: string;
+  occurredAt?: string;
   level: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS' | 'SEC_ALERT';
   source: string;
   message: string;
