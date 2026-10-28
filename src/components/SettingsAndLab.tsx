@@ -18,6 +18,9 @@ import { UIMode, SecurityPolicy, TrainingLabScenario, AccessPoint, MaintenanceAp
 import { PolicyEngine, POLICY_CLASSIFICATION_ROUTES } from '../services/policyEngine';
 import { TRAINING_SCENARIOS } from '../services/offlineLab';
 import { MaintenanceApprovalCenter } from './MaintenanceApprovalCenter';
+import { AuditTrailCenter } from './AuditTrailCenter';
+import { AuditChainState } from '../services/auditChain';
+import { OperatorRole, can } from '../services/operatorRoles';
 
 interface SettingsAndLabProps {
   uiMode: UIMode;
@@ -28,6 +31,14 @@ interface SettingsAndLabProps {
   onApproveMaintenance: (id: string, approver: string) => Promise<void>;
   onRejectMaintenance: (id: string, approver: string, note: string) => Promise<void>;
   onRevokeMaintenance: (id: string) => Promise<void>;
+  auditChain: AuditChainState;
+  operatorName: string;
+  operatorRole: OperatorRole;
+  onOperatorNameChange: (name: string) => void;
+  onOperatorRoleChange: (role: OperatorRole) => void;
+  onExportAudit: () => Promise<void>;
+  onResetAudit: () => Promise<void>;
+  auditError?: string;
 }
 
 export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
@@ -38,7 +49,15 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
   maintenanceApprovals,
   onApproveMaintenance,
   onRejectMaintenance,
-  onRevokeMaintenance
+  onRevokeMaintenance,
+  auditChain,
+  operatorName,
+  operatorRole,
+  onOperatorNameChange,
+  onOperatorRoleChange,
+  onExportAudit,
+  onResetAudit,
+  auditError
 }) => {
   const policyEngine = PolicyEngine.getInstance();
   const [activePolicyId, setActivePolicyId] = useState(policyEngine.getActivePolicy().id);
@@ -267,6 +286,18 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
         onApprove={onApproveMaintenance}
         onReject={onRejectMaintenance}
         onRevoke={onRevokeMaintenance}
+        canDecide={can(operatorRole, 'approve_maintenance')}
+      />
+
+      <AuditTrailCenter
+        chain={auditChain}
+        operatorName={operatorName}
+        operatorRole={operatorRole}
+        onOperatorNameChange={onOperatorNameChange}
+        onOperatorRoleChange={onOperatorRoleChange}
+        onExport={onExportAudit}
+        onReset={onResetAudit}
+        error={auditError}
       />
 
       {/* Section 3: Offline Training & Lab Workbench */}

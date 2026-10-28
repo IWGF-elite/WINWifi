@@ -58,6 +58,23 @@ import {
   revokeMaintenance,
   sanitizeMaintenanceText
 } from '../src/services/maintenanceApproval';
+import {
+  MAX_AUDIT_RECORDS,
+  appendAuditRecord,
+  createAuditChain,
+  genesisHash,
+  headHashOf,
+  normalizeAuditChain,
+  resetAuditChain,
+  sha256Hex,
+  verifyAuditChain
+} from '../src/services/auditChain';
+import {
+  can,
+  normalizeOperatorRole,
+  requireCapability,
+  sanitizeOperatorName
+} from '../src/services/operatorRoles';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1160,6 +1177,149 @@ runTest('T23: Maintenance Approval Workflow', () => {
   }
   if (!pruned.records[0].id.startsWith('MAINT-')) {
     throw new Error('Pruning retained the stale records instead of the new request');
+  }
+});
+
+// 24. Operator roles and the SHA-256 audit chain
+runTest('T24: Operator Roles & Hash-Chained Audit Trail', () => {
+  if (sha256Hex('') !== 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855') {
+    throw new Error('SHA-256 empty-string vector failed');
+  }
+  if (sha256Hex('abc') !== 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad') {
+    throw new Error('SHA-256 "abc" vector failed');
+  }
+  if (sha256Hex('The quick brown fox jumps over the lazy dog') !== 'd7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592') {
+    throw new Error('SHA-256 fox vector failed');
+  }
+  if (sha256Hex('a'.repeat(55)) === sha256Hex('a'.repeat(56)) || sha256Hex('a'.repeat(1000)).length !== 64) {
+    throw new Error('SHA-256 padding-boundary determinism failed');
+  }
+
+  if (normalizeOperatorRole('Viewer') !== 'Viewer' || normalizeOperatorRole('root') !== 'Administrator') {
+    throw new Error('normalizeOperatorRole did not bound unknown values');
+  }
+  if (!can('Viewer', 'view') || can('Viewer', 'connect_network') || can('Viewer', 'edit_assets')) {
+    throw new Error('Viewer capabilities are incorrect');
+  }
+  if (!can('Auditor', 'connect_network') || !can('Auditor', 'request_maintenance') || can('Auditor', 'approve_maintenance') || can('Auditor', 'delete_assets')) {
+    throw new Error('Auditor capabilities are incorrect');
+  }
+  if (!can('Administrator', 'approve_maintenance') || !can('Administrator', 'manage_projects') || !can('Administrator', 'clear_logs')) {
+    throw new Error('Administrator capabilities are incomplete');
+  }
+  let denied = false;
+  try { requireCapability('Viewer', 'connect_network', 'Connecting'); } catch { denied = true; }
+  if (!denied) throw new Error('requireCapability allowed a Viewer connection');
+  requireCapability('Auditor', 'connect_network', 'Connecting');
+  if (sanitizeOperatorName('  \u0000 Alice \n Smith ') !== 'Alice Smith' || sanitizeOperatorName('') !== 'Local operator' || sanitizeOperatorName('x'.repeat(120)).length !== 80) {
+    throw new Error('sanitizeOperatorName did not sanitize or bound the name');
+  }
+
+  const start = new Date('2026-10-02T09:00:00.000Z');
+  const created = createAuditChain(start);
+  if (created.version !== 1 || !created.chainId.startsWith('AUD-') || created.records.length !== 0 || created.createdAt !== start.toISOString()) {
+    throw new Error('createAuditChain did not build a genesis chain');
+  }
+  if (verifyAuditChain(created).valid !== true || headHashOf(created) !== genesisHash(created.chainId)) {
+    throw new Error('The empty chain did not verify against its genesis hash');
+  }
+
+  const first = appendAuditRecord(created, {
+    action: 'ASSET_SAVE',
+    subject: '02:00:00:00:00:AA',
+    details: 'Saved a registry asset.'
+  }, 'Alice Auditor', 'Auditor', start);
+  if (first.error || !first.record) throw new Error(`First append failed: ${first.error}`);
+  if (first.record.seq !== 1 || first.record.prevHash !== genesisHash(created.chainId) || first.record.hash.length !== 64 || first.record.timestamp !== start.toISOString()) {
+    throw new Error('The first audit record is not linked to the genesis hash');
+  }
+
+  const second = appendAuditRecord(first.state, {
+    action: 'MAINTENANCE_APPROVE',
+    subject: 'QA-Lab (02:00:00:00:00:AA)',
+    details: 'Approved request MAINT-1.'
+  }, 'Bob Approver', 'Administrator', new Date(start.getTime() + 60_000));
+  if (second.error || !second.record || second.record.seq !== 2 || second.record.prevHash !== first.record.hash) {
+    throw new Error('The second audit record did not link to the first');
+  }
+  if (!verifyAuditChain(second.state).valid || verifyAuditChain(second.state).checked !== 2) {
+    throw new Error('The two-record chain did not verify');
+  }
+  if (headHashOf(second.state) !== second.record.hash) {
+    throw new Error('headHashOf did not return the latest hash');
+  }
+
+  const roundTrip = normalizeAuditChain(JSON.parse(JSON.stringify(second.state)));
+  if (!verifyAuditChain(roundTrip).valid || roundTrip.records[1].actor !== 'Bob Approver') {
+    throw new Error('A JSON round-trip did not preserve the chain');
+  }
+
+  const modified = normalizeAuditChain({
+    ...second.state,
+    records: second.state.records.map((record, index) => index === 0 ? { ...record, details: 'Altered after signing.' } : record)
+  });
+  if (verifyAuditChain(modified).valid || verifyAuditChain(modified).brokenAt !== 1) {
+    throw new Error('A modified record was not detected');
+  }
+
+  const deleted = normalizeAuditChain({ ...second.state, records: [second.state.records[1]] });
+  if (verifyAuditChain(deleted).valid || verifyAuditChain(deleted).brokenAt !== 1) {
+    throw new Error('A deleted record was not detected');
+  }
+
+  const reordered = normalizeAuditChain({ ...second.state, records: [second.state.records[1], second.state.records[0]] });
+  if (verifyAuditChain(reordered).valid) {
+    throw new Error('A reordered chain was not detected');
+  }
+
+  const unlinked = normalizeAuditChain({
+    ...second.state,
+    records: second.state.records.map((record, index) => index === 1 ? { ...record, prevHash: '0'.repeat(64) } : record)
+  });
+  if (verifyAuditChain(unlinked).valid || verifyAuditChain(unlinked).brokenAt !== 2) {
+    throw new Error('A broken hash link was not detected');
+  }
+
+  const unsupported = normalizeAuditChain({
+    ...second.state,
+    records: second.state.records.map((record, index) => index === 0 ? { ...record, action: 'INJECT' } : record)
+  });
+  if (unsupported.records[0].action !== 'UNSUPPORTED' || verifyAuditChain(unsupported).valid) {
+    throw new Error('An unsupported action was not retained and rejected');
+  }
+
+  const unsanitized = appendAuditRecord(created, {
+    action: 'CONNECT_ATTEMPT',
+    subject: 's'.repeat(300),
+    details: 'd'.repeat(600)
+  }, '   ', 'Viewer', start);
+  if (unsanitized.error || !unsanitized.record || unsanitized.record.actor !== 'Local operator' || unsanitized.record.subject.length !== 200 || unsanitized.record.details.length !== 500) {
+    throw new Error('Audit text fields were not sanitized or bounded');
+  }
+  if (!appendAuditRecord(created, { action: 'ASSET_SAVE', subject: '', details: '' }, 'Alice', 'Auditor', start).error) {
+    throw new Error('An audit record without a subject was accepted');
+  }
+  if (!appendAuditRecord(created, { action: 'NOPE' as any, subject: 'x', details: '' }, 'Alice', 'Auditor', start).error) {
+    throw new Error('An unsupported audit action was accepted');
+  }
+
+  const fullChain = {
+    ...created,
+    records: Array.from({ length: MAX_AUDIT_RECORDS }, (_, index) => ({ ...first.record!, seq: index + 1 }))
+  };
+  if (!appendAuditRecord(fullChain, { action: 'ASSET_SAVE', subject: 'x', details: '' }, 'Alice', 'Auditor', start).error) {
+    throw new Error('The audit chain cap was not enforced');
+  }
+
+  const rotated = resetAuditChain(second.state, 'Alice Auditor', 'Administrator', start);
+  if (rotated.chainId === second.state.chainId || rotated.records.length !== 1 || rotated.records[0].action !== 'AUDIT_RESET') {
+    throw new Error('resetAuditChain did not create a new chain with a reset record');
+  }
+  if (!rotated.records[0].details.includes(second.state.chainId) || !rotated.records[0].details.includes(headHashOf(second.state))) {
+    throw new Error('The reset record did not archive the previous chain head');
+  }
+  if (!verifyAuditChain(rotated).valid) {
+    throw new Error('The rotated chain did not verify');
   }
 });
 

@@ -1,6 +1,7 @@
 import { AccessPoint, AnalystClassification, AuditProject, AuditLog, EvidenceItem, HandshakeInfo, IncidentRecord, EnterpriseAssetRecord, MaintenanceApprovalRecord, SiteRecord } from '../types';
 import { normalizeSiteDirectory } from './siteDirectory';
 import { normalizeMaintenanceApprovals } from './maintenanceApproval';
+import { AuditChainState, MAX_AUDIT_RECORDS, normalizeAuditChain } from './auditChain';
 
 const DB_PREFIX = 'winwifi_sqlite_';
 
@@ -73,7 +74,7 @@ export class SqliteDatabaseService {
   public deleteProjectData(projectId: string): void {
     localStorage.removeItem(`${DB_PREFIX}access_points_${projectId}`);
     localStorage.removeItem(`${DB_PREFIX}analyst_overrides_${projectId}`);
-    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes', 'assets', 'sites', 'maintenance']) {
+    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes', 'assets', 'sites', 'maintenance', 'audit_chain']) {
       localStorage.removeItem(this.scopedKey(kind, projectId));
     }
   }
@@ -196,6 +197,20 @@ export class SqliteDatabaseService {
 
   public saveMaintenanceApprovals(records: MaintenanceApprovalRecord[], projectId: string = this.getCurrentProjectId()): void {
     this.writeScoped('maintenance', projectId, normalizeMaintenanceApprovals(records));
+  }
+
+  public getAuditChain(projectId: string = this.getCurrentProjectId()): AuditChainState {
+    const raw = this.readScoped<unknown>('audit_chain', projectId, null);
+    const normalized = normalizeAuditChain(raw);
+    if (raw === null) this.writeScoped('audit_chain', projectId, normalized);
+    return normalized;
+  }
+
+  public saveAuditChain(state: AuditChainState, projectId: string = this.getCurrentProjectId()): void {
+    const bounded: AuditChainState = state.records.length > MAX_AUDIT_RECORDS
+      ? { ...state, records: state.records.slice(0, MAX_AUDIT_RECORDS) }
+      : state;
+    this.writeScoped('audit_chain', projectId, bounded);
   }
 
   public getEnterpriseAssets(projectId: string = this.getCurrentProjectId()): EnterpriseAssetRecord[] {

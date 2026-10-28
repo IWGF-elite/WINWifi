@@ -7,12 +7,14 @@ interface LogConsoleProps {
   logs: AuditLog[];
   onClearLogs: () => void;
   isDarkMode: boolean;
+  canClearLogs?: boolean;
 }
 
 export const LogConsole: React.FC<LogConsoleProps> = ({
   logs,
   onClearLogs,
   isDarkMode,
+  canClearLogs = true,
 }) => {
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
   const [search, setSearch] = useState<string>('');
@@ -76,8 +78,9 @@ export const LogConsole: React.FC<LogConsoleProps> = ({
           </button>
           <button
             onClick={onClearLogs}
-            className="p-1.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400"
-            title="Clear Logs"
+            disabled={!canClearLogs}
+            className="p-1.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+            title={canClearLogs ? 'Clear Logs' : 'Clearing logs requires the Administrator role'}
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>

@@ -8,6 +8,7 @@ interface MaintenanceApprovalCenterProps {
   onApprove: (id: string, approver: string) => Promise<void>;
   onReject: (id: string, approver: string, note: string) => Promise<void>;
   onRevoke: (id: string) => Promise<void>;
+  canDecide?: boolean;
 }
 
 const statusStyles: Record<MaintenanceApprovalStatus, string> = {
@@ -34,7 +35,8 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
   approvals,
   onApprove,
   onReject,
-  onRevoke
+  onRevoke,
+  canDecide = true
 }) => {
   const [approverName, setApproverName] = useState('');
   const [decisionNote, setDecisionNote] = useState('');
@@ -61,7 +63,7 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
     }
   };
 
-  const canDecide = approverName.trim().length >= 2;
+  const hasApproverName = approverName.trim().length >= 2;
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
@@ -105,6 +107,11 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
       <p className="text-[11px] text-slate-500">
         Approvals live in this project's local workspace. The native bridge still enforces its own authorization flag and BSSID allow-list when a connection is requested.
       </p>
+      {!canDecide && (
+        <p className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+          The current local role cannot approve, reject, or revoke maintenance requests. Switch to Administrator in the audit section below.
+        </p>
+      )}
 
       {error && <p role="alert" className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
 
@@ -150,7 +157,7 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
                   <div className="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-2">
                     <button
                       type="button"
-                      disabled={!canDecide || busy}
+                      disabled={!hasApproverName || !canDecide || busy}
                       onClick={() => void run(record.id, () => onApprove(record.id, approverName))}
                       className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
                     >
@@ -158,13 +165,13 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
                     </button>
                     <button
                       type="button"
-                      disabled={!canDecide || busy}
+                      disabled={!hasApproverName || !canDecide || busy}
                       onClick={() => void run(record.id, () => onReject(record.id, approverName, decisionNote))}
                       className="flex items-center gap-1.5 rounded-lg border border-rose-500/40 px-3 py-1.5 font-semibold text-rose-300 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <XCircle className="h-3.5 w-3.5" /> Reject
                     </button>
-                    {!canDecide && <span className="text-[10px] text-slate-500">Enter the acting approver first.</span>}
+                    {!hasApproverName && <span className="text-[10px] text-slate-500">Enter the acting approver first.</span>}
                   </div>
                 )}
 
@@ -173,7 +180,7 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
                     <span className="text-[11px] text-emerald-300">Connect actions for this BSSID are unlocked until the window expires.</span>
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || !canDecide}
                       onClick={() => void run(record.id, () => onRevoke(record.id))}
                       className="flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
                     >

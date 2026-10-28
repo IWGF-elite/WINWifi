@@ -43,6 +43,7 @@ import {
   serializeAssetCsv
 } from './services/assetRegistry';
 import { ensureScopeInDirectory } from './services/siteDirectory';
+import { downloadBlob } from './services/download';
 import {
   approveMaintenance,
   createMaintenanceRequest,
@@ -51,6 +52,14 @@ import {
   rejectMaintenance,
   revokeMaintenance
 } from './services/maintenanceApproval';
+import { AuditAction, AuditChainState, appendAuditRecord, resetAuditChain } from './services/auditChain';
+import {
+  OperatorRole,
+  can,
+  normalizeOperatorRole,
+  requireCapability,
+  sanitizeOperatorName
+} from './services/operatorRoles';
 import type { AssetImportSummary } from './components/EnterpriseRegistry';
 
 // Components
@@ -190,6 +199,20 @@ export default function App() {
   const maintenanceApprovalsRef = useRef(maintenanceApprovals);
   useEffect(() => { maintenanceApprovalsRef.current = maintenanceApprovals; }, [maintenanceApprovals]);
 
+  const [operatorName, setOperatorName] = useState<string>(
+    () => localStorage.getItem('winwifi_operator_name') || 'Local operator');
+  const operatorNameRef = useRef(operatorName);
+  const [operatorRole, setOperatorRole] = useState<OperatorRole>(
+    () => normalizeOperatorRole(localStorage.getItem('winwifi_operator_role')));
+  const operatorRoleRef = useRef(operatorRole);
+  useEffect(() => { operatorRoleRef.current = operatorRole; }, [operatorRole]);
+
+  const [auditChain, setAuditChain] = useState<AuditChainState>(
+    () => db.getAuditChain(db.getCurrentProjectId()));
+  const auditChainRef = useRef(auditChain);
+  useEffect(() => { auditChainRef.current = auditChain; }, [auditChain]);
+  const [auditError, setAuditError] = useState('');
+
   const [packets, setPackets] = useState<PcapPacket[]>([]);
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
   // A visual row/focus selection is not permission to open the inspection drawer.
@@ -253,6 +276,31 @@ export default function App() {
     setMaintenanceApprovals(next);
     db.saveMaintenanceApprovals(next, projectId);
   }, [db]);
+
+  const commitAuditChain = useCallback((next: AuditChainState, projectId: string) => {
+    auditChainRef.current = next;
+    setAuditChain(next);
+    db.saveAuditChain(next, projectId);
+    setAuditError('');
+  }, [db]);
+
+  const recordAudit = useCallback((
+    action: AuditAction,
+    subject: string,
+    details: string,
+    projectId: string = currentProjectIdRef.current
+  ): void => {
+    const result = appendAuditRecord(
+      auditChainRef.current,
+      { action, subject, details },
+      operatorNameRef.current,
+      operatorRoleRef.current);
+    if (result.error || !result.record) {
+      setAuditError(result.error || 'The audit chain could not record this event.');
+      return;
+    }
+    commitAuditChain(result.state, projectId);
+  }, [commitAuditChain]);
 
   // Native SQLite is authoritative when connected. Local-only records survive
   // and are replayed to the bridge instead of being silently dropped.
@@ -506,6 +554,7 @@ export default function App() {
     justification: string,
     durationMinutes: number
   ): Promise<void> => {
+    requireCapability(operatorRoleRef.current, 'request_maintenance', 'Requesting maintenance approval');
     const projectId = currentProjectIdRef.current;
     const result = createMaintenanceRequest(maintenanceApprovalsRef.current, {
       action: 'Connect to network',
@@ -520,6 +569,7 @@ export default function App() {
       throw new Error(result.error || 'The maintenance request could not be created.');
     }
     commitMaintenanceApprovals(result.records, projectId);
+    recordAudit('MAINTENANCE_REQUEST', `${result.record.ssid || '[hidden network]'} (${result.record.bssid})`, `Request ${result.record.id} by ${result.record.requester}; window ends ${result.record.expiresAt}.`, projectId);
     const log = db.appendLog({
       level: 'INFO',
       source: 'MAINTENANCE',
@@ -529,12 +579,14 @@ export default function App() {
   };
 
   const handleApproveMaintenance = async (id: string, approver: string): Promise<void> => {
+    requireCapability(operatorRoleRef.current, 'approve_maintenance', 'Approving maintenance requests');
     const projectId = currentProjectIdRef.current;
     const result = approveMaintenance(maintenanceApprovalsRef.current, id, approver);
     if (result.error || !result.record) {
       throw new Error(result.error || 'The maintenance approval could not be recorded.');
     }
     commitMaintenanceApprovals(result.records, projectId);
+    recordAudit('MAINTENANCE_APPROVE', `${result.record.ssid || '[hidden network]'} (${result.record.bssid})`, `Request ${id} approved by ${result.record.approver}; expires ${result.record.expiresAt}.`, projectId);
     const log = db.appendLog({
       level: 'SUCCESS',
       source: 'MAINTENANCE',
@@ -544,12 +596,14 @@ export default function App() {
   };
 
   const handleRejectMaintenance = async (id: string, approver: string, note: string): Promise<void> => {
+    requireCapability(operatorRoleRef.current, 'approve_maintenance', 'Rejecting maintenance requests');
     const projectId = currentProjectIdRef.current;
     const result = rejectMaintenance(maintenanceApprovalsRef.current, id, approver, note);
     if (result.error || !result.record) {
       throw new Error(result.error || 'The maintenance rejection could not be recorded.');
     }
     commitMaintenanceApprovals(result.records, projectId);
+    recordAudit('MAINTENANCE_REJECT', `${result.record.ssid || '[hidden network]'} (${result.record.bssid})`, `Request ${id} rejected by ${result.record.approver}${result.record.decisionNote ? `: ${result.record.decisionNote}` : '.'}`, projectId);
     const log = db.appendLog({
       level: 'WARN',
       source: 'MAINTENANCE',
@@ -559,12 +613,14 @@ export default function App() {
   };
 
   const handleRevokeMaintenance = async (id: string): Promise<void> => {
+    requireCapability(operatorRoleRef.current, 'approve_maintenance', 'Revoking maintenance approvals');
     const projectId = currentProjectIdRef.current;
     const result = revokeMaintenance(maintenanceApprovalsRef.current, id);
     if (result.error || !result.record) {
       throw new Error(result.error || 'The maintenance approval could not be revoked.');
     }
     commitMaintenanceApprovals(result.records, projectId);
+    recordAudit('MAINTENANCE_REVOKE', `${result.record.ssid || '[hidden network]'} (${result.record.bssid})`, `Request ${id} was revoked.`, projectId);
     const log = db.appendLog({
       level: 'WARN',
       source: 'MAINTENANCE',
@@ -574,10 +630,12 @@ export default function App() {
   };
 
   const handleAuthorizedConnect = async (ap: AccessPoint, password: string, confirmed: boolean): Promise<string> => {
+    requireCapability(operatorRoleRef.current, 'connect_network', 'Connecting this PC to a network');
     if (bridgeClient.getState() !== 'CONNECTED') throw new Error('Windows bridge is not connected.');
     if (!confirmed) throw new Error('Connection blocked: confirm that you own or are authorized to test this network.');
     const approval = findActiveApproval(maintenanceApprovalsRef.current, ap.bssid);
     if (!approval) {
+      recordAudit('CONNECT_ATTEMPT', `${ap.ssid || '[hidden network]'} (${ap.bssid})`, 'Blocked: no active maintenance approval.');
       throw new Error('Connection blocked: this BSSID has no active maintenance approval. Request one in the inspection panel and have a different analyst approve it.');
     }
     const result = await bridgeClient.connectAuthorizedNetwork({
@@ -591,6 +649,7 @@ export default function App() {
     if (result.state === 'Connected') setConnectedBssid(result.bssid);
     const used = markApprovalUsed(maintenanceApprovalsRef.current, approval.id);
     if (!used.error) commitMaintenanceApprovals(used.records, currentProjectIdRef.current);
+    recordAudit('CONNECT_ATTEMPT', `${ap.ssid || '[hidden network]'} (${ap.bssid})`, `${result.state}: ${result.reason} Approval ${approval.id} by ${approval.approver}.`);
     const log = db.appendLog({
       level: result.state === 'Failed' ? 'ERROR' : 'INFO',
       source: 'WLAN_CONNECT',
@@ -833,10 +892,15 @@ export default function App() {
   };
 
   const handleSiteDirectoryChange = useCallback((sites: SiteRecord[], changedAssets: EnterpriseAssetRecord[]) => {
+    if (!can(operatorRoleRef.current, 'manage_sites')) {
+      setAuditError('Editing the site directory is not allowed by the current local role.');
+      return;
+    }
     const projectId = currentProjectIdRef.current;
     siteDirectoryRef.current = sites;
     setSiteDirectory(sites);
     db.saveSiteDirectory(sites, projectId);
+    recordAudit('SITE_DIRECTORY', 'Site directory updated', `${sites.length} site(s) saved; ${changedAssets.length} registry location record(s) updated.`, projectId);
 
     if (changedAssets.length === 0) return;
 
@@ -867,9 +931,10 @@ export default function App() {
       }, projectId);
       setLogs(previous => [log, ...previous]);
     });
-  }, [bridgeClient, commitEnterpriseAssets, db]);
+  }, [bridgeClient, commitEnterpriseAssets, db, recordAudit]);
 
   const handleSaveEnterpriseAsset = async (asset: EnterpriseAssetRecord) => {
+    requireCapability(operatorRoleRef.current, 'edit_assets', 'Editing registry assets');
     const projectId = currentProjectIdRef.current;
     const next = mergeAssetLists(enterpriseAssetsRef.current, [asset]);
     commitEnterpriseAssets(next, projectId);
@@ -898,12 +963,15 @@ export default function App() {
     });
     setLogs(previous => [log, ...previous]);
 
+    recordAudit('ASSET_SAVE', `${asset.macAddress} (${asset.classification} / ${asset.approvalStatus})`, syncError ? `Saved locally; native sync failed: ${syncError}` : 'Saved to the project registry.', projectId);
+
     if (syncError) {
       throw new Error(`Saved to the local project cache, but native SQLite sync failed: ${syncError}`);
     }
   };
 
   const handleDeleteEnterpriseAsset = async (macAddress: string) => {
+    requireCapability(operatorRoleRef.current, 'delete_assets', 'Deleting registry assets');
     const mac = normalizeMac(macAddress);
     if (!mac) throw new Error('A valid MAC address is required to delete a registry record.');
     const projectId = currentProjectIdRef.current;
@@ -935,12 +1003,15 @@ export default function App() {
     });
     setLogs(previous => [log, ...previous]);
 
+    recordAudit('ASSET_DELETE', mac, syncError ? `Removed locally; native delete failed: ${syncError}` : 'Removed from the project registry; evidence untouched.', projectId);
+
     if (syncError) {
       throw new Error(`Removed from the local project cache, but native SQLite delete failed: ${syncError}`);
     }
   };
 
   const handleImportEnterpriseAssetsCsv = async (csv: string): Promise<AssetImportSummary> => {
+    requireCapability(operatorRoleRef.current, 'import_assets', 'Importing asset CSV');
     const parsed = parseAssetCsv(csv);
     if (parsed.fatalError) throw new Error(parsed.fatalError);
     if (parsed.rows.length === 0) {
@@ -999,6 +1070,12 @@ export default function App() {
     }, projectId);
     setLogs(previous => [log, ...previous]);
 
+    recordAudit(
+      'ASSET_IMPORT',
+      `${parsed.rows.length} valid asset row(s)`,
+      `${parsed.rejected.length} rejected; ${syncError ? `native sync failed: ${syncError}` : connected ? 'written to project SQLite.' : 'cached locally; bridge offline.'}`,
+      projectId);
+
     const message = [
       `Read ${parsed.rowsRead} row(s): ${parsed.rows.length} valid record(s), ${parsed.rejected.length} rejected.`,
       parsed.warnings.length > 0 ? `${parsed.warnings.length} warning(s) written to the audit log.` : '',
@@ -1019,6 +1096,10 @@ export default function App() {
   };
 
   const handleExportEnterpriseAssetsCsv = () => {
+    if (!can(operatorRoleRef.current, 'export_report')) {
+      setAuditError('Exporting the asset registry is not allowed by the current local role.');
+      return;
+    }
     const assets = enterpriseAssetsRef.current;
     if (assets.length === 0) return;
     const csv = serializeAssetCsv(assets);
@@ -1037,6 +1118,7 @@ export default function App() {
       message: `Exported ${assets.length} enterprise asset record(s) to CSV. Formula-leading cells were neutralized.`,
     });
     setLogs(previous => [log, ...previous]);
+    recordAudit('ASSET_EXPORT', `${assets.length} asset record(s)`, 'Exported the registry to CSV; formula-leading cells were neutralized.');
   };
 
   const handleClassifyAP = (bssid: string, classification: AnalystClassification) => {
@@ -1087,6 +1169,10 @@ export default function App() {
     const localApprovals = db.getMaintenanceApprovals(projectId);
     maintenanceApprovalsRef.current = localApprovals;
     setMaintenanceApprovals(localApprovals);
+    const localAudit = db.getAuditChain(projectId);
+    auditChainRef.current = localAudit;
+    setAuditChain(localAudit);
+    setAuditError('');
     setAccessPoints(applyAssetsToAccessPoints(savedAps, localAssets));
     setIncidents(savedIncidents);
     threatEngine.setIncidents(savedIncidents);
@@ -1127,6 +1213,10 @@ export default function App() {
 
   // Create Project in SQLite
   const handleCreateProject = (newProj: AuditProject) => {
+    if (!can(operatorRoleRef.current, 'manage_projects')) {
+      setAuditError('Creating projects is not allowed by the current local role.');
+      return;
+    }
     const updated = [newProj, ...projects];
     setProjects(updated);
     db.saveProjects(updated);
@@ -1144,9 +1234,14 @@ export default function App() {
       message: `Created SQLite project session: "${newProj.name}".`,
     }, newProj.id);
     setLogs((prev) => [log, ...prev]);
+    recordAudit('PROJECT_CREATE', newProj.name, `Created project workspace ${newProj.id}.`, newProj.id);
   };
 
   const handleRenameProject = (projectId: string, name: string) => {
+    if (!can(operatorRoleRef.current, 'manage_projects')) {
+      setAuditError('Renaming projects is not allowed by the current local role.');
+      return;
+    }
     const updated = projects.map(project => project.id === projectId
       ? { ...project, name, updatedAt: new Date().toISOString() }
       : project);
@@ -1159,10 +1254,16 @@ export default function App() {
         // Renaming is persisted locally first; the bridge syncs on reconnect.
       });
     }
+    recordAudit('PROJECT_RENAME', name, `Renamed project ${projectId} to "${name}".`);
   };
 
   const handleDeleteProject = (projectId: string) => {
+    if (!can(operatorRoleRef.current, 'manage_projects')) {
+      setAuditError('Deleting projects is not allowed by the current local role.');
+      return;
+    }
     if (projects.length <= 1) return;
+    const deletedName = projects.find(project => project.id === projectId)?.name || projectId;
     const updated = projects.filter(project => project.id !== projectId);
     if (updated.length === projects.length) return;
     db.deleteProjectData(projectId);
@@ -1175,8 +1276,46 @@ export default function App() {
       currentProjectIdRef.current = next.id;
       applyProjectWorkspace(next.id, next.name, next.scope);
     }
-    const log = db.appendLog({ level: 'INFO', source: 'PROJECT_MGR', message: `Deleted project "${projects.find(project => project.id === projectId)?.name || projectId}" and its saved network observations.` });
+    const log = db.appendLog({ level: 'INFO', source: 'PROJECT_MGR', message: `Deleted project "${deletedName}" and its saved network observations.` });
     setLogs(previous => [log, ...previous]);
+    recordAudit('PROJECT_DELETE', deletedName, `Deleted project ${projectId} and its scoped workspace, including its audit chain.`);
+  };
+
+  const handleOperatorNameChange = (name: string) => {
+    const next = name.slice(0, 80);
+    operatorNameRef.current = next;
+    setOperatorName(next);
+    localStorage.setItem('winwifi_operator_name', next);
+  };
+
+  const handleOperatorRoleChange = (role: OperatorRole) => {
+    const previous = operatorRoleRef.current;
+    if (role === previous) return;
+    operatorRoleRef.current = role;
+    setOperatorRole(role);
+    localStorage.setItem('winwifi_operator_role', role);
+    recordAudit(
+      'ROLE_CHANGE',
+      `Local role: ${role}`,
+      `Changed from ${previous} to ${role} for ${sanitizeOperatorName(operatorNameRef.current)}. This is a local guardrail, not authentication.`);
+  };
+
+  const handleExportAuditChain = async (): Promise<void> => {
+    requireCapability(operatorRoleRef.current, 'export_report', 'Exporting the audit chain');
+    const before = auditChainRef.current;
+    recordAudit('AUDIT_EXPORT', 'Audit chain export', `Exported ${before.records.length} record(s); head ${before.records[before.records.length - 1]?.hash || 'genesis'}.`);
+    const chain = auditChainRef.current;
+    const blob = new Blob([JSON.stringify(chain, null, 2)], { type: 'application/json' });
+    downloadBlob(blob, `winwifi-audit-${currentProjectIdRef.current}-${new Date().toISOString().slice(0, 10)}.json`);
+  };
+
+  const handleResetAuditChain = async (): Promise<void> => {
+    requireCapability(operatorRoleRef.current, 'manage_roles', 'Starting a new audit chain');
+    const next = resetAuditChain(
+      auditChainRef.current,
+      sanitizeOperatorName(operatorNameRef.current),
+      operatorRoleRef.current);
+    commitAuditChain(next, currentProjectIdRef.current);
   };
 
   const handleAddEvidence = (incidentId: string, evidence: EvidenceItem) => {
@@ -1578,6 +1717,9 @@ export default function App() {
                 maintenanceApprovals={maintenanceApprovals}
                 onRequestMaintenance={handleRequestMaintenance}
                 onApproveMaintenance={handleApproveMaintenance}
+                canRequestMaintenance={can(operatorRole, 'request_maintenance')}
+                canApproveMaintenance={can(operatorRole, 'approve_maintenance')}
+                canConnect={can(operatorRole, 'connect_network')}
               />
             )}
           </div>
@@ -1723,6 +1865,14 @@ export default function App() {
             onApproveMaintenance={handleApproveMaintenance}
             onRejectMaintenance={handleRejectMaintenance}
             onRevokeMaintenance={handleRevokeMaintenance}
+            auditChain={auditChain}
+            operatorName={operatorName}
+            operatorRole={operatorRole}
+            onOperatorNameChange={handleOperatorNameChange}
+            onOperatorRoleChange={handleOperatorRoleChange}
+            onExportAudit={handleExportAuditChain}
+            onResetAudit={handleResetAuditChain}
+            auditError={auditError}
           />
         )}
 
@@ -1734,7 +1884,13 @@ export default function App() {
         {/* Real-time Diagnostics & Auditing Logs Console */}
         <LogConsole
           logs={logs}
+          canClearLogs={can(operatorRole, 'clear_logs')}
           onClearLogs={() => {
+            if (!can(operatorRoleRef.current, 'clear_logs')) {
+              setAuditError('Clearing diagnostic logs is not allowed by the current local role.');
+              return;
+            }
+            recordAudit('LOG_CLEAR', 'Diagnostic logs cleared', `${logs.length} log entr${logs.length === 1 ? 'y' : 'ies'} removed; the audit chain was retained.`);
             db.clearLogs();
             setLogs([]);
           }}
