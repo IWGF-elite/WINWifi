@@ -85,6 +85,13 @@ import {
   summarizeAlerts
 } from '../src/services/alerts';
 import { bridgeStatusView, classifyBridgeError, isEmbeddedDashboard, resolveBridgeBaseUrl } from '../src/services/bridgeStatus';
+import {
+  FIXTURE_ACCESS_POINTS,
+  buildBeaconFrame,
+  buildDataFrame,
+  buildEapolFrame,
+  buildRadiotapPcap
+} from './fixtures';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -119,17 +126,33 @@ runTest('T1: System Capabilities & Detection', () => {
 
 // 2. Binary PCAP Dissection
 runTest('T2: Libpcap 2.4 Binary Dissection & Framing', () => {
-  const engine = WifiEngine.getInstance();
   const pcap = PcapService.getInstance();
-  const benchmarkAps = engine.getBenchmarkAccessPoints();
-  const testPackets = engine.generatePackets(benchmarkAps);
-  const binaryBytes = pcap.exportBinaryPcap(testPackets.slice(0, 5));
-  const parsed = pcap.parseBinaryPcap(binaryBytes.buffer);
-  if (parsed.packets.length !== 5) {
-    throw new Error(`Expected 5 packets, got ${parsed.packets.length}`);
+  const channels = [1, 6, 11, 36, 44];
+  const frames = channels.map((channel, index) => buildBeaconFrame({
+    bssid: `02:00:00:00:00:${String(index + 1).padStart(2, '0')}`,
+    ssid: `T2 Fixture ${channel}`,
+    channel,
+    akmSuiteType: 2
+  }));
+
+  const parsed = pcap.parseBinaryPcap(buildRadiotapPcap(frames));
+  if (parsed.packets.length !== frames.length) {
+    throw new Error(`Expected ${frames.length} packets, got ${parsed.packets.length}`);
   }
-  if (!parsed.summary || parsed.summary.totalPackets !== 5) {
+  if (!parsed.summary || parsed.summary.totalPackets !== frames.length) {
     throw new Error('Summary mismatch');
+  }
+  if (parsed.accessPoints.length !== channels.length) {
+    throw new Error(`Expected ${channels.length} BSS entries, got ${parsed.accessPoints.length}`);
+  }
+  const decodedChannels = parsed.accessPoints.map(ap => ap.channel).sort((a, b) => a - b);
+  if (decodedChannels.join(',') !== channels.join(',')) {
+    throw new Error(`DS-set channel decoding failed: ${decodedChannels.join(',')}`);
+  }
+  for (const ap of parsed.accessPoints) {
+    if (ap.security !== 'WPA2-Personal (AES)' || ap.cipher !== 'CCMP (AES)') {
+      throw new Error(`RSN IE decoding failed for ${ap.ssid}: ${ap.security}/${ap.cipher}`);
+    }
   }
 });
 
@@ -148,21 +171,53 @@ runTest('T3: RF Spectrum Math (2.4, 5, 6 GHz)', () => {
   if (ch69.freqMhz !== 6295 || ch69.band !== '6 GHz') throw new Error('CH69 6GHz failed');
 });
 
-// 4. EAPOL Cryptographic Handshake & Hashcat 22000
-runTest('T4: Cryptographic Handshake & Hashcat 22000 Structure', () => {
-  const engine = WifiEngine.getInstance();
-  const benchmarkAps = engine.getBenchmarkAccessPoints();
-  const apWithHandshake = benchmarkAps.find(a => a.handshake);
-  if (!apWithHandshake || !apWithHandshake.handshake) {
-    throw new Error('No handshake in benchmark');
+// 4. EAPOL 4-Way Handshake reconstruction from capture bytes
+runTest('T4: EAPOL Metadata & Hashcat 22000 Structure From Frame Bytes', () => {
+  const pcap = PcapService.getInstance();
+  const apBssid = '02:00:00:00:00:0A';
+  const clientMac = '02:00:00:00:00:0B';
+  const toHex = (bytes: number[]) => bytes.map(b => b.toString(16).padStart(2, '0')).join('');
+  const anonce = Array.from({ length: 32 }, (_, i) => 0xA1 + (i % 16));
+  const snonce = Array.from({ length: 32 }, (_, i) => 0x1B + (i % 16));
+  const mic = Array.from({ length: 16 }, (_, i) => 0xF0 - i);
+
+  const frames = [
+    buildBeaconFrame({ bssid: apBssid, ssid: 'T4 Fixture Net', channel: 44, akmSuiteType: 1 }),
+    buildEapolFrame({ apBssid, clientMac, step: 'M1', nonce: anonce, mic: new Array(16).fill(0), replayCounter: 1 }),
+    buildEapolFrame({ apBssid, clientMac, step: 'M2', nonce: snonce, mic, replayCounter: 2 })
+  ];
+
+  const parsed = pcap.parseBinaryPcap(buildRadiotapPcap(frames));
+  const handshake = parsed.handshakes[0];
+  if (!handshake) throw new Error('No EAPOL handshake reconstructed from the fixture capture');
+  if (handshake.apBssid !== apBssid || handshake.clientMac !== clientMac) {
+    throw new Error(`Wrong MAC attribution: ${handshake.apBssid}/${handshake.clientMac}`);
   }
-  const hs = apWithHandshake.handshake;
-  if (!hs.hashcatFormat?.startsWith('WPA*02*')) {
-    throw new Error(`Invalid Hashcat prefix: ${hs.hashcatFormat ?? '(missing)'}`);
+  if (handshake.ssid !== 'T4 Fixture Net') {
+    throw new Error(`Handshake SSID was not taken from the beacon: ${handshake.ssid}`);
   }
-  if (!hs.capturedSteps || hs.capturedSteps.length < 2) {
-    throw new Error('Incomplete handshake messages');
+  if (!handshake.isComplete || handshake.capturedSteps.length !== 2) {
+    throw new Error(`Incomplete M-step tracking: ${handshake.capturedSteps.join(',')}`);
   }
+  if (handshake.anonce !== toHex(anonce).toUpperCase() || handshake.snonce !== toHex(snonce).toUpperCase()) {
+    throw new Error('Nonce bytes were mis-attributed between M1 and M2');
+  }
+  if (handshake.micHex !== toHex(mic).toUpperCase() || !handshake.micVerified) {
+    throw new Error('M2 MIC was not recovered from the frame');
+  }
+
+  // The 22000 line is assembled only from bytes present in the capture.
+  const line = handshake.hashcatFormat;
+  if (!line?.startsWith('WPA*02*')) {
+    throw new Error(`Missing 22000 line despite a complete M1/M2 pair: ${line ?? '(none)'}`);
+  }
+  const fields = line.split('*');
+  if (fields.length !== 9) throw new Error(`Expected 8 delimited hash fields, got ${fields.length - 1}`);
+  if (fields[2] !== toHex(mic).toLowerCase()) throw new Error('Hash MIC does not match the captured M2');
+  if (fields[3] !== apBssid.replace(/:/g, '').toLowerCase()) throw new Error('Hash BSSID field wrong');
+  if (fields[4] !== clientMac.replace(/:/g, '').toLowerCase()) throw new Error('Hash client field wrong');
+  if (fields[6] !== toHex(anonce).toLowerCase()) throw new Error('Hash ANonce does not match the captured M1');
+  if (!fields[7] || fields[7].length < 198) throw new Error('Hash EAPOL field is not the raw M2 payload');
 });
 
 // 5. Windows netsh Stream Parser
@@ -198,28 +253,74 @@ SSID 2 : Open_Public
   }
 });
 
-// 6. SQLite Query Engine
-runTest('T6: SQLite Client Storage & SQL Terminal', () => {
-  const engine = WifiEngine.getInstance();
+// 6. SQL query engine over the observed access-point table
+runTest('T6: SQL Query Engine Filtering, Projection & Schema Reads', () => {
   const db = SqliteDatabaseService.getInstance();
-  const benchmarkAps = engine.getBenchmarkAccessPoints();
-  
-  const resWhere = db.executeQuery('SELECT * FROM access_points WHERE score < 50;', benchmarkAps);
-  const resLimit = db.executeQuery('SELECT ssid, bssid, channel FROM access_points ORDER BY channel LIMIT 3;', benchmarkAps);
-  
-  if (resWhere.rowCount === 0) throw new Error('WHERE query returned 0 rows');
-  if (resLimit.rowCount !== 3) throw new Error(`LIMIT query returned ${resLimit.rowCount} rows`);
+
+  const weak = db.executeQuery('SELECT * FROM access_points WHERE score < 50;', FIXTURE_ACCESS_POINTS);
+  if (weak.rowCount !== 2) throw new Error(`WHERE score < 50 returned ${weak.rowCount} rows, expected 2`);
+  for (const row of weak.rows) {
+    const score = row[row.length - 1];
+    if (typeof score !== 'number' || score >= 50) throw new Error(`Unfiltered row leaked: ${JSON.stringify(row)}`);
+  }
+
+  const projected = db.executeQuery('SELECT ssid, bssid, channel FROM access_points ORDER BY channel LIMIT 3;', FIXTURE_ACCESS_POINTS);
+  if (projected.columns.join(',') !== 'ssid,bssid,channel') {
+    throw new Error(`Column projection lost: ${projected.columns.join(',')}`);
+  }
+  if (projected.rowCount !== 3) throw new Error(`LIMIT 3 returned ${projected.rowCount} rows`);
+  if (projected.rows[0][2] !== 1) throw new Error(`ORDER BY channel ascending failed: first row is ${projected.rows[0][2]}`);
+
+  const wps = db.executeQuery("SELECT bssid FROM access_points WHERE wps = 1;", FIXTURE_ACCESS_POINTS);
+  if (wps.rowCount !== 1) throw new Error(`WPS filter returned ${wps.rowCount} rows, expected 1`);
+
+  const five = db.executeQuery("SELECT bssid FROM access_points WHERE band = '5 GHz';", FIXTURE_ACCESS_POINTS);
+  if (five.rowCount !== 2) throw new Error(`5 GHz filter returned ${five.rowCount} rows, expected 2`);
+
+  const schema = db.executeQuery("SELECT name FROM sqlite_master WHERE type='table';", FIXTURE_ACCESS_POINTS);
+  if (schema.tableName !== 'sqlite_master' || !schema.rows.some(row => row[1] === 'access_points')) {
+    throw new Error('Schema query did not list the access_points table');
+  }
 });
 
-// 7. NIST SP 800-153 Policy & Rogue AP Engine
-runTest('T7: NIST SP 800-153 Policy & Rogue AP Engine', () => {
-  const engine = WifiEngine.getInstance();
-  const benchmarkAps = engine.getBenchmarkAccessPoints();
-  const rogue = benchmarkAps.find(a => a.isRogueCandidate);
-  const wep = benchmarkAps.find(a => a.security.includes('WEP'));
-  
-  if (!rogue) throw new Error('Rogue candidate not detected');
-  if (!wep || wep.securityScore > 40) throw new Error('WEP score not penalized appropriately');
+// 7. NIST SP 800-153 posture heuristics on decoded beacons
+runTest('T7: NIST SP 800-153 Risk Scoring & Penalty Heuristics', () => {
+  const pcap = PcapService.getInstance();
+  const frames = [
+    buildBeaconFrame({ bssid: '02:00:00:00:00:21', ssid: 'T7 Open', channel: 6 }),
+    buildBeaconFrame({ bssid: '02:00:00:00:00:22', ssid: 'T7 WEP', channel: 1, wpsEnabled: true }),
+    buildBeaconFrame({ bssid: '02:00:00:00:00:23', ssid: 'T7 WPA2', channel: 11, akmSuiteType: 2 }),
+    buildBeaconFrame({ bssid: '02:00:00:00:00:24', ssid: 'T7 WPA3', channel: 36, akmSuiteType: 8, pmfRequired: true })
+  ];
+  const parsed = pcap.parseBinaryPcap(buildRadiotapPcap(frames));
+  const bySsid = new Map(parsed.accessPoints.map(ap => [ap.ssid, ap]));
+
+  const open = bySsid.get('T7 Open');
+  if (!open || open.security !== 'Open') throw new Error('Open beacon was not decoded from the capability bits');
+  if (!open.issues.some(issue => issue.id === 'ISS-OPEN')) throw new Error('Missing cleartext finding on the Open network');
+  if (open.securityScore > 40) throw new Error(`Open network scored too high: ${open.securityScore}`);
+
+  const wep = bySsid.get('T7 WEP');
+  if (!wep || !wep.security.includes('WEP')) throw new Error('WEP beacon was not decoded');
+  if (!wep.issues.some(issue => issue.id === 'ISS-WEP' && issue.severity === 'CRITICAL')) {
+    throw new Error('WEP is not reported as a critical cipher');
+  }
+  if (!wep.wpsEnabled || !wep.issues.some(issue => issue.id === 'ISS-WPS')) {
+    throw new Error('WPS element was not decoded on the legacy network');
+  }
+  if (wep.securityScore > 10) throw new Error(`WEP + WPS scored too high: ${wep.securityScore}`);
+
+  const wpa2 = bySsid.get('T7 WPA2');
+  if (!wpa2 || wpa2.security !== 'WPA2-Personal (AES)') throw new Error('RSN element was not decoded');
+  if (!wpa2.issues.some(issue => issue.id === 'ISS-PMF')) throw new Error('Missing PMF finding when 802.11w is optional');
+
+  const wpa3 = bySsid.get('T7 WPA3');
+  if (!wpa3 || !wpa3.security.includes('WPA3') || !wpa3.pmfRequired) {
+    throw new Error(`WPA3/PMF beacon decoding failed: ${wpa3?.security}/${wpa3?.pmfRequired}`);
+  }
+  if (wpa3.securityScore !== 100 || wpa3.issues.length !== 0) {
+    throw new Error(`A hardened network should score 100 with no findings, got ${wpa3.securityScore}/${wpa3.issues.length}`);
+  }
 });
 
 // 8. Deterministic Rogue/Evil Twin Heuristic Tests
@@ -291,16 +392,28 @@ runTest('T8: Deterministic Evil Twin & Roaming Validation', () => {
   }
 });
 
-// 9. Station / Client Tracking Source of Truth
+// 9. Station observation decoded from associated data frames
 runTest('T9: Station Observer & Association State Mapping', () => {
-  const engine = WifiEngine.getInstance();
-  const benchmarkAps = engine.getBenchmarkAccessPoints();
-  const allClients = benchmarkAps.flatMap(a => a.clients);
-  if (allClients.length === 0) throw new Error('No client stations available in benchmark');
-
-  for (const client of allClients) {
-    if (!client.macAddress || !client.vendor) throw new Error('Client record missing MAC or Vendor');
-    if (typeof client.rssi !== 'number' || client.rssi > 0) throw new Error(`Invalid client RSSI: ${client.rssi}`);
+  const pcap = PcapService.getInstance();
+  const apBssid = '02:00:00:00:00:31';
+  const clientMac = '02:00:00:00:00:32';
+  const frames = [
+    buildBeaconFrame({ bssid: apBssid, ssid: 'T9 Fixture Net', channel: 36, akmSuiteType: 2 }),
+    buildDataFrame({ apBssid, clientMac }),
+    buildDataFrame({ apBssid, clientMac })
+  ];
+  const parsed = pcap.parseBinaryPcap(buildRadiotapPcap(frames));
+  const ap = parsed.accessPoints.find(entry => entry.bssid === apBssid);
+  if (!ap) throw new Error('Beacon did not register the access point before station traffic');
+  if (ap.clients.length !== 1) throw new Error(`Expected 1 associated station, got ${ap.clients.length}`);
+  const client = ap.clients[0];
+  if (client.macAddress !== clientMac || client.apBssid !== apBssid) {
+    throw new Error(`Station mapping wrong: ${client.macAddress} on ${client.apBssid}`);
+  }
+  if (client.packetsSent !== 2) throw new Error(`Frame counting drift: packetsSent=${client.packetsSent}`);
+  if (typeof client.rssi !== 'number' || client.rssi > 0) throw new Error(`Invalid client RSSI: ${client.rssi}`);
+  if (typeof client.vendor !== 'string' || client.vendor.length === 0) {
+    throw new Error('Vendor resolution returned no label for the observed station');
   }
 });
 
@@ -464,7 +577,7 @@ runTest('T14: Policy Selection and Evidence Persistence', () => {
     const policyEngine = PolicyEngine.getInstance();
     policyEngine.setActivePolicy('high-sec-policy');
     if (policyEngine.getActivePolicy().id !== 'high-sec-policy') throw new Error('Selected policy was not activated');
-    const weakAp = WifiEngine.getInstance().getBenchmarkAccessPoints().find(ap => ap.security === 'Open');
+    const weakAp = FIXTURE_ACCESS_POINTS.find(ap => ap.security === 'Open');
     if (!weakAp) throw new Error('No open AP available for policy evaluation');
     const result = policyEngine.evaluateAP(weakAp);
     if (result.status === 'Compliant' || result.policyName !== 'High Security Policy') throw new Error('Active policy did not evaluate the AP');
