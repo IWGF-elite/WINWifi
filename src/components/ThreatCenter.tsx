@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Flame, 
   CheckCircle2, 
@@ -22,8 +22,10 @@ interface ThreatCenterProps {
   onClassifyAP: (bssid: string, status: AnalystClassification) => void;
 }
 
+const EMPTY_ACCESS_POINTS: AccessPoint[] = [];
+
 export const ThreatCenter: React.FC<ThreatCenterProps> = ({
-  accessPoints = [],
+  accessPoints = EMPTY_ACCESS_POINTS,
   incidents = [],
   securityChanges = [],
   uiMode,
@@ -33,6 +35,11 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
   onClassifyAP
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'rogues' | 'changes'>('rogues');
+  const [analysis, setAnalysis] = useState<{ at: number; count: number } | null>(null);
+
+  useEffect(() => {
+    setAnalysis({ at: Date.now(), count: accessPoints.length });
+  }, [accessPoints]);
 
   // Filter rogue candidates
   const rogueAPs = accessPoints.filter(a => a.isRogueCandidate || a.classification === 'Rogue' || a.classification === 'Suspicious');
@@ -61,6 +68,9 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 Multi-factor defensive correlation analyzing SSID collisions, cryptographic downgrades, OUI anomalies, and historical drift.
+              </p>
+              <p className="mt-1 text-[10px] text-slate-500" aria-live="polite">
+                {analysis ? `Last analyzed at ${new Date(analysis.at).toLocaleTimeString()}, ${analysis.count} APs checked` : 'No observations analyzed'}
               </p>
             </div>
           </div>
