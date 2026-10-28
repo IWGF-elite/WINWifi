@@ -412,24 +412,6 @@ export interface AuditLog {
   message: string;
 }
 
-export interface TrainingLabScenario {
-  id: string;
-  title: string;
-  category: 'Secure' | 'Vulnerability' | 'Threat' | 'Anomaly' | 'Forensic';
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
-  description: string;
-  learningObjectives: string[];
-  simulatedAPs: AccessPoint[];
-  simulatedPackets: PcapPacket[];
-  simulatedHandshakes: HandshakeInfo[];
-  guidedExplanation: {
-    overview: string;
-    whyItMatters: string;
-    howToInvestigate: string;
-    remediation: string;
-  };
-}
-
 export type ActiveTab = 
   | 'dashboard'
   | 'discover'

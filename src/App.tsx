@@ -16,7 +16,6 @@ import {
   IncidentRecord,
   EvidenceItem,
   SecurityChange,
-  TrainingLabScenario,
   AnalystClassification,
   EnterpriseAssetRecord,
   EnterpriseScope,
@@ -856,29 +855,6 @@ export default function App() {
       level: 'SUCCESS',
       source: 'NETSH_INGEST',
       message: logMsg,
-    });
-    setLogs((prev) => [log, ...prev]);
-  };
-
-  // Load Offline Training Scenario
-  const handleLoadLabScenario = (scenario: TrainingLabScenario) => {
-    const taggedAps = applyAnalystOverrides(scenario.simulatedAPs.map((a) => ({
-      ...a,
-      dataSourceOrigin: 'TRAINING' as DataOrigin,
-    })), db.getAnalystOverrides(currentProjectId));
-    setAccessPoints(taggedAps);
-    db.saveAccessPoints(currentProjectId, taggedAps);
-    setPackets(engine.generatePackets(taggedAps));
-    setDataSourceProfile('TRAINING');
-    setActiveSourceLabel(`Lab: ${scenario.title}`);
-    setInspectedBssid(null);
-    setSelectedBssid(taggedAps[0]?.bssid || null);
-    handleNavigate('dashboard');
-
-    const log = db.appendLog({
-      level: 'INFO',
-      source: 'OFFLINE_LAB',
-      message: `Loaded offline interactive lab scenario: ${scenario.title}.`,
     });
     setLogs((prev) => [log, ...prev]);
   };
@@ -1998,7 +1974,6 @@ export default function App() {
             uiMode={uiMode}
             accessPoints={accessPoints}
             onToggleUIMode={handleToggleUIMode}
-            onLoadLabScenario={handleLoadLabScenario}
             maintenanceApprovals={maintenanceApprovals}
             onApproveMaintenance={handleApproveMaintenance}
             onRejectMaintenance={handleRejectMaintenance}
