@@ -1,7 +1,7 @@
 import React from 'react';
 import { CheckCircle2, CircleDashed, KeyRound, RefreshCw, ShieldCheck, TriangleAlert, Wifi } from 'lucide-react';
 import { BridgeConnectionState, DataSourceProfile, WifiAdapter } from '../types';
-import { BridgeErrorKind, BRIDGE_RETRY_NOTE, bridgeStatusView } from '../services/bridgeStatus';
+import { BridgeErrorKind, BRIDGE_RETRY_NOTE, bridgeStatusView, isEmbeddedDashboard } from '../services/bridgeStatus';
 import { WinWiFiLogo } from './WinWiFiLogo';
 
 interface StartupReadinessOverlayProps {
@@ -21,9 +21,10 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
   const bridgeReady = bridgeState === 'CONNECTED';
   const scanReady = dataSourceProfile === 'LIVE_WINDOWS' && accessPointCount >= 0;
   const failed = bridgeState === 'ERROR';
-  const view = bridgeStatusView(bridgeState, errorKind ?? null);
+  const shell = isEmbeddedDashboard();
+  const view = bridgeStatusView(bridgeState, errorKind ?? null, shell);
   const steps = [
-    { label: 'Checking Windows WLAN bridge', detail: bridgeReady ? 'Local bridge connected' : failed ? view.label : 'Connecting to localhost', done: bridgeReady, failed },
+    { label: 'Checking Windows WLAN bridge', detail: bridgeReady ? 'Local bridge connected' : failed ? view.label : 'Starting the live data connection', done: bridgeReady, failed },
     { label: 'Detecting Wi-Fi adapters', detail: adapters.length ? `${adapters.length} adapter${adapters.length === 1 ? '' : 's'} available` : bridgeReady ? 'No adapter reported by Windows' : 'Waiting for bridge', done: bridgeReady && adapters.length > 0, failed: bridgeReady && adapters.length === 0 },
     { label: 'Loading authorized audit history', detail: 'Local project data is ready', done: true, failed: false },
     { label: 'Starting live telemetry', detail: scanReady ? `${accessPointCount} current BSSID${accessPointCount === 1 ? '' : 's'} observed` : bridgeReady ? 'Waiting for first WLAN observation' : 'Requires local bridge', done: scanReady, failed: false }
@@ -53,7 +54,7 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
                 <span>{view.title}.</span>
               </div>
               <p className="mt-1 leading-relaxed">{view.description}</p>
-              {error && <p className="mt-1 text-[11px] opacity-70">{error}</p>}
+              {!shell && error && <p className="mt-1 text-[11px] opacity-70">{error}</p>}
               <div className="mt-2.5 flex items-center gap-2">
                 {onRetry && (
                   <button

@@ -32,6 +32,11 @@ namespace WinWiFi.Services
         private CancellationTokenSource? _cts;
         private Task? _listenerTask;
         private readonly ConcurrentDictionary<string, StreamWriter> _sseClients = new();
+        // Scanner events (networks, diagnostics, state) fire concurrently on
+        // different threads. Serializing writes per payload prevents two events
+        // from interleaving chunks on the same StreamWriter, which corrupted
+        // SSE frames with "Bad control character" JSON parse errors.
+        private readonly object _sseWriteLock = new();
         private readonly HashSet<string> _allowedBrowserOrigins;
         private readonly string _authToken;
         private const string AuthTokenHeader = "X-WinWiFi-Token";
@@ -197,6 +202,11 @@ namespace WinWiFi.Services
 
         private void OnNetworksDiscovered(List<AccessPoint> aps)
         {
+            ProcessScanResults(aps);
+        }
+
+        private void ProcessScanResults(List<AccessPoint> aps)
+        {
             _latestAccessPoints = ReconcileLiveAccessPoints(aps);
             var threats = AnalyzeCurrentScan(_latestAccessPoints.Where(ap => ap.IsActiveInCurrentScan).ToList());
             _latestIncidents = threats.Findings;
@@ -269,8 +279,13 @@ namespace WinWiFi.Services
             if (_listener.IsListening) return;
 
             _cts = new CancellationTokenSource();
+            // Bind before anything slow: a port conflict must fail fast so the
+            // caller can fall back to another port, and the dashboard must be
+            // able to answer /api/health while the first WLAN scan warms up.
             _listener.Start();
             PersistAuthToken();
+            _listenerTask = Task.Run(() => ListenLoopAsync(_cts.Token));
+            Console.WriteLine($"[HttpBridgeServer] Listening on http://127.0.0.1:{_port}/ (token file: {BridgeTokenFilePath()})");
 
             try
             {
@@ -289,12 +304,11 @@ namespace WinWiFi.Services
                     var initialAps = await _wifiService.ScanNetworksAsync(_activeAdapterId, _cts.Token);
                     if (initialAps.Count > 0)
                     {
-                        _latestAccessPoints = ReconcileLiveAccessPoints(initialAps);
-                        var initialThreats = AnalyzeCurrentScan(_latestAccessPoints);
-                        _latestIncidents = initialThreats.Findings;
+                        ProcessScanResults(initialAps);
                     }
                 }
             }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
                 Console.WriteLine($"[HttpBridgeServer] Adapter discovery failed: {ex.Message}");
@@ -303,8 +317,33 @@ namespace WinWiFi.Services
             // Continue bounded Windows WLAN discovery after the startup scan.
             _ = _scanner.StartAsync(_cts.Token);
 
-            _listenerTask = Task.Run(() => ListenLoopAsync(_cts.Token));
-            Console.WriteLine($"[HttpBridgeServer] Listening on http://127.0.0.1:{_port}/ (token file: {BridgeTokenFilePath()})");
+            // Cold-start warm-up: the Windows WLAN cache can take several seconds
+            // to stabilize after the first scan request (observed 1 vs 37 visible
+            // BSSIDs on real hardware). Scan again shortly after startup and merge
+            // the results so early counts are not artificially low.
+            _ = WarmupSecondScanAsync();
+        }
+
+        private async Task WarmupSecondScanAsync()
+        {
+            if (_cts is null || string.IsNullOrEmpty(_activeAdapterId)) return;
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(4), _cts.Token);
+                await _wifiService.TriggerHardwareScanAsync(_activeAdapterId, _cts.Token);
+                await Task.Delay(TimeSpan.FromSeconds(3), _cts.Token);
+                var aps = await _wifiService.ScanNetworksAsync(_activeAdapterId, _cts.Token);
+                if (aps.Count > 0)
+                {
+                    _scanCycleCount++;
+                    ProcessScanResults(aps);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HttpBridgeServer] Warm-up scan failed: {ex.Message}");
+            }
         }
 
         public async Task StopAsync()
@@ -329,13 +368,15 @@ namespace WinWiFi.Services
 
             if (_listenerTask != null)
             {
-                try { await _listenerTask; } catch { }
+                // ConfigureAwait(false): the desktop shell awaits this from its UI
+                // thread during shutdown, and a captured context would deadlock.
+                try { await _listenerTask.ConfigureAwait(false); } catch { }
             }
         }
 
         public async ValueTask DisposeAsync()
         {
-            await StopAsync();
+            await StopAsync().ConfigureAwait(false);
             _listener.Close();
             if (_ownsStorage) _storage.Dispose();
         }
@@ -1383,25 +1424,19 @@ namespace WinWiFi.Services
             string json = JsonSerializer.Serialize(data, JsonOptions);
             string message = $"event: {eventName}\ndata: {json}\n\n";
 
-            foreach (var kvp in _sseClients)
+            lock (_sseWriteLock)
             {
-                try
+                foreach (var kvp in _sseClients)
                 {
-                    Task.Run(async () =>
+                    try
                     {
-                        try
-                        {
-                            await kvp.Value.WriteLineAsync(message);
-                        }
-                        catch
-                        {
-                            _sseClients.TryRemove(kvp.Key, out _);
-                        }
-                    });
-                }
-                catch
-                {
-                    _sseClients.TryRemove(kvp.Key, out _);
+                        kvp.Value.Write(message);
+                        kvp.Value.Flush();
+                    }
+                    catch
+                    {
+                        _sseClients.TryRemove(kvp.Key, out _);
+                    }
                 }
             }
         }

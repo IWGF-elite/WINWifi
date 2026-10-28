@@ -9,7 +9,14 @@ import {
   DataOrigin,
   EnterpriseAssetRecord
 } from '../types';
-import { BridgeErrorKind, classifyBridgeError } from './bridgeStatus';
+import {
+  BridgeErrorKind,
+  SHELL_OFFLINE_DESCRIPTION,
+  bridgeStatusView,
+  classifyBridgeError,
+  isEmbeddedDashboard,
+  resolveBridgeBaseUrl
+} from './bridgeStatus';
 
 export type BridgeEventCallback<T> = (data: T) => void;
 
@@ -147,6 +154,20 @@ export class NativeBridgeClient {
     } catch {
       this.config = { ...DEFAULT_CONFIG };
     }
+    // Embedded mode: when the bridge itself serves this page (desktop WebView2
+    // or a browser tab on the daemon port), the serving origin is authoritative
+    // so the desktop's dynamically chosen port works with zero configuration.
+    // This intentionally overrides any stale saved config.
+    try {
+      if (typeof window !== 'undefined') {
+        this.config.baseUrl = resolveBridgeBaseUrl(
+          window.location.hostname,
+          window.location.port,
+          window.location.search,
+          this.config.baseUrl
+        );
+      }
+    } catch { /* keep the configured URL */ }
   }
 
   private saveConfig(): void {
@@ -686,21 +707,15 @@ export class NativeBridgeClient {
   private formatBridgeError(err: any): string {
     const raw = err.message || String(err);
     const kind = classifyBridgeError(raw);
-    if (kind === 'token') {
-      return (
-        'The local WinWiFi bridge rejected this dashboard session. ' +
-        'Launch the dashboard from WinWiFi, or set VITE_WINWIFI_BRIDGE_TOKEN from %LOCALAPPDATA%\\WinWiFi\\bridge.token for development.'
-      );
+    if (kind === 'unknown') {
+      // Unrecognized failures keep the original text for developers; the shell
+      // user only needs to know live data could not be reached.
+      return isEmbeddedDashboard()
+        ? SHELL_OFFLINE_DESCRIPTION
+        : raw;
     }
-    if (kind === 'offline') {
-      return (
-        'Native bridge offline. Start WinWiFi.Desktop or run the CLI with --bridge --port 38989 ' +
-        '(dotnet run --project WinWiFi.CLI -- --bridge --port 38989), or use start-dev.ps1 to launch both together.'
-      );
-    }
-    if (kind === 'timeout') {
-      return `Connection to ${this.config.baseUrl} timed out. The native scanner process may be busy or unresponsive.`;
-    }
-    return raw;
+    // Same wording as the status panel, so a desktop user is never shown a
+    // port, URL, token file, or environment variable they would have to act on.
+    return bridgeStatusView('ERROR', kind).description;
   }
 }

@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -181,11 +183,24 @@ namespace WinWiFi
 
             // 3. Normal GUI Application Startup (Windows WPF)
 #if WINDOWS_DESKTOP
+            AddFileTraceListener();
+            using var instanceGuard = SingleInstanceGuard.TryAcquire();
+            if (instanceGuard is null)
+            {
+                // Another WinWiFi window is already open; bring it forward and quit.
+                Trace.TraceInformation("Second launch detected; signaling the existing window and exiting.");
+                SingleInstanceGuard.ActivateExistingInstance();
+                return 0;
+            }
             try
             {
+                Trace.TraceInformation($"WinWiFi desktop starting (PID {Environment.ProcessId}).");
                 var app = new App();
                 app.InitializeComponent();
-                return app.Run();
+                App.InstanceGuard = instanceGuard;
+                int exitCode = app.Run();
+                Trace.TraceInformation($"WinWiFi desktop message loop ended (exit {exitCode}).");
+                return exitCode;
             }
             catch (Exception ex)
             {
@@ -200,6 +215,25 @@ namespace WinWiFi
         }
 
 #if WINDOWS_DESKTOP
+        private static void AddFileTraceListener()
+        {
+            try
+            {
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinWiFi");
+                Directory.CreateDirectory(dir);
+                // Shared read/write so a second launch can still log while the
+                // first instance holds the file open.
+                var stream = new FileStream(
+                    Path.Combine(dir, "desktop.log"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                Trace.Listeners.Add(new TextWriterTraceListener(new StreamWriter(stream) { AutoFlush = true }, "WinWiFiDesktopLog"));
+                Trace.AutoFlush = true;
+            }
+            catch
+            {
+                // Diagnostics are optional; never block the window over a log file.
+            }
+        }
+
         private static void EnsureConsole()
         {
             if (!AttachConsole(uint.MaxValue)) AllocConsole();

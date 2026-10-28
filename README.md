@@ -104,13 +104,18 @@ capture is optional and requires Npcap plus an adapter and driver that support
 - **The dashboard is blank or does not open:** run
   `Install-WebView2Runtime.exe` from the WinWiFi installation folder, then
   restart the application.
-- **"Could not start its local dashboard bridge":** close any other running
-  WinWiFi window and start the app again. WinWiFi uses a local-only dashboard
-  bridge on `127.0.0.1:38989`; it does not expose the bridge to the network.
+- **The window says WinWiFi could not start its local Wi-Fi bridge:** another
+  program is holding every loopback port WinWiFi will try. Close the other
+  WinWiFi window or the program using the port and start the app again. When
+  only the preferred port is taken, WinWiFi picks the next free one by itself —
+  there is nothing to configure, and the bridge is never exposed to the network.
 - **No networks appear:** ensure the Windows Wi-Fi radio and adapter are
   enabled. An active Internet connection is not required for scanning.
 - **Monitor-mode capture is unavailable:** this is expected unless both Npcap
   and a monitor-mode capable Wi-Fi adapter/driver are installed.
+- **Startup and bridge diagnostics:** the desktop app appends plain-text
+  events (bridge port chosen, activation by a second launch, shutdown) to
+  `%LOCALAPPDATA%\WinWiFi\desktop.log`.
 
 ### Build from source
 
@@ -160,8 +165,10 @@ powershell -ExecutionPolicy Bypass -File .\start-dev.ps1
 This starts the native bridge (`dotnet run --project WinWiFi.CLI -- --bridge
 --port 38989`, loopback only) and the Vite dev server together, waits until the
 bridge health endpoint answers, and opens the dashboard with the per-launch
-bridge token already supplied. Ctrl+C stops both services. To start the pieces
-manually instead:
+bridge token already supplied. Ctrl+C stops both services; the script also puts
+them in a Windows job object, so closing its window cannot leave a bridge
+holding port 38989 for the next run. Both services are probed on `127.0.0.1`
+because the dev server binds IPv4 only. To start the pieces manually instead:
 
 ```powershell
 # Terminal 1: bridge (prints a dashboard URL that includes the ?token=)
@@ -176,7 +183,12 @@ Every bridge request (including `/api/health`) requires the per-launch token;
 browser sessions without it see an explicit "Token mismatch" state, and the
 header shows the bridge as Connected / Offline / Token mismatch. When the
 bridge is not running, the dashboard shows an offline panel with the exact
-start command and retries automatically every few seconds.
+start command and retries automatically every few seconds. All token,
+bridge.token, and environment-variable handling is a development concern only
+— the installed desktop app starts its own bridge, passes the token to its
+embedded window internally, falls back to a free port automatically when
+38989 is taken, keeps a single instance (a second launch focuses the first
+window), and stops its bridge on exit.
 
 ## Running the native Windows app from source (live scanning)
 
@@ -210,6 +222,18 @@ dotnet run --project WinWiFi.CLI\WinWiFi.CLI.csproj -c Release -- --scan <adapte
 
 `--scan` reads the Windows WLAN scan cache; it does not inject frames or change
 adapter settings.
+
+### What a normal launch does
+
+Double-clicking `WinWiFi.exe` (or running it from the build output) needs no
+setup at all: the app starts its own loopback bridge, hands the per-launch
+token to its embedded window through the navigation URL, scans this PC's real
+Wi-Fi adapter, and opens the Command Center as soon as live data arrives. If
+the preferred port is busy it binds the next free one and points the window
+there. A second launch focuses the already-open window instead of starting a
+second bridge, and closing the window stops the bridge. Nothing in that flow
+asks the user for a token, port, URL, or environment variable — those exist only
+for the development setups described above.
 
 ## Running self-tests
 

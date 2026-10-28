@@ -9,7 +9,9 @@ namespace WinWiFi;
 
 public partial class MainWindow : Window
 {
-    private static readonly Uri DashboardUri = new("http://127.0.0.1:38989/");
+    // Set at load time from the port the app's bridge actually bound; the
+    // preferred port can differ when another local bridge already owns it.
+    private Uri _dashboardUri = new("http://127.0.0.1:38989/");
     private bool _isFittedToWorkArea;
 
     public MainWindow()
@@ -55,8 +57,40 @@ public partial class MainWindow : Window
         ApplyWorkingAreaSize(!_isFittedToWorkArea);
     }
 
+    internal void ActivateWindow()
+    {
+        Trace.TraceInformation("Activation requested by a second launch; focusing the existing window.");
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        // Windows can refuse Activate() for a background process; nudge with
+        // the foreground call so the existing window visibly comes forward.
+        try
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            if (!SetForegroundWindow(hwnd))
+                Trace.TraceInformation($"Windows kept the foreground elsewhere (error {Marshal.GetLastWin32Error()}); the window is still activated in-app.");
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"SetForegroundWindow failed: {ex}");
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (string.IsNullOrWhiteSpace(App.BridgeToken))
+        {
+            // Rare: no free loopback port at all. Plain language only — the user
+            // must never be shown a listener, port, or token detail.
+            Dashboard.Visibility = Visibility.Collapsed;
+            StartupErrorMessage.Text = App.BridgeStartupError ?? "WinWiFi could not start its local Wi-Fi bridge. Close any other WinWiFi windows and start the app again.";
+            StartupError.Visibility = Visibility.Visible;
+            return;
+        }
+
         try
         {
             string userDataFolder = Path.Combine(
@@ -97,13 +131,11 @@ public partial class MainWindow : Window
             Dashboard.CoreWebView2.NavigationStarting += (_, args) =>
             {
                 if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) ||
-                    !string.Equals(target.GetLeftPart(UriPartial.Authority), DashboardUri.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(target.GetLeftPart(UriPartial.Authority), _dashboardUri.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
                     args.Cancel = true;
             };
-            string? bridgeToken = App.BridgeToken;
-            Dashboard.Source = string.IsNullOrWhiteSpace(bridgeToken)
-                ? DashboardUri
-                : new Uri(DashboardUri, $"?token={Uri.EscapeDataString(bridgeToken)}");
+            _dashboardUri = new Uri($"http://127.0.0.1:{App.BridgePort}/");
+            Dashboard.Source = new Uri(_dashboardUri, $"?token={Uri.EscapeDataString(App.BridgeToken)}");
         }
         catch (Exception ex)
         {
