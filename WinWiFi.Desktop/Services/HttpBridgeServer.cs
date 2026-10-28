@@ -26,7 +26,6 @@ namespace WinWiFi.Services
         private readonly SqliteStorageService _storage;
         private readonly bool _ownsStorage;
         private readonly WifiBackgroundScanner _scanner;
-        private readonly NativeSelfTests _selfTests;
         private readonly string? _dashboardRoot;
 
         private CancellationTokenSource? _cts;
@@ -178,7 +177,6 @@ namespace WinWiFi.Services
             _ownsStorage = storage is null;
             _storage = storage ?? new SqliteStorageService();
             _scanner = scanner ?? new WifiBackgroundScanner(_wifiService, _securityAnalyzer);
-            _selfTests = new NativeSelfTests();
 
             // Hook scanner events
             _scanner.NetworksDiscovered += OnNetworksDiscovered;
@@ -568,11 +566,6 @@ namespace WinWiFi.Services
 
                     case "/api/connection/connect":
                         await HandleConnectAsync(request, response);
-                        break;
-
-                    case "/api/selftests":
-                    case "/api/tests":
-                        await HandleSelfTestsAsync(response);
                         break;
 
                     case "/api/events":
@@ -1280,12 +1273,6 @@ namespace WinWiFi.Services
             // Password is deliberately not logged or persisted by WinWiFi.
             var result = native.ConnectToAuthorizedNetwork(string.IsNullOrWhiteSpace(payload.AdapterId) ? _activeAdapterId ?? string.Empty : payload.AdapterId, payload.Ssid, payload.Password);
             await WriteJsonAsync(response, result);
-        }
-
-        private async Task HandleSelfTestsAsync(HttpListenerResponse response)
-        {
-            var results = await _selfTests.RunAllTestsAsync();
-            await WriteJsonAsync(response, results);
         }
 
         private async Task HandleImportNetshAsync(HttpListenerRequest request, HttpListenerResponse response)
