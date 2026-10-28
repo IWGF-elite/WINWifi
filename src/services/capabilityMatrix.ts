@@ -185,7 +185,7 @@ export class CapabilityMatrixService {
       methods: [
         {
           name: 'Method 1: Npcap Raw 802.11 Monitor Capture (Recommended for Windows)',
-          driver: 'Npcap 1.7x+ (Insecure.Com LLC / Nmap Project)',
+          driver: 'Compatible 802.11 capture driver',
           platform: 'Windows 10 / 11 64-bit',
           command: 'dumpcap.exe -i \\Device\\NPF_{ADAPTER-GUID} -y IEEE802_11_RADIO -w "capture.pcap"',
           instructions: [
