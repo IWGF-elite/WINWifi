@@ -90,6 +90,7 @@ import {
   buildBeaconFrame,
   buildDataFrame,
   buildEapolFrame,
+  buildIpv4UdpDnsFrame,
   buildRadiotapPcap
 } from './fixtures';
 import { NATIVE_TABLES, MAX_VIEW_ROWS, toNativeTableView } from '../src/services/nativeDatabaseView';
@@ -155,6 +156,16 @@ runTest('T2: Libpcap 2.4 Binary Dissection & Framing', () => {
       throw new Error(`RSN IE decoding failed for ${ap.ssid}: ${ap.security}/${ap.cipher}`);
     }
   }
+});
+
+runTest('T2A: Clear 802.11 IPv4/UDP/DNS dissection in browser import path', () => {
+  const parsed = PcapService.getInstance().parseBinaryPcap(buildRadiotapPcap([buildIpv4UdpDnsFrame()]));
+  const packet = parsed.packets[0];
+  if (packet.networkProtocol !== 'IPv4/UDP' || packet.applicationProtocol !== 'DNS') throw new Error(`Unexpected protocols: ${packet.networkProtocol}/${packet.applicationProtocol}`);
+  if (packet.sourceIp !== '192.168.1.52' || packet.destinationIp !== '192.168.1.1') throw new Error('IPv4 endpoints were not parsed from frame bytes');
+  if (packet.sourcePort !== 53000 || packet.destinationPort !== 53) throw new Error('UDP ports were not parsed from frame bytes');
+  if (packet.networkFields?.['DNS query name'] !== 'router.local') throw new Error('DNS query name was not decoded');
+  if (!packet.conversationId?.includes('192.168.1.1:53')) throw new Error('IP conversation key was not produced');
 });
 
 // 3. Frequency & Channel Math across 2.4 / 5 / 6 GHz

@@ -275,6 +275,27 @@ export const buildDataFrame = (options: { apBssid: string; clientMac: string }):
   return new Uint8Array(bytes);
 };
 
+/** 802.11 LLC/SNAP IPv4/UDP DNS query used only by parser tests. */
+export const buildIpv4UdpDnsFrame = (): Uint8Array => {
+  const label = (value: string) => [value.length, ...Array.from(new TextEncoder().encode(value))];
+  const dns = [0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0,
+    ...label('router'), ...label('local'), 0, 0, 1, 0, 1];
+  const udpLength = 8 + dns.length;
+  const ipLength = 20 + udpLength;
+  return new Uint8Array([
+    0x08, 0x00, 0, 0,
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+    0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+    0, 0,
+    0xaa, 0xaa, 0x03, 0, 0, 0, 0x08, 0x00,
+    0x45, 0, (ipLength >> 8) & 0xff, ipLength & 0xff, 0x12, 0x34, 0x40, 0, 64, 17, 0, 0,
+    192, 168, 1, 52, 192, 168, 1, 1,
+    0xcf, 0x08, 0, 53, (udpLength >> 8) & 0xff, udpLength & 0xff, 0, 0,
+    ...dns
+  ]);
+};
+
 /** libpcap global header plus an 8-byte radiotap preface per frame. */
 export const buildRadiotapPcap = (frames: Uint8Array[]): ArrayBuffer => {
   const radiotapLength = 8;

@@ -97,6 +97,19 @@ namespace WinWiFi.Models
         // Empty dictionaries mean the corresponding bytes were not present.
         public Dictionary<string, string> InformationElements { get; set; } = new();
         public Dictionary<string, string> EapolFields { get; set; } = new();
+        public string NetworkProtocol { get; set; } = string.Empty;
+        public string ApplicationProtocol { get; set; } = string.Empty;
+        public string SourceIp { get; set; } = string.Empty;
+        public string DestinationIp { get; set; } = string.Empty;
+        public int? SourcePort { get; set; }
+        public int? DestinationPort { get; set; }
+        public string ConversationId { get; set; } = string.Empty;
+        public string TcpStreamId { get; set; } = string.Empty;
+        public uint? TcpSequenceNumber { get; set; }
+        public uint? TcpAcknowledgmentNumber { get; set; }
+        public string TcpFlags { get; set; } = string.Empty;
+        public string TcpPayloadHex { get; set; } = string.Empty;
+        public Dictionary<string, string> NetworkFields { get; set; } = new();
     }
 
     public class WifiAdapter

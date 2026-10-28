@@ -116,6 +116,22 @@ namespace WinWiFi.Tests
                 return $"Parsed {res.Packets.Count} frame, BSSID: {res.AccessPoints[0].Bssid}";
             }));
 
+            results.Add(RunTest("T3A-IP-LAYERS", "802.11 LLC/SNAP IPv4 UDP DNS Dissection", () =>
+            {
+                var packet = new PcapDissector().DissectBytes(BuildPcap(105, BuildIpv4UdpDnsFrame())).Packets.Single();
+                if (packet.NetworkProtocol != "IPv4/UDP" || packet.ApplicationProtocol != "DNS")
+                    throw new Exception($"Expected IPv4/UDP DNS, got {packet.NetworkProtocol}/{packet.ApplicationProtocol}.");
+                if (packet.SourceIp != "192.168.1.52" || packet.DestinationIp != "192.168.1.1")
+                    throw new Exception("The parsed IPv4 endpoints do not match the captured header bytes.");
+                if (packet.SourcePort != 53000 || packet.DestinationPort != 53)
+                    throw new Exception("The parsed UDP ports do not match the captured header bytes.");
+                if (!packet.NetworkFields.TryGetValue("DNS query name", out var queryName) || queryName != "router.local")
+                    throw new Exception("DNS query name was not extracted from the captured question section.");
+                if (!packet.ConversationId.Contains("192.168.1.1:53", StringComparison.Ordinal))
+                    throw new Exception("A stable UDP conversation key was not produced.");
+                return $"Parsed {packet.NetworkProtocol} {packet.SourceIp}:{packet.SourcePort} → {packet.DestinationIp}:{packet.DestinationPort}; DNS {queryName}.";
+            }));
+
             // Test 4: The parsed handshake path keeps forensic metadata but withholds
             // export material and never fabricates a Hashcat mode 22000 line.
             results.Add(RunTest("T4-EAPOL-METADATA", "EAPOL 4-Way Metadata (No Hash Export)", () =>
@@ -1638,6 +1654,46 @@ SSID 2 : Guest-Open
             writer.Write(new byte[] { 0xAA, 0xAA, 0x03, 0x00, 0x00, 0x00, 0x08, 0x00 });
             writer.Write(new byte[8]);
             return stream.ToArray();
+        }
+
+        private static byte[] BuildIpv4UdpDnsFrame()
+        {
+            byte[] dnsName = { 6, (byte)'r', (byte)'o', (byte)'u', (byte)'t', (byte)'e', (byte)'r', 5, (byte)'l', (byte)'o', (byte)'c', (byte)'a', (byte)'l', 0 };
+            using var dnsStream = new MemoryStream();
+            using (var dns = new BinaryWriter(dnsStream))
+            {
+                dns.Write((byte)0x12); dns.Write((byte)0x34); // transaction ID
+                dns.Write((byte)0x01); dns.Write((byte)0x00); // standard query, recursion desired
+                dns.Write((byte)0); dns.Write((byte)1); // one question
+                dns.Write(new byte[6]);
+                dns.Write(dnsName);
+                dns.Write((byte)0); dns.Write((byte)1); // A
+                dns.Write((byte)0); dns.Write((byte)1); // IN
+            }
+            byte[] dnsPayload = dnsStream.ToArray();
+            using var frameStream = new MemoryStream();
+            using (var frame = new BinaryWriter(frameStream))
+            {
+                frame.Write((ushort)0x0008); // unprotected 802.11 data
+                frame.Write((ushort)0);
+                frame.Write(new byte[] { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 }); // receiver/AP
+                frame.Write(new byte[] { 0x02, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE }); // source station
+                frame.Write(new byte[] { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 }); // BSSID
+                frame.Write((ushort)0);
+                frame.Write(new byte[] { 0xAA, 0xAA, 0x03, 0, 0, 0, 0x08, 0x00 }); // LLC/SNAP IPv4
+                frame.Write(new byte[] { 0x45, 0x00 });
+                ushort ipLength = (ushort)(20 + 8 + dnsPayload.Length);
+                frame.Write((byte)(ipLength >> 8)); frame.Write((byte)ipLength);
+                frame.Write(new byte[] { 0x12, 0x34, 0x40, 0x00, 64, 17, 0, 0 });
+                frame.Write(new byte[] { 192, 168, 1, 52, 192, 168, 1, 1 });
+                frame.Write((byte)(53000 >> 8)); frame.Write((byte)(53000 & 0xff)); // source port
+                frame.Write((byte)0); frame.Write((byte)53); // destination port
+                ushort udpLength = (ushort)(8 + dnsPayload.Length);
+                frame.Write((byte)(udpLength >> 8)); frame.Write((byte)udpLength);
+                frame.Write(new byte[] { 0, 0 }); // checksum
+                frame.Write(dnsPayload);
+            }
+            return frameStream.ToArray();
         }
 
         private static void WritePcapNgBlock(BinaryWriter writer, uint blockType, byte[] body, bool corruptTrailer = false)

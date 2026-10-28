@@ -239,6 +239,7 @@ export class PcapService {
 
         let frameTypeName: PcapPacket['frameType'] = 'LLC Data';
         let info = '';
+        let networkDetails: Partial<PcapPacket> = {};
 
         const date = new Date(tsSec * 1000);
         const timeStr = date.toLocaleTimeString() + '.' + String(Math.floor(tsUsec / 1000)).padStart(3, '0');
@@ -285,7 +286,12 @@ export class PcapService {
         // Data Frames
         else if (fType === 2) {
           frameTypeName = fSubtype === 8 ? 'QoS Data' : 'LLC Data';
-          const payload = packetBytes.subarray(frameOffset + 24);
+          const fourAddress = (fc & 0x0300) === 0x0300;
+          const qosData = (fSubtype & 0x08) !== 0;
+          const htControl = qosData && (fc & 0x8000) !== 0;
+          const macHeaderLength = 24 + (fourAddress ? 6 : 0) + (qosData ? 2 : 0) + (htControl ? 4 : 0);
+          const payload = packetBytes.subarray(frameOffset + macHeaderLength);
+          if ((fc & 0x4000) === 0) networkDetails = this.dissectDataPayload(payload);
 
           // Check for EAPOL (802.1X Key Exchange)
           // Look for LLC/SNAP EtherType 0x888E
@@ -352,7 +358,7 @@ export class PcapService {
               handshakesMap.set(key, entry);
             }
           } else {
-            info = `Data Frame Len=${packetBytes.length}B SRC=${addr2} DST=${addr1}`;
+            info = networkDetails.info || `Data Frame Len=${packetBytes.length}B SRC=${addr2} DST=${addr1}`;
             // Register client activity
             this.registerClientActivity(apMap, addr3, addr2, rssi);
           }
@@ -370,7 +376,8 @@ export class PcapService {
           rssi,
           lengthBytes: packetBytes.length,
           info: info || `IEEE 802.11 ${frameTypeName}`,
-          hexPreview
+          hexPreview,
+          ...networkDetails
         });
 
         packetNumber++;
@@ -413,6 +420,197 @@ export class PcapService {
 
   private static sanitizeSsid(value: string): string {
     return value.replace(/[\u0000-\u001F\u007F]/g, '?').trim();
+  }
+
+  /** Decode only clear LLC/SNAP payload bytes from an unprotected 802.11 data frame. */
+  private dissectDataPayload(payload: Uint8Array): Partial<PcapPacket> {
+    if (payload.length < 8 || payload[0] !== 0xaa || payload[1] !== 0xaa || payload[2] !== 0x03
+      || payload[3] !== 0 || payload[4] !== 0 || (payload[5] !== 0 && payload[5] !== 0xf8)) return {};
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    const etherType = view.getUint16(6, false);
+    const fields: Record<string, string> = {};
+    if (etherType === 0x0806) {
+      if (payload.length < 36) return { networkProtocol: 'ARP', applicationProtocol: 'ARP', info: 'ARP (truncated header)' };
+      const hlen = payload[12]; const plen = payload[13]; const op = view.getUint16(14, false);
+      const arpEnd = 16 + 2 * hlen + 2 * plen;
+      if (hlen > 32 || plen > 32 || arpEnd > payload.length) return { networkProtocol: 'ARP', applicationProtocol: 'ARP', info: 'ARP (invalid address lengths)' };
+      const senderMac = hlen === 6 ? this.formatMac(payload.subarray(16, 22)) : Array.from(payload.subarray(16, 16 + hlen), b => b.toString(16).padStart(2, '0')).join('');
+      const senderIpOffset = 16 + hlen;
+      const targetMacOffset = senderIpOffset + plen;
+      const targetIpOffset = targetMacOffset + hlen;
+      const sourceIp = plen === 4 ? Array.from(payload.subarray(senderIpOffset, senderIpOffset + 4)).join('.') : '';
+      const destinationIp = plen === 4 ? Array.from(payload.subarray(targetIpOffset, targetIpOffset + 4)).join('.') : '';
+      fields['Operation'] = op === 1 ? 'Request' : op === 2 ? 'Reply' : String(op);
+      fields['Sender MAC'] = senderMac;
+      fields['Sender IPv4'] = sourceIp;
+      fields['Target MAC'] = hlen === 6 ? this.formatMac(payload.subarray(targetMacOffset, targetMacOffset + hlen)) : '';
+      fields['Target IPv4'] = destinationIp;
+      return { networkProtocol: 'ARP', applicationProtocol: 'ARP', sourceIp, destinationIp,
+        conversationId: `ARP|${[sourceIp, destinationIp].sort().join('|')}`,
+        networkFields: fields,
+        info: op === 1 ? `ARP request: who has ${destinationIp}? Tell ${sourceIp}` : `ARP reply: ${sourceIp} is at ${senderMac}` };
+    }
+
+    if (etherType === 0x0800) {
+      const offset = 8;
+      if (payload.length < offset + 20 || payload[offset] >> 4 !== 4) return { networkProtocol: 'IPv4', info: 'IPv4 (truncated or invalid header)' };
+      const headerLength = (payload[offset] & 0x0f) * 4;
+      if (headerLength < 20 || payload.length < offset + headerLength) return { networkProtocol: 'IPv4', info: 'IPv4 (invalid header length)' };
+      const totalLength = view.getUint16(offset + 2, false);
+      const fragment = view.getUint16(offset + 6, false);
+      const sourceIp = Array.from(payload.subarray(offset + 12, offset + 16)).join('.');
+      const destinationIp = Array.from(payload.subarray(offset + 16, offset + 20)).join('.');
+      const ipEnd = Math.min(payload.length, offset + Math.max(headerLength, totalLength));
+      fields['Version'] = '4'; fields['Header length'] = `${headerLength} bytes`; fields['Total length'] = String(totalLength);
+      fields['TTL'] = String(payload[offset + 8]); fields['Source IPv4'] = sourceIp; fields['Destination IPv4'] = destinationIp;
+      fields['Header checksum'] = `0x${view.getUint16(offset + 10, false).toString(16).padStart(4, '0')}`;
+      if ((fragment & 0x1fff) !== 0) return { networkProtocol: 'IPv4 fragment', sourceIp, destinationIp, networkFields: fields, info: `IPv4 fragment ${sourceIp} → ${destinationIp}` };
+      const proto = payload[offset + 9];
+      return this.dissectIpTransport(payload, offset + headerLength, ipEnd, proto, sourceIp, destinationIp, 'IPv4', fields);
+    }
+
+    if (etherType === 0x86dd) {
+      const offset = 8;
+      if (payload.length < offset + 40 || payload[offset] >> 4 !== 6) return { networkProtocol: 'IPv6', info: 'IPv6 (truncated or invalid header)' };
+      const sourceIp = this.formatIpv6(payload.subarray(offset + 8, offset + 24));
+      const destinationIp = this.formatIpv6(payload.subarray(offset + 24, offset + 40));
+      fields['Version'] = '6'; fields['Payload length'] = String(view.getUint16(offset + 4, false));
+      fields['Hop limit'] = String(payload[offset + 7]); fields['Source IPv6'] = sourceIp; fields['Destination IPv6'] = destinationIp;
+      const nextHeader = payload[offset + 6];
+      // Extension headers remain visible as IPv6; transport is dissected when the base header names it directly.
+      return this.dissectIpTransport(payload, offset + 40, Math.min(payload.length, offset + 40 + view.getUint16(offset + 4, false)), nextHeader, sourceIp, destinationIp, 'IPv6', fields);
+    }
+    return {};
+  }
+
+  private dissectIpTransport(payload: Uint8Array, offset: number, end: number, protocolNumber: number,
+    sourceIp: string, destinationIp: string, ipVersion: 'IPv4' | 'IPv6', fields: Record<string, string>): Partial<PcapPacket> {
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    const transport = protocolNumber === 6 ? 'TCP' : protocolNumber === 17 ? 'UDP' : protocolNumber === 1 ? 'ICMP' : protocolNumber === 58 ? 'ICMPv6' : `IP protocol ${protocolNumber}`;
+    let sourcePort: number | undefined; let destinationPort: number | undefined;
+    let applicationProtocol = transport; let tcpSequenceNumber: number | undefined; let tcpAcknowledgmentNumber: number | undefined;
+    let tcpFlags = ''; let tcpPayloadHex = ''; let summary = `${ipVersion} ${sourceIp} → ${destinationIp} (${transport})`;
+    if (protocolNumber === 6 || protocolNumber === 17) {
+      const headerSize = protocolNumber === 6 ? 20 : 8;
+      if (offset + headerSize > end) return { networkProtocol: `${ipVersion}/${transport}`, sourceIp, destinationIp, networkFields: fields, info: `${transport} (truncated header)` };
+      sourcePort = view.getUint16(offset, false); destinationPort = view.getUint16(offset + 2, false);
+      fields['Source port'] = String(sourcePort); fields['Destination port'] = String(destinationPort);
+      let bodyOffset = offset + headerSize;
+      if (protocolNumber === 6) {
+        const tcpHeaderLength = (payload[offset + 12] >> 4) * 4;
+        if (tcpHeaderLength < 20 || offset + tcpHeaderLength > end) return { networkProtocol: `${ipVersion}/TCP`, sourceIp, destinationIp, sourcePort, destinationPort, networkFields: fields, info: 'TCP (invalid header length)' };
+        bodyOffset = offset + tcpHeaderLength;
+        tcpSequenceNumber = view.getUint32(offset + 4, false); tcpAcknowledgmentNumber = view.getUint32(offset + 8, false);
+        const flagByte = payload[offset + 13];
+        tcpFlags = ['FIN', 'SYN', 'RST', 'PSH', 'ACK', 'URG', 'ECE', 'CWR'].filter((_, index) => (flagByte & (1 << index)) !== 0).join(', ') || 'none';
+        fields['Sequence number'] = String(tcpSequenceNumber); fields['Acknowledgment number'] = String(tcpAcknowledgmentNumber);
+        fields['Flags'] = tcpFlags; fields['Window'] = String(view.getUint16(offset + 14, false));
+        const appPort = [sourcePort, destinationPort].find(port => [53, 80, 443, 8080, 8443].includes(port));
+        if (appPort === 53) {
+          applicationProtocol = 'DNS';
+          if (bodyOffset + 2 <= end) this.parseDnsQuestion(payload.subarray(bodyOffset + 2, end), fields);
+          if (fields['DNS query name']) summary = `DNS query: ${fields['DNS query name']}`;
+        } else if (appPort === 80 || appPort === 8080) {
+          const text = new TextDecoder('latin1').decode(payload.subarray(bodyOffset, end));
+          const lines = text.split(/\r?\n/);
+          if (/^(GET|POST|PUT|HEAD|HTTP)\b/i.test(lines[0] || '')) {
+            applicationProtocol = 'HTTP'; fields['HTTP start line'] = lines[0];
+            for (const line of lines.slice(1, 33)) {
+              if (!line) break;
+              const split = line.indexOf(':'); if (split < 1) continue;
+              const name = line.slice(0, split).trim();
+              const value = /^(authorization|proxy-authorization|cookie|set-cookie)$/i.test(name) ? '[redacted]' : line.slice(split + 1).trim();
+              fields[`HTTP ${name}`] = value;
+            }
+            summary = `HTTP ${lines[0]}`;
+          }
+        } else if (appPort === 443 || appPort === 8443) {
+          applicationProtocol = 'TLS';
+          if (bodyOffset + 5 <= end && payload[bodyOffset] >= 20 && payload[bodyOffset] <= 23 && payload[bodyOffset + 1] === 3) {
+            fields['TLS record type'] = payload[bodyOffset] === 22 ? 'Handshake' : payload[bodyOffset] === 23 ? 'Application data' : payload[bodyOffset] === 21 ? 'Alert' : 'ChangeCipherSpec';
+            fields['TLS record version'] = `0x${view.getUint16(bodyOffset + 1, false).toString(16)}`;
+          }
+        }
+        tcpPayloadHex = Array.from(payload.subarray(bodyOffset, Math.min(end, bodyOffset + 4096)), byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
+        if (applicationProtocol === 'TCP') applicationProtocol = appPort === 53 ? 'DNS' : 'TCP';
+      } else {
+        const udpLength = view.getUint16(offset + 4, false); fields['UDP length'] = String(udpLength);
+        bodyOffset = offset + 8;
+        const udpPayload = payload.subarray(bodyOffset, Math.min(end, offset + Math.min(udpLength, end - offset)));
+        if ([53, 5353, 5355].includes(sourcePort) || [53, 5353, 5355].includes(destinationPort)) {
+          applicationProtocol = sourcePort === 5353 || destinationPort === 5353 ? 'mDNS' : 'DNS';
+          this.parseDnsQuestion(udpPayload, fields);
+          if (fields['DNS query name']) summary = `DNS query: ${fields['DNS query name']}`;
+        } else if ([67, 68].includes(sourcePort) || [67, 68].includes(destinationPort)) {
+          applicationProtocol = 'DHCP';
+          this.parseDhcpPayload(udpPayload, fields);
+          if (fields['DHCP message type']) summary = `DHCP ${fields['DHCP message type']}${fields['DHCP hostname'] ? ' for ' + fields['DHCP hostname'] : ''}`;
+        }
+      }
+      const left = `${sourceIp}:${sourcePort}`; const right = `${destinationIp}:${destinationPort}`;
+      const sorted = [left, right].sort();
+      const conversationId = `${transport}|${sorted[0]}|${sorted[1]}`;
+      if (applicationProtocol === 'DNS') fields['DNS transport'] = transport;
+      return { networkProtocol: `${ipVersion}/${transport}`, applicationProtocol, sourceIp, destinationIp, sourcePort, destinationPort,
+        conversationId, ...(protocolNumber === 6 ? { tcpStreamId: conversationId, tcpSequenceNumber, tcpAcknowledgmentNumber, tcpFlags, tcpPayloadHex } : {}), networkFields: fields, info: summary };
+    }
+    if ((protocolNumber === 1 || protocolNumber === 58) && offset + 4 <= end) {
+      fields['ICMP type'] = String(payload[offset]); fields['ICMP code'] = String(payload[offset + 1]);
+      applicationProtocol = transport;
+    }
+    return { networkProtocol: `${ipVersion}/${transport}`, applicationProtocol, sourceIp, destinationIp,
+      conversationId: `${transport}|${[sourceIp, destinationIp].sort().join('|')}`, networkFields: fields, info: summary };
+  }
+
+  private parseDnsQuestion(payload: Uint8Array, fields: Record<string, string>): void {
+    if (payload.length < 12) return;
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    fields['DNS transaction ID'] = `0x${view.getUint16(0, false).toString(16).padStart(4, '0')}`;
+    fields['DNS message'] = (view.getUint16(2, false) & 0x8000) ? 'Response' : 'Query';
+    fields['DNS questions'] = String(view.getUint16(4, false)); fields['DNS answers'] = String(view.getUint16(6, false));
+    if (!view.getUint16(4, false)) return;
+    const labels: string[] = []; let cursor = 12;
+    while (cursor < payload.length && labels.length < 32) {
+      const length = payload[cursor++];
+      if (!length) break;
+      if ((length & 0xc0) !== 0 || cursor + length > payload.length) return; // compressed names need a capture-aware pointer resolver
+      labels.push(new TextDecoder('utf-8', { fatal: false }).decode(payload.subarray(cursor, cursor + length)));
+      cursor += length;
+    }
+    if (!labels.length) return;
+    fields['DNS query name'] = labels.join('.');
+    if (cursor + 4 <= payload.length) {
+      const type = view.getUint16(cursor, false);
+      fields['DNS query type'] = type === 1 ? 'A' : type === 28 ? 'AAAA' : type === 12 ? 'PTR' : type === 33 ? 'SRV' : String(type);
+    }
+  }
+
+  private parseDhcpPayload(payload: Uint8Array, fields: Record<string, string>): void {
+    if (payload.length < 240 || payload[236] !== 99 || payload[237] !== 130 || payload[238] !== 83 || payload[239] !== 99) return;
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    fields['DHCP transaction ID'] = `0x${view.getUint32(4, false).toString(16).padStart(8, '0')}`;
+    fields['DHCP client MAC'] = this.formatMac(payload.subarray(28, 34));
+    fields['DHCP client IPv4'] = Array.from(payload.subarray(12, 16)).join('.');
+    fields['DHCP your IPv4'] = Array.from(payload.subarray(16, 20)).join('.');
+    const messageTypes: Record<number, string> = { 1: 'Discover', 2: 'Offer', 3: 'Request', 4: 'Decline', 5: 'Ack', 6: 'Nak', 7: 'Release', 8: 'Inform' };
+    for (let cursor = 240; cursor < payload.length;) {
+      const tag = payload[cursor++];
+      if (tag === 255) break;
+      if (tag === 0) continue;
+      if (cursor >= payload.length) break;
+      const length = payload[cursor++];
+      if (cursor + length > payload.length) break;
+      const value = payload.subarray(cursor, cursor + length);
+      if (tag === 12) fields['DHCP hostname'] = new TextDecoder('utf-8').decode(value);
+      if (tag === 53 && length === 1) fields['DHCP message type'] = messageTypes[value[0]] || String(value[0]);
+      if ((tag === 50 || tag === 54) && length === 4) fields[tag === 50 ? 'DHCP requested IPv4' : 'DHCP server IPv4'] = Array.from(value).join('.');
+      cursor += length;
+    }
+  }
+
+  private formatIpv6(bytes: Uint8Array): string {
+    const groups = Array.from({ length: 8 }, (_, index) => ((bytes[index * 2] << 8) | bytes[index * 2 + 1]).toString(16));
+    return groups.join(':');
   }
 
   // Parse Beacon / Probe Response Information Elements

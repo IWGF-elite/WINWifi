@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text;
 using WinWiFi.Interop;
 using WinWiFi.Models;
@@ -49,6 +50,24 @@ namespace WinWiFi.Services
 
     public class PcapDissector
     {
+        private sealed class NetworkDissection
+        {
+            public string Protocol { get; set; } = string.Empty;
+            public string ApplicationProtocol { get; set; } = string.Empty;
+            public string SourceIp { get; set; } = string.Empty;
+            public string DestinationIp { get; set; } = string.Empty;
+            public int? SourcePort { get; set; }
+            public int? DestinationPort { get; set; }
+            public string ConversationId { get; set; } = string.Empty;
+            public string TcpStreamId { get; set; } = string.Empty;
+            public uint? TcpSequenceNumber { get; set; }
+            public uint? TcpAcknowledgmentNumber { get; set; }
+            public string TcpFlags { get; set; } = string.Empty;
+            public string TcpPayloadHex { get; set; } = string.Empty;
+            public string Summary { get; set; } = string.Empty;
+            public Dictionary<string, string> Fields { get; set; } = new();
+        }
+
         private const uint PCAP_MAGIC_MICROSECOND = 0xa1b2c3d4;
         private const uint PCAP_MAGIC_SWAPPED = 0xd4c3b2a1;
         private const uint PCAP_MAGIC_NANOSECOND = 0xa1b23c4d;
@@ -466,6 +485,7 @@ namespace WinWiFi.Services
             string expertInfo = string.Empty;
             var informationElements = new Dictionary<string, string>();
             var eapolFields = new Dictionary<string, string>();
+            var networkInfo = new NetworkDissection();
 
             // 3. Process Specific Frame Types
 
@@ -608,16 +628,36 @@ namespace WinWiFi.Services
                     }
                 }
 
-                // Check for LLC/SNAP Header (8 bytes) + EtherType 0x888E (802.1X EAPOL)
-                int macHeaderLen = (subtype == 8 || subtype == 12) ? 26 : 24; // QoS Data has 2 extra bytes
+                // LLC/SNAP follows the complete MAC header. Protected payloads
+                // remain encrypted and are never guessed or decrypted here.
+                bool fourAddress = toDs && fromDs;
+                bool qosData = (subtype & 0x08) != 0;
+                bool htControl = qosData && (frameControl & 0x8000) != 0;
+                int macHeaderLen = 24 + (fourAddress ? 6 : 0) + (qosData ? 2 : 0) + (htControl ? 4 : 0);
                 int llcOffset = offset + macHeaderLen;
-
-                if (llcOffset + 8 <= rawBytes.Length && rawBytes[llcOffset + 6] == 0x88 && rawBytes[llcOffset + 7] == 0x8E)
+                bool snap = llcOffset + 8 <= rawBytes.Length
+                    && rawBytes[llcOffset] == 0xAA && rawBytes[llcOffset + 1] == 0xAA && rawBytes[llcOffset + 2] == 0x03
+                    && rawBytes[llcOffset + 3] == 0 && rawBytes[llcOffset + 4] == 0
+                    && (rawBytes[llcOffset + 5] == 0 || rawBytes[llcOffset + 5] == 0xF8);
+                if (isProtected)
                 {
-                    subtypeName = "EAPOL Key";
-                    int eapolOffset = llcOffset + 8;
-                    eapolFields = ExtractEapolFields(rawBytes, eapolOffset);
-                    info = DissectEapolFrame(rawBytes, eapolOffset, srcMac, destMac, bssid, timestamp, handshakeTracker, apMap, result, options);
+                    info = "Encrypted 802.11 data; network-layer fields are not visible without decryption keys.";
+                }
+                else if (snap)
+                {
+                    ushort etherType = ReadNetworkUInt16(rawBytes, llcOffset + 6);
+                    int networkOffset = llcOffset + 8;
+                    if (etherType == 0x888E)
+                    {
+                        subtypeName = "EAPOL Key";
+                        eapolFields = ExtractEapolFields(rawBytes, networkOffset);
+                        info = DissectEapolFrame(rawBytes, networkOffset, srcMac, destMac, bssid, timestamp, handshakeTracker, apMap, result, options);
+                    }
+                    else
+                    {
+                        networkInfo = DissectNetworkLayer(rawBytes, networkOffset, etherType);
+                        if (!string.IsNullOrWhiteSpace(networkInfo.Summary)) info = networkInfo.Summary;
+                    }
                 }
             }
 
@@ -654,9 +694,514 @@ namespace WinWiFi.Services
                 RawBytesAscii = rawAscii,
                 ExpertInfo = expertInfo,
                 InformationElements = informationElements,
-                EapolFields = eapolFields
+                EapolFields = eapolFields,
+                NetworkProtocol = networkInfo.Protocol,
+                ApplicationProtocol = networkInfo.ApplicationProtocol,
+                SourceIp = networkInfo.SourceIp,
+                DestinationIp = networkInfo.DestinationIp,
+                SourcePort = networkInfo.SourcePort,
+                DestinationPort = networkInfo.DestinationPort,
+                ConversationId = networkInfo.ConversationId,
+                TcpStreamId = networkInfo.TcpStreamId,
+                TcpSequenceNumber = networkInfo.TcpSequenceNumber,
+                TcpAcknowledgmentNumber = networkInfo.TcpAcknowledgmentNumber,
+                TcpFlags = networkInfo.TcpFlags,
+                TcpPayloadHex = networkInfo.TcpPayloadHex,
+                NetworkFields = networkInfo.Fields
             };
         }
+
+        private static NetworkDissection DissectNetworkLayer(byte[] bytes, int offset, ushort etherType)
+        {
+            if (etherType == 0x0806) return DissectArp(bytes, offset);
+            if (etherType == 0x0800) return DissectIpv4(bytes, offset);
+            if (etherType == 0x86DD) return DissectIpv6(bytes, offset);
+            return new NetworkDissection { Protocol = $"EtherType 0x{etherType:X4}", Summary = $"802.11 LLC/SNAP EtherType 0x{etherType:X4}" };
+        }
+
+        private static NetworkDissection DissectArp(byte[] bytes, int offset)
+        {
+            var parsed = new NetworkDissection { Protocol = "ARP", ApplicationProtocol = "ARP" };
+            if (offset + 8 > bytes.Length) { parsed.Summary = "ARP (truncated header)"; return parsed; }
+            ushort hardwareType = ReadNetworkUInt16(bytes, offset);
+            ushort protocolType = ReadNetworkUInt16(bytes, offset + 2);
+            int hardwareLength = bytes[offset + 4];
+            int protocolLength = bytes[offset + 5];
+            ushort operation = ReadNetworkUInt16(bytes, offset + 6);
+            int required = 8 + 2 * hardwareLength + 2 * protocolLength;
+            if (hardwareLength > 32 || protocolLength > 32 || offset + required > bytes.Length)
+            { parsed.Summary = "ARP (truncated or invalid address lengths)"; return parsed; }
+
+            int senderHardware = offset + 8;
+            int senderProtocol = senderHardware + hardwareLength;
+            int targetHardware = senderProtocol + protocolLength;
+            int targetProtocol = targetHardware + hardwareLength;
+            string senderMac = hardwareLength == 6 ? FormatMac(bytes, senderHardware) : Convert.ToHexString(bytes, senderHardware, hardwareLength);
+            string targetMac = hardwareLength == 6 ? FormatMac(bytes, targetHardware) : Convert.ToHexString(bytes, targetHardware, hardwareLength);
+            string senderIp = protocolType == 0x0800 && protocolLength == 4 ? new IPAddress(bytes.Skip(senderProtocol).Take(4).ToArray()).ToString() : string.Empty;
+            string targetIp = protocolType == 0x0800 && protocolLength == 4 ? new IPAddress(bytes.Skip(targetProtocol).Take(4).ToArray()).ToString() : string.Empty;
+            parsed.SourceIp = senderIp;
+            parsed.DestinationIp = targetIp;
+            parsed.Fields["Hardware type"] = hardwareType.ToString();
+            parsed.Fields["Protocol type"] = $"0x{protocolType:X4}";
+            parsed.Fields["Operation"] = operation switch { 1 => "Request", 2 => "Reply", _ => operation.ToString() };
+            parsed.Fields["Sender MAC"] = senderMac;
+            parsed.Fields["Sender IPv4"] = senderIp;
+            parsed.Fields["Target MAC"] = targetMac;
+            parsed.Fields["Target IPv4"] = targetIp;
+            parsed.ConversationId = MakeConversationId("ARP", senderIp, null, targetIp, null);
+            parsed.Summary = operation == 1 ? $"ARP request: who has {targetIp}? Tell {senderIp}" : $"ARP reply: {senderIp} is at {senderMac}";
+            return parsed;
+        }
+
+        private static NetworkDissection DissectIpv4(byte[] bytes, int offset)
+        {
+            var parsed = new NetworkDissection { Protocol = "IPv4" };
+            if (offset + 20 > bytes.Length) { parsed.Summary = "IPv4 (truncated header)"; return parsed; }
+            int version = bytes[offset] >> 4;
+            int headerLength = (bytes[offset] & 0x0F) * 4;
+            if (version != 4 || headerLength < 20 || offset + headerLength > bytes.Length)
+            { parsed.Summary = "IPv4 (invalid header length)"; return parsed; }
+            int totalLength = ReadNetworkUInt16(bytes, offset + 2);
+            ushort id = ReadNetworkUInt16(bytes, offset + 4);
+            ushort fragment = ReadNetworkUInt16(bytes, offset + 6);
+            byte ttl = bytes[offset + 8];
+            byte protocolNumber = bytes[offset + 9];
+            string source = new IPAddress(bytes.Skip(offset + 12).Take(4).ToArray()).ToString();
+            string destination = new IPAddress(bytes.Skip(offset + 16).Take(4).ToArray()).ToString();
+            int fragmentOffset = fragment & 0x1FFF;
+            bool moreFragments = (fragment & 0x2000) != 0;
+            parsed.SourceIp = source;
+            parsed.DestinationIp = destination;
+            parsed.Fields["Version"] = "4";
+            parsed.Fields["Header length"] = headerLength.ToString();
+            parsed.Fields["Total length"] = totalLength.ToString();
+            parsed.Fields["Identification"] = id.ToString();
+            parsed.Fields["Flags / fragment offset"] = $"0x{fragment >> 13:X1} / {fragmentOffset}";
+            parsed.Fields["TTL"] = ttl.ToString();
+            parsed.Fields["Header checksum"] = $"0x{ReadNetworkUInt16(bytes, offset + 10):X4}";
+            parsed.Fields["Source IPv4"] = source;
+            parsed.Fields["Destination IPv4"] = destination;
+            parsed.Fields["Protocol number"] = protocolNumber.ToString();
+            int capturedLength = Math.Max(0, Math.Min(totalLength, bytes.Length - offset) - headerLength);
+            if (fragmentOffset != 0)
+            {
+                parsed.Protocol = "IPv4 fragment";
+                parsed.Summary = $"IPv4 fragment {source} → {destination} (offset {fragmentOffset})";
+                return parsed;
+            }
+            string transport = protocolNumber switch { 6 => "TCP", 17 => "UDP", 1 => "ICMP", _ => $"IP protocol {protocolNumber}" };
+            parsed.Fields["Transport"] = transport;
+            var transportInfo = DissectTransport(bytes, offset + headerLength, capturedLength, protocolNumber, source, destination, isIpv6: false);
+            MergeNetworkInfo(parsed, transportInfo);
+            if (moreFragments) parsed.Fields["More fragments"] = "Yes";
+            if (string.IsNullOrWhiteSpace(parsed.Summary)) parsed.Summary = $"IPv4 {source} → {destination} ({transport})";
+            return parsed;
+        }
+
+        private static NetworkDissection DissectIpv6(byte[] bytes, int offset)
+        {
+            var parsed = new NetworkDissection { Protocol = "IPv6" };
+            if (offset + 40 > bytes.Length) { parsed.Summary = "IPv6 (truncated header)"; return parsed; }
+            byte version = (byte)(bytes[offset] >> 4);
+            if (version != 6) { parsed.Summary = "IPv6 (invalid version)"; return parsed; }
+            ushort payloadLength = ReadNetworkUInt16(bytes, offset + 4);
+            byte nextHeader = bytes[offset + 6];
+            byte hopLimit = bytes[offset + 7];
+            string source = new IPAddress(bytes.Skip(offset + 8).Take(16).ToArray()).ToString();
+            string destination = new IPAddress(bytes.Skip(offset + 24).Take(16).ToArray()).ToString();
+            parsed.SourceIp = source;
+            parsed.DestinationIp = destination;
+            parsed.Fields["Version"] = "6";
+            parsed.Fields["Traffic class"] = ((bytes[offset] & 0x0F) << 4 | bytes[offset + 1] >> 4).ToString();
+            parsed.Fields["Flow label"] = $"0x{(((uint)(bytes[offset + 1] & 0x0F) << 16) | ((uint)bytes[offset + 2] << 8) | bytes[offset + 3]):X5}";
+            parsed.Fields["Payload length"] = payloadLength.ToString();
+            parsed.Fields["Hop limit"] = hopLimit.ToString();
+            parsed.Fields["Source IPv6"] = source;
+            parsed.Fields["Destination IPv6"] = destination;
+            int transportOffset = offset + 40;
+            int remaining = Math.Min(payloadLength, Math.Max(0, bytes.Length - transportOffset));
+            for (int extensions = 0; extensions < 8; extensions++)
+            {
+                if (nextHeader is 0 or 43 or 60)
+                {
+                    if (remaining < 2) break;
+                    byte following = bytes[transportOffset];
+                    int length = (bytes[transportOffset + 1] + 1) * 8;
+                    if (length > remaining) break;
+                    parsed.Fields[$"IPv6 extension {nextHeader}"] = $"{length} bytes";
+                    transportOffset += length; remaining -= length; nextHeader = following;
+                }
+                else if (nextHeader == 44)
+                {
+                    if (remaining < 8) break;
+                    byte following = bytes[transportOffset];
+                    ushort fragment = ReadNetworkUInt16(bytes, transportOffset + 2);
+                    parsed.Fields["IPv6 fragment offset"] = ((fragment >> 3) & 0x1FFF).ToString();
+                    if (((fragment >> 3) & 0x1FFF) != 0)
+                    {
+                        parsed.Protocol = "IPv6 fragment";
+                        parsed.Summary = $"IPv6 fragment {source} → {destination}";
+                        return parsed;
+                    }
+                    transportOffset += 8; remaining -= 8; nextHeader = following;
+                }
+                else if (nextHeader == 51)
+                {
+                    if (remaining < 2) break;
+                    byte following = bytes[transportOffset];
+                    int length = (bytes[transportOffset + 1] + 2) * 4;
+                    if (length > remaining) break;
+                    transportOffset += length; remaining -= length; nextHeader = following;
+                }
+                else break;
+            }
+            string transport = nextHeader switch { 6 => "TCP", 17 => "UDP", 58 => "ICMPv6", 50 => "ESP", _ => $"IPv6 next header {nextHeader}" };
+            parsed.Fields["Transport"] = transport;
+            if (nextHeader == 50)
+            {
+                parsed.Protocol = "IPv6/ESP";
+                parsed.Summary = $"IPv6 encrypted payload {source} → {destination}";
+                return parsed;
+            }
+            var transportInfo = DissectTransport(bytes, transportOffset, remaining, nextHeader, source, destination, isIpv6: true);
+            MergeNetworkInfo(parsed, transportInfo);
+            if (string.IsNullOrWhiteSpace(parsed.Summary)) parsed.Summary = $"IPv6 {source} → {destination} ({transport})";
+            return parsed;
+        }
+
+        private static NetworkDissection DissectTransport(byte[] bytes, int offset, int length, byte protocol, string sourceIp, string destinationIp, bool isIpv6)
+        {
+            var parsed = new NetworkDissection { SourceIp = sourceIp, DestinationIp = destinationIp };
+            if (offset < 0 || length < 0 || offset + length > bytes.Length) return parsed;
+            if (protocol == 6) // TCP
+            {
+                parsed.Protocol = "TCP";
+                parsed.ApplicationProtocol = "TCP";
+                if (length < 20) { parsed.Summary = "TCP (truncated header)"; return parsed; }
+                int sourcePort = ReadNetworkUInt16(bytes, offset);
+                int destinationPort = ReadNetworkUInt16(bytes, offset + 2);
+                int headerLength = (bytes[offset + 12] >> 4) * 4;
+                if (headerLength < 20 || headerLength > length) { parsed.Summary = "TCP (invalid header length)"; return parsed; }
+                uint sequence = ReadNetworkUInt32(bytes, offset + 4);
+                uint acknowledgment = ReadNetworkUInt32(bytes, offset + 8);
+                byte flags = bytes[offset + 13];
+                parsed.SourcePort = sourcePort;
+                parsed.DestinationPort = destinationPort;
+                parsed.TcpSequenceNumber = sequence;
+                parsed.TcpAcknowledgmentNumber = acknowledgment;
+                parsed.TcpFlags = FormatTcpFlags(flags);
+                parsed.ConversationId = MakeConversationId("TCP", sourceIp, sourcePort, destinationIp, destinationPort);
+                parsed.TcpStreamId = parsed.ConversationId;
+                parsed.Fields["Source port"] = sourcePort.ToString();
+                parsed.Fields["Destination port"] = destinationPort.ToString();
+                parsed.Fields["Sequence number"] = sequence.ToString();
+                parsed.Fields["Acknowledgment number"] = acknowledgment.ToString();
+                parsed.Fields["Header length"] = headerLength.ToString();
+                parsed.Fields["Flags"] = parsed.TcpFlags;
+                parsed.Fields["Window"] = ReadNetworkUInt16(bytes, offset + 14).ToString();
+                parsed.Fields["Checksum"] = $"0x{ReadNetworkUInt16(bytes, offset + 16):X4}";
+                int payloadOffset = offset + headerLength;
+                int payloadLength = length - headerLength;
+                byte[] payload = bytes.Skip(payloadOffset).Take(payloadLength).ToArray();
+                parsed.TcpPayloadHex = Convert.ToHexString(payload.Take(4096).ToArray());
+                string app = IdentifyTcpApplication(sourcePort, destinationPort);
+                if (app == "HTTP") ParseHttp(payload, parsed);
+                else if (app == "TLS") ParseTls(payload, parsed);
+                else if (app == "DNS") ParseDns(payload, isTcp: true, parsed);
+                parsed.ApplicationProtocol = string.IsNullOrEmpty(parsed.ApplicationProtocol) || parsed.ApplicationProtocol == "TCP" ? app : parsed.ApplicationProtocol;
+                if (string.IsNullOrWhiteSpace(parsed.Summary))
+                    parsed.Summary = $"TCP {sourceIp}:{sourcePort} → {destinationIp}:{destinationPort} [{parsed.TcpFlags}]";
+                return parsed;
+            }
+            if (protocol == 17) // UDP
+            {
+                parsed.Protocol = "UDP";
+                parsed.ApplicationProtocol = "UDP";
+                if (length < 8) { parsed.Summary = "UDP (truncated header)"; return parsed; }
+                int sourcePort = ReadNetworkUInt16(bytes, offset);
+                int destinationPort = ReadNetworkUInt16(bytes, offset + 2);
+                int udpLength = ReadNetworkUInt16(bytes, offset + 4);
+                parsed.SourcePort = sourcePort;
+                parsed.DestinationPort = destinationPort;
+                parsed.ConversationId = MakeConversationId("UDP", sourceIp, sourcePort, destinationIp, destinationPort);
+                parsed.Fields["Source port"] = sourcePort.ToString();
+                parsed.Fields["Destination port"] = destinationPort.ToString();
+                parsed.Fields["Length"] = udpLength.ToString();
+                parsed.Fields["Checksum"] = $"0x{ReadNetworkUInt16(bytes, offset + 6):X4}";
+                int payloadLength = Math.Clamp(Math.Min(udpLength, length) - 8, 0, length - 8);
+                byte[] payload = bytes.Skip(offset + 8).Take(payloadLength).ToArray();
+                if (sourcePort is 53 or 5353 or 5355 || destinationPort is 53 or 5353 or 5355)
+                {
+                    parsed.ApplicationProtocol = sourcePort == 5353 || destinationPort == 5353 ? "mDNS" : "DNS";
+                    ParseDns(payload, isTcp: false, parsed);
+                }
+                else if (sourcePort is 67 or 68 || destinationPort is 67 or 68)
+                {
+                    parsed.ApplicationProtocol = "DHCP";
+                    ParseDhcp(payload, parsed);
+                }
+                if (string.IsNullOrWhiteSpace(parsed.Summary))
+                    parsed.Summary = $"UDP {sourceIp}:{sourcePort} → {destinationIp}:{destinationPort}";
+                return parsed;
+            }
+            if (protocol is 1 or 58) // ICMP / ICMPv6
+            {
+                parsed.Protocol = protocol == 1 ? "ICMP" : "ICMPv6";
+                parsed.ApplicationProtocol = parsed.Protocol;
+                if (length >= 4)
+                {
+                    byte type = bytes[offset];
+                    byte code = bytes[offset + 1];
+                    parsed.Fields["Type"] = type.ToString();
+                    parsed.Fields["Code"] = code.ToString();
+                    parsed.Fields["Checksum"] = $"0x{ReadNetworkUInt16(bytes, offset + 2):X4}";
+                    parsed.Summary = $"{parsed.Protocol} type {type}, code {code}: {sourceIp} → {destinationIp}";
+                }
+                else parsed.Summary = parsed.Protocol + " (truncated header)";
+                parsed.ConversationId = MakeConversationId(parsed.Protocol, sourceIp, null, destinationIp, null);
+            }
+            return parsed;
+        }
+
+        private static void MergeNetworkInfo(NetworkDissection parent, NetworkDissection child)
+        {
+            if (!string.IsNullOrWhiteSpace(child.Protocol)) parent.Protocol += "/" + child.Protocol;
+            if (!string.IsNullOrWhiteSpace(child.ApplicationProtocol)) parent.ApplicationProtocol = child.ApplicationProtocol;
+            if (!string.IsNullOrWhiteSpace(child.SourceIp)) parent.SourceIp = child.SourceIp;
+            if (!string.IsNullOrWhiteSpace(child.DestinationIp)) parent.DestinationIp = child.DestinationIp;
+            parent.SourcePort = child.SourcePort;
+            parent.DestinationPort = child.DestinationPort;
+            parent.ConversationId = child.ConversationId;
+            parent.TcpStreamId = child.TcpStreamId;
+            parent.TcpSequenceNumber = child.TcpSequenceNumber;
+            parent.TcpAcknowledgmentNumber = child.TcpAcknowledgmentNumber;
+            parent.TcpFlags = child.TcpFlags;
+            parent.TcpPayloadHex = child.TcpPayloadHex;
+            parent.Summary = child.Summary;
+            foreach (var field in child.Fields) parent.Fields[field.Key] = field.Value;
+        }
+
+        private static string IdentifyTcpApplication(int sourcePort, int destinationPort)
+        {
+            int port = sourcePort is 53 or 80 or 443 or 8080 or 8443 ? sourcePort : destinationPort;
+            return port switch
+            {
+                53 => "DNS", 80 or 8080 => "HTTP", 443 or 8443 => "TLS", _ => "TCP"
+            };
+        }
+
+        private static string FormatTcpFlags(byte flags)
+        {
+            var values = new List<string>();
+            if ((flags & 0x02) != 0) values.Add("SYN");
+            if ((flags & 0x10) != 0) values.Add("ACK");
+            if ((flags & 0x01) != 0) values.Add("FIN");
+            if ((flags & 0x04) != 0) values.Add("RST");
+            if ((flags & 0x08) != 0) values.Add("PSH");
+            if ((flags & 0x20) != 0) values.Add("URG");
+            if ((flags & 0x40) != 0) values.Add("ECE");
+            if ((flags & 0x80) != 0) values.Add("CWR");
+            return values.Count == 0 ? "none" : string.Join(", ", values);
+        }
+
+        private static string MakeConversationId(string protocol, string sourceIp, int? sourcePort, string destinationIp, int? destinationPort)
+        {
+            string source = sourceIp + (sourcePort.HasValue ? ":" + sourcePort.Value : string.Empty);
+            string destination = destinationIp + (destinationPort.HasValue ? ":" + destinationPort.Value : string.Empty);
+            return string.Compare(source, destination, StringComparison.Ordinal) <= 0
+                ? $"{protocol}|{source}|{destination}" : $"{protocol}|{destination}|{source}";
+        }
+
+        private static void ParseHttp(byte[] payload, NetworkDissection parsed)
+        {
+            if (payload.Length == 0) return;
+            string text = Encoding.Latin1.GetString(payload.Take(Math.Min(payload.Length, 8192)).ToArray());
+            string[] lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length == 0 || !(lines[0].StartsWith("GET ", StringComparison.OrdinalIgnoreCase)
+                || lines[0].StartsWith("POST ", StringComparison.OrdinalIgnoreCase)
+                || lines[0].StartsWith("PUT ", StringComparison.OrdinalIgnoreCase)
+                || lines[0].StartsWith("HEAD ", StringComparison.OrdinalIgnoreCase)
+                || lines[0].StartsWith("HTTP/", StringComparison.OrdinalIgnoreCase))) return;
+            parsed.ApplicationProtocol = "HTTP";
+            parsed.Fields["HTTP start line"] = lines[0];
+            foreach (string line in lines.Skip(1).Take(32))
+            {
+                if (string.IsNullOrWhiteSpace(line)) break;
+                int separator = line.IndexOf(':');
+                if (separator <= 0) continue;
+                string name = line[..separator].Trim();
+                string value = line[(separator + 1)..].Trim();
+                if (name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("Cookie", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase)) value = "[redacted]";
+                parsed.Fields["HTTP " + name] = value;
+            }
+            parsed.Summary = "HTTP " + lines[0];
+        }
+
+        private static void ParseTls(byte[] payload, NetworkDissection parsed)
+        {
+            if (payload.Length < 5) return;
+            if (payload[0] < 20 || payload[0] > 23 || payload[1] != 3) return;
+            int recordLength = ReadNetworkUInt16(payload, 3);
+            string recordType = payload[0] switch { 20 => "ChangeCipherSpec", 21 => "Alert", 22 => "Handshake", 23 => "Application data", _ => "TLS" };
+            parsed.ApplicationProtocol = "TLS";
+            parsed.Fields["TLS record type"] = recordType;
+            parsed.Fields["TLS record version"] = FormatTlsVersion(ReadNetworkUInt16(payload, 1));
+            if (payload[0] == 22 && recordLength >= 4 && payload.Length >= 9)
+            {
+                byte handshakeType = payload[5];
+                parsed.Fields["TLS handshake"] = handshakeType switch { 1 => "ClientHello", 2 => "ServerHello", 11 => "Certificate", _ => "Handshake " + handshakeType };
+                int bodyEnd = Math.Min(payload.Length, 9 + Math.Min(recordLength - 4, 8192));
+                int cursor = 9;
+                if (handshakeType is 1 or 2 && cursor + 34 <= bodyEnd)
+                {
+                    ushort legacyVersion = ReadNetworkUInt16(payload, cursor);
+                    parsed.Fields["TLS legacy version"] = FormatTlsVersion(legacyVersion);
+                    cursor += 34; // legacy version plus random
+                    if (cursor < bodyEnd)
+                    {
+                        int sessionLength = payload[cursor++];
+                        cursor += sessionLength;
+                    }
+                    if (cursor + 2 <= bodyEnd)
+                    {
+                        int cipherLength = ReadNetworkUInt16(payload, cursor); cursor += 2;
+                        if (cursor + cipherLength <= bodyEnd) cursor += cipherLength; else cursor = bodyEnd;
+                    }
+                    if (handshakeType == 1 && cursor < bodyEnd)
+                    {
+                        int compressionLength = payload[cursor++]; cursor += compressionLength;
+                    }
+                    if (cursor + 2 <= bodyEnd)
+                    {
+                        int extensionsLength = ReadNetworkUInt16(payload, cursor); cursor += 2;
+                        int extensionsEnd = Math.Min(bodyEnd, cursor + extensionsLength);
+                        while (cursor + 4 <= extensionsEnd)
+                        {
+                            ushort extensionType = ReadNetworkUInt16(payload, cursor);
+                            int extensionLength = ReadNetworkUInt16(payload, cursor + 2); cursor += 4;
+                            if (cursor + extensionLength > extensionsEnd) break;
+                            if (handshakeType == 1 && extensionType == 0 && extensionLength >= 5)
+                            {
+                                int nameCursor = cursor + 2;
+                                if (nameCursor + 3 <= cursor + extensionLength)
+                                {
+                                    int nameLength = ReadNetworkUInt16(payload, nameCursor + 1);
+                                    if (payload[nameCursor] == 0 && nameCursor + 3 + nameLength <= cursor + extensionLength)
+                                        parsed.Fields["TLS server name"] = Encoding.ASCII.GetString(payload, nameCursor + 3, nameLength);
+                                }
+                            }
+                            if (extensionType == 43 && extensionLength >= 2)
+                                parsed.Fields["TLS supported version"] = FormatTlsVersion(ReadNetworkUInt16(payload, cursor + extensionLength - 2));
+                            cursor += extensionLength;
+                        }
+                    }
+                }
+            }
+            parsed.Summary = parsed.Fields.TryGetValue("TLS server name", out string? sni)
+                ? $"TLS ClientHello for {sni}"
+                : parsed.Fields.TryGetValue("TLS handshake", out string? handshake) ? "TLS " + handshake : "TLS " + recordType;
+        }
+
+        private static string FormatTlsVersion(ushort version) => version switch
+        {
+            0x0300 => "SSL 3.0", 0x0301 => "TLS 1.0", 0x0302 => "TLS 1.1", 0x0303 => "TLS 1.2", 0x0304 => "TLS 1.3", _ => $"0x{version:X4}"
+        };
+
+        private static void ParseDhcp(byte[] payload, NetworkDissection parsed)
+        {
+            if (payload.Length < 240 || payload[236] != 99 || payload[237] != 130 || payload[238] != 83 || payload[239] != 99)
+            { parsed.Summary = "DHCP/BOOTP (truncated or missing magic cookie)"; return; }
+            parsed.Fields["DHCP transaction ID"] = $"0x{ReadNetworkUInt32(payload, 4):X8}";
+            parsed.Fields["Client MAC"] = Convert.ToHexString(payload, 28, Math.Min(6, payload.Length - 28)).Chunk(2).Select(x => string.Join(string.Empty, x)).Aggregate((a, b) => a + ":" + b);
+            parsed.Fields["Client IPv4"] = new IPAddress(payload.Skip(12).Take(4).ToArray()).ToString();
+            parsed.Fields["Your IPv4"] = new IPAddress(payload.Skip(16).Take(4).ToArray()).ToString();
+            int offset = 240;
+            while (offset < payload.Length)
+            {
+                byte tag = payload[offset++];
+                if (tag == 255) break;
+                if (tag == 0) continue;
+                if (offset >= payload.Length) break;
+                int length = payload[offset++];
+                if (offset + length > payload.Length) break;
+                string name = tag switch { 12 => "Hostname", 50 => "Requested IPv4", 53 => "Message type", 54 => "Server IPv4", 55 => "Parameter request list", _ => $"Option {tag}" };
+                string value = tag is 50 or 54 && length == 4
+                    ? new IPAddress(payload.Skip(offset).Take(4).ToArray()).ToString()
+                    : tag == 12 ? Encoding.ASCII.GetString(payload, offset, length).TrimEnd('\0')
+                    : tag == 53 && length == 1 ? payload[offset] switch { 1 => "Discover", 2 => "Offer", 3 => "Request", 4 => "Decline", 5 => "Ack", 6 => "Nak", 7 => "Release", 8 => "Inform", _ => payload[offset].ToString() }
+                    : Convert.ToHexString(payload, offset, length);
+                parsed.Fields["DHCP " + name] = value;
+                offset += length;
+            }
+            string message = parsed.Fields.TryGetValue("DHCP Message type", out string? messageType) ? messageType : "message";
+            string hostname = parsed.Fields.TryGetValue("DHCP Hostname", out string? host) ? " for " + host : string.Empty;
+            parsed.Summary = "DHCP " + message + hostname;
+        }
+
+        private static void ParseDns(byte[] payload, bool isTcp, NetworkDissection parsed)
+        {
+            int start = isTcp ? 2 : 0;
+            if (payload.Length < start + 12) { parsed.Summary = "DNS (truncated header)"; return; }
+            int end = start + (isTcp ? ReadNetworkUInt16(payload, 0) : payload.Length);
+            end = Math.Min(end, payload.Length);
+            int questions = ReadNetworkUInt16(payload, start + 4);
+            int answers = ReadNetworkUInt16(payload, start + 6);
+            ushort flags = ReadNetworkUInt16(payload, start + 2);
+            parsed.Fields["DNS transaction ID"] = $"0x{ReadNetworkUInt16(payload, start):X4}";
+            parsed.Fields["DNS message"] = (flags & 0x8000) != 0 ? "Response" : "Query";
+            parsed.Fields["DNS response code"] = (flags & 0x000F).ToString();
+            parsed.Fields["DNS questions"] = questions.ToString();
+            parsed.Fields["DNS answers"] = answers.ToString();
+            int cursor = start + 12;
+            string firstQuestion = string.Empty;
+            if (questions > 0)
+            {
+                firstQuestion = ReadDnsName(payload, ref cursor, end);
+                if (cursor + 4 <= end)
+                {
+                    ushort type = ReadNetworkUInt16(payload, cursor);
+                    parsed.Fields["DNS query name"] = firstQuestion;
+                    parsed.Fields["DNS query type"] = type switch { 1 => "A", 28 => "AAAA", 12 => "PTR", 15 => "MX", 16 => "TXT", 33 => "SRV", 255 => "ANY", _ => type.ToString() };
+                    parsed.Fields["DNS query class"] = ReadNetworkUInt16(payload, cursor + 2).ToString();
+                }
+            }
+            string message = (flags & 0x8000) != 0 ? "response" : "query";
+            parsed.Summary = firstQuestion.Length > 0 ? $"DNS {message}: {firstQuestion}" : "DNS " + message;
+        }
+
+        private static string ReadDnsName(byte[] bytes, ref int offset, int end)
+        {
+            var labels = new List<string>();
+            int cursor = offset;
+            int resume = -1;
+            int hops = 0;
+            while (cursor < end && hops++ < 64)
+            {
+                byte size = bytes[cursor++];
+                if (size == 0) { if (resume < 0) resume = cursor; break; }
+                if ((size & 0xC0) == 0xC0)
+                {
+                    if (cursor >= end) return string.Empty;
+                    int pointer = ((size & 0x3F) << 8) | bytes[cursor++];
+                    if (resume < 0) resume = cursor;
+                    if (pointer >= end) return string.Empty;
+                    cursor = pointer;
+                    continue;
+                }
+                if ((size & 0xC0) != 0 || cursor + size > end) return string.Empty;
+                labels.Add(Encoding.ASCII.GetString(bytes, cursor, size));
+                cursor += size;
+            }
+            offset = resume >= 0 ? resume : cursor;
+            return string.Join('.', labels);
+        }
+
+        private static ushort ReadNetworkUInt16(byte[] bytes, int offset) => (ushort)((bytes[offset] << 8) | bytes[offset + 1]);
+        private static uint ReadNetworkUInt32(byte[] bytes, int offset) => ((uint)bytes[offset] << 24) | ((uint)bytes[offset + 1] << 16) | ((uint)bytes[offset + 2] << 8) | bytes[offset + 3];
 
         private static Dictionary<string, string> ExtractInformationElements(byte[] bytes, int offset)
         {
