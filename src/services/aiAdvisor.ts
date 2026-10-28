@@ -186,8 +186,20 @@ export class AIAdvisor {
     if (change.type === 'new_bssid') {
       return `A brand new transmitter with MAC address ${change.bssid} started broadcasting SSID "${change.ssid}". If this was not installed by your IT staff, it may be an unauthorized rogue router.`;
     }
-    if (change.type === 'channel_change') {
+    if (change.type === 'channel_change' || change.type === 'channel_shift') {
       return `Network "${change.ssid}" migrated from ${change.before} to ${change.after}. This is usually normal dynamic frequency selection, but verify if sudden interference occurred.`;
+    }
+    if (change.type === 'pmf_disabled' || change.type === 'pmf_change') {
+      return `Network "${change.ssid}" now advertises protected management frames as ${change.after} (previously ${change.before}). Losing PMF removes protection against deauth-style disruption of clients.`;
+    }
+    if (change.type === 'wps_enabled' || change.type === 'wps_change') {
+      return `Wi-Fi Protected Setup on "${change.ssid}" changed from ${change.before} to ${change.after}. An enabled WPS PIN restores a brute-forceable path around the WPA2/WPA3 passphrase.`;
+    }
+    if (change.type === 'vendor_mismatch') {
+      return `The transmitter for "${change.ssid}" now reports a different manufacturer (${change.before} to ${change.after}) for BSSID ${change.bssid}. Verify the hardware was actually replaced.`;
+    }
+    if (change.type === 'bssid_drift') {
+      return `Broadcast parameters for "${change.ssid}" drifted on BSSID ${change.bssid}: ${change.before} to ${change.after}.`;
     }
     return `State shift detected for ${change.ssid}: changed from "${change.before}" to "${change.after}".`;
   }

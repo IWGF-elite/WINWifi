@@ -136,6 +136,7 @@ namespace WinWiFi.Services
 
         private List<AccessPoint> _latestAccessPoints = new();
         private List<ThreatFinding> _latestIncidents = new();
+        private List<SecurityChange> _latestDrifts = new();
         private List<StationClientRecord> _latestClients = new();
         private Dictionary<string, AccessPoint> _previousScanByBssid = new(StringComparer.OrdinalIgnoreCase);
         private string? _activeAdapterId;
@@ -210,15 +211,23 @@ namespace WinWiFi.Services
             _latestAccessPoints = ReconcileLiveAccessPoints(aps);
             var threats = AnalyzeCurrentScan(_latestAccessPoints.Where(ap => ap.IsActiveInCurrentScan).ToList());
             _latestIncidents = threats.Findings;
+            _latestDrifts = threats.DetectedDrifts;
 
-            // Broadcast to SSE clients
+            BroadcastScanResult();
+        }
+
+        // The background cycle and a manual refresh publish one identical live
+        // snapshot, so the payload is defined once instead of twice.
+        private void BroadcastScanResult()
+        {
             BroadcastSseEvent("scan_result", new
             {
                 cycle = _scanCycleCount,
                 timestamp = DateTime.UtcNow,
                 accessPointsCount = _latestAccessPoints.Count,
                 accessPoints = _latestAccessPoints,
-                incidents = _latestIncidents
+                incidents = _latestIncidents,
+                drifts = _latestDrifts
             });
         }
 
@@ -543,6 +552,10 @@ namespace WinWiFi.Services
 
                     case "/api/incidents":
                         await HandleIncidentsAsync(response);
+                        break;
+
+                    case "/api/drifts":
+                        await HandleDriftsAsync(response);
                         break;
 
                     case "/api/clients":
@@ -1047,6 +1060,7 @@ namespace WinWiFi.Services
             // the newly selected workspace.
             _latestAccessPoints = new List<AccessPoint>();
             _latestIncidents = new List<ThreatFinding>();
+            _latestDrifts = new List<SecurityChange>();
             _previousScanByBssid = new Dictionary<string, AccessPoint>(StringComparer.OrdinalIgnoreCase);
             BroadcastSseEvent("project_changed", new { projectId, projectName = _activeProjectName });
 
@@ -1096,6 +1110,7 @@ namespace WinWiFi.Services
             _latestAccessPoints = ReconcileLiveAccessPoints(aps);
             var threats = AnalyzeCurrentScan(_latestAccessPoints.Where(ap => ap.IsActiveInCurrentScan).ToList());
             _latestIncidents = threats.Findings;
+            _latestDrifts = threats.DetectedDrifts;
             _scanCycleCount++;
 
             // Persist into the selected project only. Without an active project
@@ -1116,17 +1131,16 @@ namespace WinWiFi.Services
                 }
             }
 
-            // Broadcast to SSE clients
-            BroadcastSseEvent("scan_result", new
-            {
-                cycle = _scanCycleCount,
-                timestamp = DateTime.UtcNow,
-                accessPointsCount = _latestAccessPoints.Count,
-                accessPoints = _latestAccessPoints,
-                incidents = _latestIncidents
-            });
+            BroadcastScanResult();
 
-            await WriteJsonAsync(response, new { message = "Scan complete", count = _latestAccessPoints.Count, accessPoints = _latestAccessPoints, incidents = _latestIncidents });
+            await WriteJsonAsync(response, new
+            {
+                message = "Scan complete",
+                count = _latestAccessPoints.Count,
+                accessPoints = _latestAccessPoints,
+                incidents = _latestIncidents,
+                drifts = _latestDrifts
+            });
         }
 
         private async Task HandleScanStartAsync(HttpListenerRequest request, HttpListenerResponse response)
@@ -1184,6 +1198,11 @@ namespace WinWiFi.Services
         private async Task HandleIncidentsAsync(HttpListenerResponse response)
         {
             await WriteJsonAsync(response, _latestIncidents);
+        }
+
+        private async Task HandleDriftsAsync(HttpListenerResponse response)
+        {
+            await WriteJsonAsync(response, _latestDrifts);
         }
 
         private async Task HandleClientsAsync(HttpListenerResponse response)
@@ -1264,7 +1283,8 @@ namespace WinWiFi.Services
                 _latestAccessPoints = aps;
                 var threats = AnalyzeCurrentScan(aps);
                 _latestIncidents = threats.Findings;
-                await WriteJsonAsync(response, new { message = "Netsh output parsed", count = aps.Count, accessPoints = aps, incidents = _latestIncidents });
+                _latestDrifts = threats.DetectedDrifts;
+                await WriteJsonAsync(response, new { message = "Netsh output parsed", count = aps.Count, accessPoints = aps, incidents = _latestIncidents, drifts = _latestDrifts });
             }
             else
             {

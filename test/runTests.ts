@@ -1642,7 +1642,7 @@ runTest('T28: Desktop Shell Wording Hides Bridge Internals', () => {
 });
 
 // 29. Polling fallback must keep native incidents alive
-runTest('T29: Polling Fallback Re-fetches Incidents Independently', () => {
+runTest('T29: Polling Fallback Re-fetches Incidents And Drift Independently', () => {
   const nativeSetInterval = globalThis.setInterval;
   const ticks: Array<() => void> = [];
   (globalThis as any).setInterval = (cb: () => void) => { ticks.push(cb); return 1 as any; };
@@ -1650,11 +1650,13 @@ runTest('T29: Polling Fallback Re-fetches Incidents Independently', () => {
   const client = new (NativeBridgeClient as any)();
   try {
     let incidentCalls = 0;
+    let driftCalls = 0;
     client.state = 'CONNECTED';
     client.getNetworks = async () => [];
     // The counter is incremented inside the async body, which runs synchronously
     // up to its first await, so the assertion below needs no timer pump.
     client.getIncidents = async () => { incidentCalls++; return [{ id: 'NATIVE-1' }]; };
+    client.getDrifts = async () => { driftCalls++; return [{ id: 'DRIFT-1' }]; };
 
     client.startPolling();
     if (ticks.length !== 1) throw new Error('startPolling did not register a fallback tick');
@@ -1666,13 +1668,30 @@ runTest('T29: Polling Fallback Re-fetches Incidents Independently', () => {
         + ' incidents every tick, otherwise every native incident is erased from the store.'
       );
     }
+    if (driftCalls !== 1) {
+      throw new Error('The polling fallback does not re-fetch configuration drift while SSE is down');
+    }
 
     // One endpoint failing must not suppress the other.
     incidentCalls = 0;
+    driftCalls = 0;
     client.getNetworks = () => Promise.reject(new Error('networks unavailable'));
     ticks[0]();
     if (incidentCalls !== 1) {
       throw new Error('A failing networks endpoint suppressed the incidents poll');
+    }
+    if (driftCalls !== 1) {
+      throw new Error('A failing networks endpoint suppressed the drift poll');
+    }
+
+    // A failed drift request must be logged, never delivered to listeners: the
+    // change-intelligence panel would read an empty delivery as "nothing changed".
+    const bridgeSource = fs.readFileSync(path.join(__dirname, '../src/services/bridgeClient.ts'), 'utf8');
+    const pollingStart = bridgeSource.indexOf('private startPolling');
+    const pollingEnd = bridgeSource.indexOf('\n  private ', pollingStart + 1);
+    const pollingBlock = bridgeSource.slice(pollingStart, pollingEnd < 0 ? undefined : pollingEnd);
+    if (!/drifts\.status === 'fulfilled'[\s\S]{0,220}?this\.driftListeners\.forEach/.test(pollingBlock)) {
+      throw new Error('The polling fallback delivers drift without checking that the request succeeded');
     }
 
     // The App-level half of the same defect: incidents must never be reconciled
@@ -1684,6 +1703,81 @@ runTest('T29: Polling Fallback Re-fetches Incidents Independently', () => {
   } finally {
     (globalThis as any).setInterval = nativeSetInterval;
     client.stopPolling();
+  }
+});
+
+runTest('T30: Native Configuration Drift Reaches The Dashboard', () => {
+  const NativeEventSource = globalThis.EventSource;
+  const listeners = new Map<string, (event: { data: string }) => void>();
+  class RecordingEventSource {
+    onopen: (() => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    constructor(_url: string) { listeners.clear(); }
+    addEventListener(event: string, listener: (payload: any) => void) { listeners.set(event, listener); }
+    close() {}
+  }
+
+  const drift = {
+    id: 'DRIFT-1',
+    bssid: '00:11:22:33:44:55',
+    ssid: 'Office',
+    timestamp: '2026-10-28 09:00:00',
+    type: 'channel_shift',
+    title: 'Operating Channel Shift',
+    before: 'Channel 6 (2.4 GHz)',
+    after: 'Channel 1 (2.4 GHz)',
+    riskImpact: 'LOW',
+  };
+
+  const client = new (NativeBridgeClient as any)();
+  try {
+    (globalThis as any).EventSource = RecordingEventSource;
+    client.state = 'CONNECTED';
+
+    // The polled endpoint contract: the bridge serves drift at /api/drifts.
+    const requested: string[] = [];
+    client.request = async (path: string) => { requested.push(path); return [drift]; };
+    client.getDrifts();
+    if (!requested.includes('/api/drifts')) {
+      throw new Error(`getDrifts() did not request /api/drifts (requested: ${requested.join(', ') || 'nothing'})`);
+    }
+
+    const received: { value: any[] | null } = { value: null };
+    const unsubscribe = client.onDrifts((value: any[]) => { received.value = value; });
+    client.initEventSource();
+
+    const scanResult = listeners.get('scan_result');
+    if (!scanResult) throw new Error('The bridge client never subscribed to scan_result events');
+    scanResult({ data: JSON.stringify({ accessPoints: [], incidents: [], drifts: [drift] }) });
+    if (!received.value || received.value.length !== 1 || received.value[0].type !== 'channel_shift') {
+      throw new Error('An SSE scan_result payload carrying drifts was not delivered to drift listeners');
+    }
+
+    received.value = null;
+    scanResult({ data: JSON.stringify({ accessPoints: [], incidents: [] }) });
+    if (received.value !== null) {
+      throw new Error('A scan_result payload without drifts overwrote the drift listeners');
+    }
+
+    unsubscribe();
+    received.value = null;
+    scanResult({ data: JSON.stringify({ accessPoints: [], incidents: [], drifts: [drift] }) });
+    if (received.value !== null) {
+      throw new Error('Unsubscribing from onDrifts left a live listener behind');
+    }
+
+    // The App-level half: drift must feed the change-intelligence state, which
+    // used to be produced only by the never-called browser-side threat engine.
+    const appSource = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf8');
+    if (!/bridgeClient\.onDrifts\(/.test(appSource)) {
+      throw new Error('App.tsx never subscribes to native configuration drift');
+    }
+    if (!/setSecurityChanges\(\s*drifts/.test(appSource)) {
+      throw new Error('The drift subscription in App.tsx does not update the security change state');
+    }
+  } finally {
+    client.disconnect();
+    (globalThis as any).EventSource = NativeEventSource;
   }
 });
 

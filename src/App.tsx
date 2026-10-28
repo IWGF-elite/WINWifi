@@ -467,6 +467,13 @@ export default function App() {
     };
     const unsubIncidents = bridgeClient.onIncidents(applyNativeIncidents);
 
+    // Configuration drift is detected natively against the analyzer's own scan
+    // baseline. It was computed every cycle and then dropped, which left the
+    // Security Change Intelligence panel permanently at zero.
+    const unsubDrifts = bridgeClient.onDrifts((drifts) => {
+      if (Array.isArray(drifts)) setSecurityChanges(drifts as SecurityChange[]);
+    });
+
     // Establish the connection and start event/polling updates on mount.
     bridgeClient.setProject(currentProjectIdRef.current, projects.find(project => project.id === currentProjectIdRef.current)?.name);
     void bridgeClient.connect();
@@ -475,6 +482,7 @@ export default function App() {
       unsubStatus();
       unsubNetworks();
       unsubIncidents();
+      unsubDrifts();
       bridgeClient.disconnect();
     };
   }, [bridgeClient, db, threatEngine, hydrateAssetsFromBridge]);

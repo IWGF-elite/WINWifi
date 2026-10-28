@@ -1360,6 +1360,103 @@ SSID 2 : Guest-Open
                 return "StopAsync finished in under 5 seconds while its captured context discarded every continuation, so the shell can always close.";
             }));
 
+            results.Add(await RunTestAsync("T28-DRIFT-SURFACE", "Bridge Publishes Native Configuration Drift", async () =>
+            {
+                // The analyzer produced DetectedDrifts on every cycle but the
+                // bridge kept only threats.Findings, so configuration drift was
+                // detected and then discarded. This drives one virtual adapter
+                // whose channel alternates on every hardware scan request, which
+                // makes the real scanner loop produce a drift each cycle. The
+                // radio is never touched: the adapter only exists in memory.
+                int port;
+                var probe = new TcpListener(IPAddress.Loopback, 0);
+                probe.Start();
+                port = ((IPEndPoint)probe.LocalEndpoint).Port;
+                probe.Stop();
+
+                string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_drift_{Guid.NewGuid():N}.db");
+                using var wifi = new ShiftingChannelWifiService();
+                using var storage = new SqliteStorageService(tempDb);
+                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage);
+                await bridge.StartAsync();
+
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                try
+                {
+                    // The live surface is the SSE scan_result payload; the polled
+                    // endpoint must serve the same snapshot when SSE is unavailable.
+                    using var sseClient = new HttpClient();
+                    using var sseRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/api/events?token={bridge.AuthToken}");
+                    using var sseResponse = await sseClient.SendAsync(sseRequest, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+                    if (sseResponse.StatusCode != HttpStatusCode.OK)
+                        throw new Exception($"The SSE stream returned {(int)sseResponse.StatusCode} instead of 200.");
+
+                    string? driftPayload = null;
+                    using var sseStream = await sseResponse.Content.ReadAsStreamAsync();
+                    using var sseReader = new StreamReader(sseStream);
+                    // .NET 8 has no cancellable ReadLineAsync, so the read is kept
+                    // as a single pending task and re-awaited until the deadline.
+                    Task<string?>? pendingLine = null;
+                    var sseDeadline = DateTime.UtcNow.AddSeconds(30);
+                    while (DateTime.UtcNow < sseDeadline)
+                    {
+                        pendingLine ??= sseReader.ReadLineAsync();
+                        if (await Task.WhenAny(pendingLine, Task.Delay(1000)) != pendingLine) continue;
+                        string? line = await pendingLine;
+                        pendingLine = null;
+                        if (line is null) break;
+                        if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+                        string data = line.Substring(5).Trim();
+                        if (!data.Contains("\"drifts\"", StringComparison.Ordinal)) continue;
+                        if (!data.Contains("channel_shift", StringComparison.Ordinal)) continue;
+                        driftPayload = data;
+                        break;
+                    }
+
+                    if (driftPayload is null)
+                        throw new Exception("No SSE scan_result payload carried a native drift within 30 seconds; drift detection is still being dropped by the bridge.");
+
+                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                    using var driftRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/api/drifts");
+                    driftRequest.Headers.Add("X-WinWiFi-Token", bridge.AuthToken);
+                    var driftResponse = await http.SendAsync(driftRequest, timeoutCts.Token);
+                    string polledJson = await driftResponse.Content.ReadAsStringAsync(timeoutCts.Token);
+                    if (driftResponse.StatusCode != HttpStatusCode.OK)
+                        throw new Exception($"GET /api/drifts returned {(int)driftResponse.StatusCode} instead of 200.");
+
+                    var options = new System.Text.Json.JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                        PropertyNameCaseInsensitive = true
+                    };
+                    var polled = System.Text.Json.JsonSerializer.Deserialize<List<SecurityChange>>(polledJson, options);
+                    if (polled is null || polled.Count == 0)
+                        throw new Exception("GET /api/drifts served an empty list while the SSE stream carried a drift.");
+
+                    SecurityChange change = polled.First(c => c.Type == "channel_shift");
+                    if (string.IsNullOrWhiteSpace(change.Bssid) || string.IsNullOrWhiteSpace(change.Title)
+                        || !change.Before.Contains("Channel", StringComparison.OrdinalIgnoreCase)
+                        || !change.After.Contains("Channel", StringComparison.OrdinalIgnoreCase)
+                        || string.IsNullOrWhiteSpace(change.RiskImpact))
+                        throw new Exception($"The served drift is missing the fields the change-intelligence panel renders: {polledJson}");
+
+                    // The camelCase keys are the contract the dashboard reads.
+                    foreach (string key in new[] { "\"bssid\"", "\"ssid\"", "\"type\"", "\"title\"", "\"before\"", "\"after\"", "\"riskImpact\"" })
+                    {
+                        if (!polledJson.Contains(key, StringComparison.Ordinal))
+                            throw new Exception($"GET /api/drifts omitted the {key} field the dashboard binds to.");
+                    }
+
+                    return $"A virtual adapter that changed channels was reported as a channel_shift drift on both the SSE scan_result payload and GET /api/drifts, with before/after and risk impact intact ('{change.Before}' -> '{change.After}', {change.RiskImpact}).";
+                }
+                finally
+                {
+                    await bridge.StopAsync();
+                    SqliteStorageService.ReleaseAllPools();
+                    TryDeleteScanDatabase(tempDb);
+                }
+            }));
+
             return results;
         }
 
@@ -1527,6 +1624,82 @@ SSID 2 : Guest-Open
             public bool IsNativeWifiAvailable() => false;
             public ScanDiagnostics GetDiagnostics() => new ScanDiagnostics();
             public void Dispose() { }
+        }
+
+        /// <summary>
+        /// One in-memory BSS entry whose channel alternates every time Windows is
+        /// asked to scan, so the real analyzer and scanner loop see a fresh
+        /// configuration drift on each cycle without touching the radio.
+        /// </summary>
+        private sealed class ShiftingChannelWifiService : INativeWifiService
+        {
+            private int _scanRequests;
+
+            public ScanTelemetryState CurrentState => ScanTelemetryState.Idle;
+            public event Action<ScanDiagnostics>? DiagnosticsUpdated { add { } remove { } }
+            public event Action<ScanBatchResult>? ScanCompleted { add { } remove { } }
+
+            public Task<List<WifiAdapter>> GetAdaptersAsync() => Task.FromResult(new List<WifiAdapter>
+            {
+                new WifiAdapter
+                {
+                    Id = "STUB-SHIFTING-ADAPTER",
+                    Name = "Virtual Telemetry Adapter",
+                    Description = "Memory-only adapter used by the drift surface test",
+                    InterfaceGuid = Guid.Empty,
+                    MacAddress = "02:00:00:00:00:01",
+                    Vendor = "Test Fixture",
+                    Chipset = "Virtual",
+                    Status = "Ready"
+                }
+            });
+
+            public Task TriggerHardwareScanAsync(string adapterId, CancellationToken cancellationToken = default)
+            {
+                // The channel is derived from the request count, so every scan
+                // cycle observes a different channel than the cycle before it.
+                Interlocked.Increment(ref _scanRequests);
+                return Task.CompletedTask;
+            }
+
+            public Task<List<AccessPoint>> ScanNetworksAsync(string adapterId, CancellationToken cancellationToken = default)
+                => Task.FromResult(new List<AccessPoint> { BuildShiftingAccessPoint(_scanRequests) });
+
+            public Task<ScanBatchResult> ScanNetworksExAsync(string adapterId, CancellationToken cancellationToken = default)
+                => Task.FromResult(new ScanBatchResult
+                {
+                    AdapterId = adapterId,
+                    AccessPoints = new List<AccessPoint> { BuildShiftingAccessPoint(_scanRequests) }
+                });
+
+            public Task<Dictionary<string, ScanBatchResult>> ScanAllAdaptersAsync(CancellationToken cancellationToken = default)
+                => Task.FromResult(new Dictionary<string, ScanBatchResult>
+                {
+                    ["STUB-SHIFTING-ADAPTER"] = new ScanBatchResult { AdapterId = "STUB-SHIFTING-ADAPTER", AccessPoints = new List<AccessPoint> { BuildShiftingAccessPoint(_scanRequests) } }
+                });
+
+            public bool IsNativeWifiAvailable() => false;
+            public ScanDiagnostics GetDiagnostics() => new ScanDiagnostics();
+            public void Dispose() { }
+
+            private static AccessPoint BuildShiftingAccessPoint(int scanRequests)
+            {
+                bool evenCycle = scanRequests % 2 == 0;
+                return new AccessPoint
+                {
+                    Bssid = "02:00:00:00:00:02",
+                    Ssid = "Drift Fixture",
+                    Channel = evenCycle ? 1 : 6,
+                    FrequencyMHz = evenCycle ? 2412 : 2437,
+                    Band = "2.4 GHz",
+                    Rssi = -52,
+                    SignalQuality = 78,
+                    Security = "WPA2-Personal",
+                    Cipher = "CCMP",
+                    Vendor = "Test Fixture",
+                    SecurityScore = 70
+                };
+            }
         }
 
         private TestResultItem RunTest(string id, string name, Func<string> action)

@@ -242,7 +242,15 @@ export interface SecurityChange {
     | 'channel_change' 
     | 'vendor_change' 
     | 'pmf_change' 
-    | 'wps_change';
+    | 'wps_change'
+    // Values actually published by the native analyzer's drift detector
+    // (WinWiFi.Desktop/Services/SecurityAnalyzer.cs). Without these the live
+    // payload was typed as impossible and readers switched on the wrong words.
+    | 'pmf_disabled'
+    | 'wps_enabled'
+    | 'channel_shift'
+    | 'bssid_drift'
+    | 'vendor_mismatch';
   title: string;
   before: string;
   after: string;

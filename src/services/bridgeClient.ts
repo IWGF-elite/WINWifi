@@ -7,7 +7,8 @@ import {
   BridgeScanStatus,
   BridgeDiagnostics,
   DataOrigin,
-  EnterpriseAssetRecord
+  EnterpriseAssetRecord,
+  SecurityChange
 } from '../types';
 import {
   BridgeErrorKind,
@@ -55,6 +56,7 @@ export class NativeBridgeClient {
   private stateListeners: Set<BridgeEventCallback<BridgeConnectionState>> = new Set();
   private networkListeners: Set<BridgeEventCallback<AccessPoint[]>> = new Set();
   private incidentListeners: Set<BridgeEventCallback<any[]>> = new Set();
+  private driftListeners: Set<BridgeEventCallback<any[]>> = new Set();
   private clientListeners: Set<BridgeEventCallback<any[]>> = new Set();
   private diagnosticListeners: Set<BridgeEventCallback<BridgeDiagnostics>> = new Set();
   private errorListeners: Set<BridgeEventCallback<string>> = new Set();
@@ -291,6 +293,11 @@ export class NativeBridgeClient {
     return () => this.incidentListeners.delete(cb);
   }
 
+  public onDrifts(cb: BridgeEventCallback<any[]>): () => void {
+    this.driftListeners.add(cb);
+    return () => this.driftListeners.delete(cb);
+  }
+
   public onClients(cb: BridgeEventCallback<any[]>): () => void {
     this.clientListeners.add(cb);
     return () => this.clientListeners.delete(cb);
@@ -396,6 +403,11 @@ export class NativeBridgeClient {
 
   public async getIncidents(): Promise<any[]> {
     return await this.request<any[]>('/api/incidents');
+  }
+
+  /** Configuration drift detected by the native analyzer against its scan baseline. */
+  public async getDrifts(): Promise<SecurityChange[]> {
+    return await this.request<SecurityChange[]>('/api/drifts');
   }
 
   public async getClients(): Promise<any[]> {
@@ -514,6 +526,14 @@ export class NativeBridgeClient {
       this.networkListeners.forEach(cb => cb(networks));
       const incidents = await this.getIncidents();
       this.incidentListeners.forEach(cb => cb(Array.isArray(incidents) ? incidents : []));
+      // Drift is an additive surface: a bridge that predates /api/drifts must
+      // not fail the whole connection, so its absence leaves the last state.
+      try {
+        const drifts = await this.getDrifts();
+        if (Array.isArray(drifts)) this.driftListeners.forEach(cb => cb(drifts));
+      } catch {
+        console.warn('[BridgeClient] Bridge does not expose /api/drifts; change intelligence stays idle.');
+      }
       const clients = await this.getClients();
       this.clientListeners.forEach(cb => cb(Array.isArray(clients) ? clients : []));
 
@@ -589,6 +609,7 @@ export class NativeBridgeClient {
             this.networkListeners.forEach(cb => cb(tagged));
           }
           if (Array.isArray(payload.incidents)) this.incidentListeners.forEach(cb => cb(payload.incidents));
+          if (Array.isArray(payload.drifts)) this.driftListeners.forEach(cb => cb(payload.drifts));
           if (Array.isArray(payload.clients)) this.clientListeners.forEach(cb => cb(payload.clients));
         } catch (e) {
           console.error('[BridgeClient] Failed to parse SSE scan_result payload', e);
@@ -651,12 +672,12 @@ export class NativeBridgeClient {
     this.pollTimer = setInterval(() => {
       if (this.state !== 'CONNECTED') return;
 
-      // Both endpoints are polled on every tick, in parallel and independently.
+      // Every endpoint is polled on every tick, in parallel and independently.
       // Networks alone used to be re-fetched here while SSE was down, so each
       // tick reconciled incidents against nothing and erased every native
       // incident from the store.
-      void Promise.allSettled([this.getNetworks(), this.getIncidents()])
-        .then(([networks, incidents]) => {
+      void Promise.allSettled([this.getNetworks(), this.getIncidents(), this.getDrifts()])
+        .then(([networks, incidents, drifts]) => {
           if (networks.status === 'fulfilled') {
             this.networkListeners.forEach(cb => cb(networks.value));
           } else {
@@ -670,6 +691,13 @@ export class NativeBridgeClient {
             if (Array.isArray(findings)) this.incidentListeners.forEach(cb => cb(findings));
           } else {
             console.warn('[BridgeClient] Polling incidents failed:', messageOf(incidents.reason));
+          }
+
+          if (drifts.status === 'fulfilled') {
+            const changes = drifts.value;
+            if (Array.isArray(changes)) this.driftListeners.forEach(cb => cb(changes));
+          } else {
+            console.warn('[BridgeClient] Polling configuration drift failed:', messageOf(drifts.reason));
           }
         });
     }, this.config.pollIntervalMs);
