@@ -716,6 +716,11 @@ export class NativeBridgeClient {
       pmfCapable: ap.pmfCapable ?? ap.PmfCapable ?? false,
       pmfInformationAvailable: ap.pmfInformationAvailable ?? ap.PmfInformationAvailable ?? false,
       isRogue: ap.isRogue ?? ap.IsRogue ?? false,
+      // The native analyzer flags a suspect as IsRogue, but every dashboard
+      // surface (Threats & Rogues, the nav badge, Alerts, Spectrum, Reports)
+      // reads isRogueCandidate. Without this alias the detection runs on real
+      // hardware every scan cycle and is then rendered nowhere.
+      isRogueCandidate: ap.isRogueCandidate ?? (ap.isRogue ?? ap.IsRogue ?? false),
       firstSeen: ap.firstSeen || ap.FirstSeen || '',
       lastSeen: ap.lastSeen || ap.LastSeen || '',
       dataSourceOrigin: origin,

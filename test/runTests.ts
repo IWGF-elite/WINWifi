@@ -395,6 +395,19 @@ runTest('T12: Bridge Serialization & Property Naming Contract', () => {
   const apPascal = taggedPascal[0];
   if (apPascal.bssid !== 'AA:BB:CC:DD:EE:FF' || apPascal.ssid !== 'Legacy-Pascal-AP') throw new Error('Legacy PascalCase fallback mapping failure');
   if (apPascal.channel !== 6 || apPascal.band !== '2.4 GHz') throw new Error('Legacy PascalCase channel/band failure');
+
+  // Native rogue detection is published as isRogue; every dashboard surface
+  // reads isRogueCandidate, so the alias must carry it across both naming
+  // styles, must not invent a candidate for a clean AP, and must not override
+  // a candidate the client already resolved.
+  const rogueCamel = (bridge as any).tagOrigin([{ bssid: 'AA:00:00:00:00:01', isRogue: true }], 'LIVE_WINDOWS')[0];
+  if (rogueCamel.isRogueCandidate !== true) throw new Error('Native isRogue was not aliased to isRogueCandidate');
+  const roguePascal = (bridge as any).tagOrigin([{ Bssid: 'AA:00:00:00:00:02', IsRogue: true }], 'LIVE_WINDOWS')[0];
+  if (roguePascal.isRogueCandidate !== true) throw new Error('PascalCase IsRogue was not aliased to isRogueCandidate');
+  const cleanAp = (bridge as any).tagOrigin([{ bssid: 'AA:00:00:00:00:03', isRogue: false }], 'LIVE_WINDOWS')[0];
+  if (cleanAp.isRogueCandidate !== false) throw new Error('A clean access point was aliased as a rogue candidate');
+  const explicitCandidate = (bridge as any).tagOrigin([{ bssid: 'AA:00:00:00:00:04', isRogue: false, isRogueCandidate: true }], 'LIVE_WINDOWS')[0];
+  if (explicitCandidate.isRogueCandidate !== true) throw new Error('An explicit isRogueCandidate was overwritten by the alias');
 });
 
 runTest('T13: SSE Failure Falls Back and Reconnects', () => {
