@@ -432,6 +432,7 @@ export type ActiveTab =
   | 'forensics'
   | 'packets'
   | 'threats'
+  | 'alerts'
   | 'investigations'
   | 'handshakes'
   | 'projects'

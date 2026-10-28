@@ -44,6 +44,11 @@ files without any native backend.
   export, and explicit chain rotation. The chain detects edits, reordering,
   and gaps inside itself; because it is stored locally, truncation of the
   newest records requires an externally stored head hash to detect
+- Local operations alerts for rogue APs, unapproved registry assets, weak
+  encryption, missing PMF enforcement, and WPS; alerts are deduplicated per
+  rule/BSSID, acknowledged locally, and resolve automatically when the
+  condition disappears from the latest observation set. Synthetic lab data
+  never generates alerts, and no notifications leave the machine
 - Connect to networks directly from the app (using a password you provide)
 
 ## Defensive scope

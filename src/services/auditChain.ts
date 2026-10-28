@@ -20,6 +20,7 @@ export type AuditAction =
   | 'MAINTENANCE_REJECT'
   | 'MAINTENANCE_REVOKE'
   | 'CONNECT_ATTEMPT'
+  | 'ALERT_ACK'
   | 'LOG_CLEAR'
   | 'AUDIT_EXPORT'
   | 'AUDIT_RESET'
@@ -40,6 +41,7 @@ export const AUDIT_ACTIONS: AuditAction[] = [
   'MAINTENANCE_REJECT',
   'MAINTENANCE_REVOKE',
   'CONNECT_ATTEMPT',
+  'ALERT_ACK',
   'LOG_CLEAR',
   'AUDIT_EXPORT',
   'AUDIT_RESET'

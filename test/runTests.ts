@@ -75,6 +75,14 @@ import {
   requireCapability,
   sanitizeOperatorName
 } from '../src/services/operatorRoles';
+import {
+  MAX_ALERTS,
+  acknowledgeAlert,
+  evaluateAlerts,
+  normalizeAlerts,
+  reconcileAlerts,
+  summarizeAlerts
+} from '../src/services/alerts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1320,6 +1328,175 @@ runTest('T24: Operator Roles & Hash-Chained Audit Trail', () => {
   }
   if (!verifyAuditChain(rotated).valid) {
     throw new Error('The rotated chain did not verify');
+  }
+});
+
+// 25. Local operations alerts
+runTest('T25: Alert Rules, Deduplication & Acknowledgement', () => {
+  const t0 = new Date('2026-10-03T10:00:00.000Z');
+  const t1 = new Date(t0.getTime() + 5 * 60_000);
+  const t2 = new Date(t0.getTime() + 10 * 60_000);
+  const clean = {
+    bssid: '02:00:00:00:00:01',
+    ssid: 'Clean',
+    security: 'WPA3-Personal (SAE)',
+    cipher: 'GCMP-256',
+    pmfRequired: true,
+    pmfInformationAvailable: true,
+    wpsEnabled: false,
+    wpsLocked: false
+  };
+  const base = (overrides: Record<string, any> = {}) => ({ ...clean, ...overrides }) as any;
+  const asset = (macAddress: string, overrides: Record<string, any> = {}) => ({
+    macAddress,
+    classification: 'Corporate',
+    approvalStatus: 'Approved',
+    ...overrides
+  }) as any;
+
+  if (evaluateAlerts([], []).length !== 0) {
+    throw new Error('evaluateAlerts invented alerts without observations');
+  }
+  if (evaluateAlerts([base()], []).length !== 0) {
+    throw new Error('An unenrolled, clean access point raised an alert');
+  }
+
+  const rogue = evaluateAlerts([base({ bssid: '0200000000aa', isRogueCandidate: true, rogueEvidence: ['BSSID mismatch'], rogueConfidence: 92 })], []);
+  if (rogue.length !== 1 || rogue[0].ruleId !== 'ROGUE_AP' || rogue[0].severity !== 'Critical' || rogue[0].bssid !== '02:00:00:00:00:AA') {
+    throw new Error('The rogue rule did not fire or canonicalize the BSSID');
+  }
+  if (!rogue[0].detail.includes('BSSID mismatch')) {
+    throw new Error('The rogue alert did not use the first evidence line');
+  }
+
+  const duplicated = evaluateAlerts([
+    base({ bssid: '02:00:00:00:00:02', isRogueCandidate: true }),
+    base({ bssid: '02:00:00:00:00:02', isRogueCandidate: true })
+  ], []);
+  if (duplicated.length !== 1) {
+    throw new Error('Duplicate observations produced duplicate alert candidates');
+  }
+
+  const openAa = asset('02:00:00:00:00:03');
+  const weak = evaluateAlerts([base({ bssid: '02:00:00:00:00:03', security: 'Open', cipher: 'None' })], [openAa]);
+  if (weak.length !== 1 || weak[0].ruleId !== 'WEAK_ENCRYPTION' || weak[0].severity !== 'High') {
+    throw new Error('An enrolled open network did not raise a high-severity weak-encryption alert');
+  }
+  const wep = evaluateAlerts([base({ bssid: '02:00:00:00:00:04', security: 'WEP-64/128', cipher: 'WEP' })], [asset('02:00:00:00:00:04')]);
+  if (!wep.some(candidate => candidate.ruleId === 'WEAK_ENCRYPTION' && candidate.severity === 'Critical')) {
+    throw new Error('WEP did not raise a critical alert');
+  }
+  const tkip = evaluateAlerts([base({ bssid: '02:00:00:00:00:05', security: 'WPA-TKIP', cipher: 'TKIP' })], [asset('02:00:00:00:00:05')]);
+  if (!tkip.some(candidate => candidate.ruleId === 'WEAK_ENCRYPTION' && candidate.severity === 'High')) {
+    throw new Error('TKIP did not raise a high-severity alert');
+  }
+
+  const unapproved = evaluateAlerts([base({ bssid: '02:00:00:00:00:06' })], [asset('02:00:00:00:00:06', { approvalStatus: 'Decommissioned' })]);
+  if (unapproved.length !== 1 || unapproved[0].ruleId !== 'UNAPPROVED_ASSET' || unapproved[0].severity !== 'High') {
+    throw new Error('A decommissioned asset did not raise an unapproved-asset alert');
+  }
+
+  const pmf = evaluateAlerts([base({ bssid: '02:00:00:00:00:07', pmfRequired: false, pmfInformationAvailable: true })], [asset('02:00:00:00:00:07')]);
+  if (!pmf.some(candidate => candidate.ruleId === 'PMF_NOT_REQUIRED' && candidate.severity === 'Medium')) {
+    throw new Error('Missing PMF did not raise a medium alert');
+  }
+  const pmfUnknown = evaluateAlerts([base({ bssid: '02:00:00:00:00:08', pmfRequired: false, pmfInformationAvailable: false })], [asset('02:00:00:00:00:08')]);
+  if (pmfUnknown.some(candidate => candidate.ruleId === 'PMF_NOT_REQUIRED')) {
+    throw new Error('An unobserved PMF state raised an alert');
+  }
+
+  const wps = evaluateAlerts([base({ bssid: '02:00:00:00:00:09', wpsEnabled: true, wpsLocked: true })], [asset('02:00:00:00:00:09')]);
+  const wpsAlert = wps.find(candidate => candidate.ruleId === 'WPS_ENABLED');
+  if (!wpsAlert || wpsAlert.severity !== 'Medium' || !wpsAlert.detail.includes('locked')) {
+    throw new Error('WPS did not raise a medium alert or report its lock state');
+  }
+
+  let state = reconcileAlerts([], rogue.concat(weak), t0);
+  if (state.added !== 2 || state.records.length !== 2 || state.records.some(record => record.status !== 'Open' || !record.id.startsWith('ALT-'))) {
+    throw new Error('Initial reconciliation did not create open alerts');
+  }
+  const firstAlert = state.records[0];
+  const rogueAlert = state.records.find(record => record.ruleId === 'ROGUE_AP')!;
+  const weakAlert = state.records.find(record => record.ruleId === 'WEAK_ENCRYPTION')!;
+  if (!rogueAlert || !weakAlert) {
+    throw new Error('The initial reconciliation did not retain both rule alerts');
+  }
+  if (firstAlert.firstSeenAt !== t0.toISOString() || firstAlert.lastSeenAt !== t0.toISOString()) {
+    throw new Error('Initial alert timestamps are incorrect');
+  }
+
+  const stable = reconcileAlerts(state.records, rogue.concat(weak), t1);
+  if (stable.added !== 0 || stable.resolved !== 0 || stable.updated !== 0 || stable.records.length !== 2) {
+    throw new Error('An unchanged observation set churned alert state');
+  }
+  if (stable.records.find(record => record.id === firstAlert.id)?.lastSeenAt !== t1.toISOString()) {
+    throw new Error('lastSeenAt did not advance on a repeat observation');
+  }
+
+  const changed = reconcileAlerts(stable.records, rogue.concat([{ ...weak[0], detail: 'Changed cipher detail.' }]), t2);
+  if (changed.updated !== 1) {
+    throw new Error('A material alert change was not counted');
+  }
+
+  const acked = acknowledgeAlert(changed.records, weakAlert.id, 'Alice Auditor', t1);
+  if (acked.error || !acked.record || acked.record.status !== 'Acknowledged' || acked.record.acknowledgedBy !== 'Alice Auditor' || acked.record.acknowledgedAt !== t1.toISOString()) {
+    throw new Error(`Acknowledging an open alert failed: ${acked.error}`);
+  }
+  if (!acknowledgeAlert(acked.records, weakAlert.id, 'Bob', t2).error) {
+    throw new Error('An acknowledged alert was acknowledged twice');
+  }
+  if (!acknowledgeAlert(changed.records, weakAlert.id, 'A', t1).error) {
+    throw new Error('A one-character acknowledging analyst was accepted');
+  }
+
+  const afterAck = reconcileAlerts(acked.records, rogue.concat(weak), t2);
+  if (afterAck.records.find(record => record.id === weakAlert.id)?.status !== 'Acknowledged') {
+    throw new Error('Reconciliation cleared an acknowledgement');
+  }
+
+  const resolvedState = reconcileAlerts(afterAck.records, rogue, t2);
+  const resolvedRecord = resolvedState.records.find(record => record.id === weakAlert.id);
+  if (resolvedState.resolved !== 1 || !resolvedRecord || resolvedRecord.status !== 'Resolved' || resolvedRecord.resolvedAt !== t2.toISOString()) {
+    throw new Error('A vanished condition was not resolved');
+  }
+  if (!acknowledgeAlert(resolvedState.records, weakAlert.id, 'Bob', t2).error) {
+    throw new Error('A resolved alert was acknowledged');
+  }
+
+  const summary = summarizeAlerts(resolvedState.records);
+  if (summary.active !== 1 || summary.critical !== 1 || summary.open !== 1 || summary.acknowledged !== 0) {
+    throw new Error('Alert summary counts are incorrect');
+  }
+
+  if (normalizeAlerts('nope').length !== 0 ||
+      normalizeAlerts([null, 42, {}, { bssid: 'nope', ruleId: 'ROGUE_AP', severity: 'Critical', status: 'Open', firstSeenAt: t0.toISOString(), lastSeenAt: t0.toISOString() }]).length !== 0) {
+    throw new Error('normalizeAlerts accepted malformed records');
+  }
+  const duplicateIds = normalizeAlerts([
+    { ...firstAlert, id: 'same' },
+    { ...firstAlert, id: 'same' }
+  ], t0);
+  if (duplicateIds.length !== 2 || duplicateIds[0].id === duplicateIds[1].id) {
+    throw new Error('normalizeAlerts did not regenerate duplicate IDs');
+  }
+  const stale = normalizeAlerts([
+    { ...firstAlert, id: 'old', status: 'Resolved', resolvedAt: new Date(t0.getTime() - 40 * 24 * 60 * 60 * 1000).toISOString() }
+  ], t0);
+  if (stale.length !== 0) {
+    throw new Error('normalizeAlerts retained a resolved alert past 30 days');
+  }
+
+  const terminal = Array.from({ length: MAX_ALERTS }, (_, index) => ({
+    ...firstAlert,
+    id: `ALT-CAP-${index}`,
+    bssid: `02:00:00:01:${Math.floor(index / 256).toString(16).padStart(2, '0').toUpperCase()}:${(index % 256).toString(16).padStart(2, '0').toUpperCase()}`,
+    ruleId: 'WPS_ENABLED' as const,
+    status: 'Resolved' as const,
+    resolvedAt: t0.toISOString()
+  }));
+  const capped = reconcileAlerts(terminal, [rogue[0]], t2);
+  if (capped.records.length !== MAX_ALERTS || !capped.records.some(record => record.ruleId === 'ROGUE_AP' && record.status === 'Open')) {
+    throw new Error('The alert cap dropped the new active alert or exceeded the limit');
   }
 });
 
