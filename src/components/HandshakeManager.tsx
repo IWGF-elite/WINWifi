@@ -20,7 +20,6 @@ interface HandshakeManagerProps {
   handshakes: HandshakeInfo[];
   accessPoints: AccessPoint[];
   dataSourceProfile?: DataSourceProfile;
-  onSimulateCapture?: (ap: AccessPoint) => void;
   onOpenImport?: () => void;
   onOpenCaptureGuide?: () => void;
   isDarkMode?: boolean;
@@ -29,8 +28,7 @@ interface HandshakeManagerProps {
 export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
   handshakes = [],
   accessPoints = [],
-  dataSourceProfile = 'BENCHMARK',
-  onSimulateCapture,
+  dataSourceProfile = 'OFFLINE',
   onOpenImport,
   onOpenCaptureGuide,
   isDarkMode = true,

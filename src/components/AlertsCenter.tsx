@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { BellRing, CheckCircle2, Clock, ShieldAlert } from 'lucide-react';
-import { DataSourceProfile } from '../types';
 import {
   ALERT_RULES,
   AlertRecord,
@@ -11,7 +10,6 @@ import {
 
 interface AlertsCenterProps {
   alerts: AlertRecord[];
-  dataSourceProfile: DataSourceProfile;
   operatorName: string;
   canAcknowledge: boolean;
   onAcknowledge: (id: string) => Promise<void>;
@@ -37,7 +35,6 @@ const formatTime = (iso: string): string => {
 
 export const AlertsCenter: React.FC<AlertsCenterProps> = ({
   alerts,
-  dataSourceProfile,
   operatorName,
   canAcknowledge,
   onAcknowledge
@@ -60,8 +57,6 @@ export const AlertsCenter: React.FC<AlertsCenterProps> = ({
       if (severityDelta !== 0) return severityDelta;
       return Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt);
     }), [alerts, severityFilter, statusFilter]);
-
-  const synthetic = dataSourceProfile === 'TRAINING' || dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB';
 
   const acknowledge = async (id: string) => {
     setBusyId(id);
@@ -168,9 +163,7 @@ export const AlertsCenter: React.FC<AlertsCenterProps> = ({
         <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/60 px-4 py-10 text-center text-xs text-slate-400">
           <ShieldAlert className="mx-auto mb-2 h-6 w-6 text-slate-500" />
           {alerts.length === 0
-            ? synthetic
-              ? 'No alerts were generated from this synthetic profile. Use a live scan or an imported capture to evaluate real observations.'
-              : 'No alerts recorded for this project yet. Alerts appear after a live Windows scan or an imported capture matches a rule.'
+            ? 'No alerts recorded for this project yet. Alerts appear after a live Windows scan or an imported capture matches a rule.'
             : 'No alerts match the selected filters.'}
         </div>
       ) : (

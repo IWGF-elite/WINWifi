@@ -55,7 +55,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   onClose,
   onCaptureHandshake,
   isDarkMode,
-  dataSourceProfile = 'BENCHMARK',
+  dataSourceProfile = 'OFFLINE',
   onOpenCaptureGuide,
   onOpenImport,
   onConnect,
@@ -519,16 +519,6 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
             </h3>
 
             {!ap.handshake ? (
-              dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB' || dataSourceProfile === 'TRAINING' ? (
-                <button
-                  onClick={() => onCaptureHandshake(ap)}
-                  className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1.5 shadow-sm transition-all text-xs"
-                  title="Generate synthetic training handshake for educational verification"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>Simulate Lab Handshake</span>
-                </button>
-              ) : (
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] text-slate-400 italic">
                     Capture Driver / Monitor Mode Required
@@ -550,7 +540,6 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
                     </button>
                   )}
                 </div>
-              )
             ) : (
               <span className={`px-2 py-0.5 rounded font-semibold text-[11px] flex items-center gap-1 border ${
                 ap.handshake.origin === 'IMPORTED' || (!ap.handshake.isSimulated && ap.handshake.origin !== 'TRAINING')

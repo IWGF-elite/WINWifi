@@ -53,7 +53,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   selectedBssid,
   onSelectAp,
   onCaptureHandshake,
-  dataSourceProfile = 'BENCHMARK',
+  dataSourceProfile = 'OFFLINE',
   activeSourceLabel = 'Default',
   onOpenImport,
   onRefreshScan,
@@ -239,9 +239,6 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
           {(dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED') && <HardDrive className="w-4 h-4 text-cyan-400 shrink-0" />}
           {dataSourceProfile === 'REAL_NETSH' && <Terminal className="w-4 h-4 text-cyan-400 shrink-0" />}
           {dataSourceProfile === 'OFFLINE' && <Database className="w-4 h-4 text-amber-400 shrink-0" />}
-          {(dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'TRAINING' || dataSourceProfile === 'OFFLINE_LAB') && (
-            <FlaskConical className="w-4 h-4 text-purple-400 shrink-0" />
-          )}
           
           <div>
             <div className="font-bold flex items-center gap-2">
@@ -250,9 +247,6 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                 {dataSourceProfile === 'REAL_PCAP' && 'IMPORTED DATA (Binary PCAP / PCAPNG Dissection)'}
                 {dataSourceProfile === 'REAL_NETSH' && 'IMPORTED DATA (Windows Netsh CLI Acquisition)'}
                 {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATA (Local Project SQLite Database)'}
-                {(dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'TRAINING' || dataSourceProfile === 'OFFLINE_LAB') && (
-                  'TRAINING DATA (NIST SP 800-153 Reference Benchmark)'
-                )}
               </span>
               <span className="text-[10px] px-1.5 py-0.2 rounded font-mono border bg-black/20 border-current/30">
                 {accessPoints.length} BSS entries loaded

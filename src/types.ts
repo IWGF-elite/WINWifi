@@ -439,11 +439,8 @@ export type DataSourceProfile =
   | 'LIVE_WINDOWS' 
   | 'OFFLINE' 
   | 'IMPORTED' 
-  | 'TRAINING'
   | 'REAL_PCAP' 
-  | 'REAL_NETSH' 
-  | 'BENCHMARK' 
-  | 'OFFLINE_LAB';
+  | 'REAL_NETSH';
 
 export type BridgeConnectionState = 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR';
 

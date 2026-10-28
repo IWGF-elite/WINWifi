@@ -44,7 +44,7 @@ interface HardwareDiagnosticsProps {
 export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
   adapter,
   uiMode,
-  dataSourceProfile = 'BENCHMARK',
+  dataSourceProfile = 'OFFLINE',
   bridgeState = 'DISCONNECTED',
   bridgeStatus,
   onOpenBridgeConfig,

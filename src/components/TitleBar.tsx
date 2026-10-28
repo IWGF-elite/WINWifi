@@ -108,14 +108,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           classes: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
           icon: <Database className="w-3 h-3 text-amber-400" />
         };
-      case 'TRAINING':
-      case 'BENCHMARK':
-      case 'OFFLINE_LAB':
-        return {
-          label: 'TRAINING DATA',
-          classes: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
-          icon: <FlaskConical className="w-3 h-3 text-purple-400" />
-        };
       default:
         return {
           label: 'NO DATA',

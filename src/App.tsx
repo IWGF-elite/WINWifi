@@ -1719,7 +1719,6 @@ export default function App() {
                   {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE WINDOWS DATA'}
                   {(dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'IMPORTED') && 'IMPORTED DATA'}
                   {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATA'}
-                  {(dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'TRAINING' || dataSourceProfile === 'OFFLINE_LAB') && 'TRAINING DATA'}
                 </span>
                 <span className="text-[11px] text-slate-500">({accessPoints.length} retained)</span>
               </div>
@@ -1838,7 +1837,6 @@ export default function App() {
         {activeTab === 'alerts' && (
           <AlertsCenter
             alerts={alerts}
-            dataSourceProfile={dataSourceProfile}
             operatorName={operatorName}
             canAcknowledge={can(operatorRole, 'manage_alerts')}
             onAcknowledge={handleAcknowledgeAlert}
@@ -1872,7 +1870,6 @@ export default function App() {
             handshakes={handshakes}
             accessPoints={accessPoints}
             dataSourceProfile={dataSourceProfile}
-            onSimulateCapture={handleCaptureHandshake}
             onOpenImport={() => setShowImportModal(true)}
             onOpenCaptureGuide={() => setShowArchitectureModal(true)}
             isDarkMode={isDarkMode}

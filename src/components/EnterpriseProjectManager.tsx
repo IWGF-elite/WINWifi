@@ -221,7 +221,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
               <div className="p-3 rounded-lg bg-slate-800/60 border border-slate-700/60">
                 <div className="text-slate-400">Current AP Inventory</div>
                 <div className="text-xl font-bold text-slate-100 mt-1">{accessPoints.length} APs</div>
-                <div className="text-[10px] text-slate-400 mt-1">{dataSourceProfile === 'LIVE_WINDOWS' ? 'Recent Windows observation' : dataSourceProfile === 'TRAINING' || dataSourceProfile === 'BENCHMARK' || dataSourceProfile === 'OFFLINE_LAB' ? 'Training data loaded' : 'No live observation'}</div>
+                <div className="text-[10px] text-slate-400 mt-1">{dataSourceProfile === 'LIVE_WINDOWS' ? 'Recent Windows observation' : 'No live observation'}</div>
               </div>
 
               <div className="p-3 rounded-lg bg-slate-800/60 border border-slate-700/60">

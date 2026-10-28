@@ -31,7 +31,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
   accessPoints = [],
   stationClients = [],
   uiMode,
-  dataSourceProfile = 'BENCHMARK',
+  dataSourceProfile = 'OFFLINE',
   onSelectAP,
   onOpenImport
 }) => {

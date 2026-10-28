@@ -15,7 +15,7 @@ export const SpectrumVisualizer: React.FC<SpectrumVisualizerProps> = ({
   selectedBssid,
   onSelectAp,
   isDarkMode = true,
-  dataSourceProfile = 'BENCHMARK',
+  dataSourceProfile = 'OFFLINE',
 }) => {
   const [band, setBand] = useState<FrequencyBand>('2.4 GHz');
 

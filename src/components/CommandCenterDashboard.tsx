@@ -45,7 +45,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
   securityChanges = [],
   uiMode,
   isScanning = false,
-  dataSourceProfile = 'BENCHMARK',
+  dataSourceProfile = 'OFFLINE',
   bridgeState = 'DISCONNECTED',
   lastLiveDataAt = null,
   onOpenBridgeConfig,
