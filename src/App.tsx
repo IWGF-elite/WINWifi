@@ -264,7 +264,6 @@ export default function App() {
   const [incidents, setIncidents] = useState<IncidentRecord[]>(() => {
     const saved = db.getIncidents(db.getCurrentProjectId());
     return (saved ?? [])
-      .filter(incident => !['INC-00042', 'INC-00038'].includes(incident.id))
       // Older builds promoted every per-AP configuration issue into a case.
       // Those findings now stay on the access point; drop the duplicates.
       .filter(incident => !incident.id.startsWith('NATIVE-AP-'))
@@ -385,8 +384,7 @@ export default function App() {
     threatEngine.setIncidents(incidents);
     const projectId = db.getCurrentProjectId();
     const stored = db.getIncidents(projectId);
-    const containsLegacyCases = !stored || stored.some(incident =>
-      ['INC-00042', 'INC-00038'].includes(incident.id) || incident.id.startsWith('NATIVE-AP-'));
+    const containsLegacyCases = !stored || stored.some(incident => incident.id.startsWith('NATIVE-AP-'));
     if (containsLegacyCases) db.saveIncidents(incidents, projectId);
   // Keep the incident engine aligned with the user's persisted incident records.
   // eslint-disable-next-line react-hooks/exhaustive-deps

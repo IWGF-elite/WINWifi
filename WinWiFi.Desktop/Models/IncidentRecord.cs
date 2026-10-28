@@ -5,7 +5,7 @@ namespace WinWiFi.Models
 {
     public class IncidentRecord
     {
-        public string Id { get; set; } = string.Empty; // e.g., "INC-00042"
+        public string Id { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Severity { get; set; } = "HIGH"; // "CRITICAL", "HIGH", "MEDIUM", "LOW"
         public int Confidence { get; set; } = 85; // 0-100%
