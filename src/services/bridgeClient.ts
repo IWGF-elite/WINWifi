@@ -20,6 +20,12 @@ import {
 
 export type BridgeEventCallback<T> = (data: T) => void;
 
+/** Rejection reasons are logged as text so a polled failure stays one readable line. */
+const messageOf = (reason: unknown): string => {
+  if (reason instanceof Error) return reason.message;
+  return String(reason);
+};
+
 const DEFAULT_CONFIG: BridgeConfig = {
   baseUrl: 'http://127.0.0.1:38989',
   allowRemote: false,
@@ -642,15 +648,30 @@ export class NativeBridgeClient {
   private startPolling(): void {
     if (this.pollTimer) return;
 
-    this.pollTimer = setInterval(async () => {
+    this.pollTimer = setInterval(() => {
       if (this.state !== 'CONNECTED') return;
 
-      try {
-        const aps = await this.getNetworks();
-        this.networkListeners.forEach(cb => cb(aps));
-      } catch (err: any) {
-        console.warn('[BridgeClient] Polling error:', err.message);
-      }
+      // Both endpoints are polled on every tick, in parallel and independently.
+      // Networks alone used to be re-fetched here while SSE was down, so each
+      // tick reconciled incidents against nothing and erased every native
+      // incident from the store.
+      void Promise.allSettled([this.getNetworks(), this.getIncidents()])
+        .then(([networks, incidents]) => {
+          if (networks.status === 'fulfilled') {
+            this.networkListeners.forEach(cb => cb(networks.value));
+          } else {
+            console.warn('[BridgeClient] Polling networks failed:', messageOf(networks.reason));
+          }
+
+          // Only a real response may reach the listeners: a failed request must
+          // never be read as "the analyzer found no incidents".
+          if (incidents.status === 'fulfilled') {
+            const findings = incidents.value;
+            if (Array.isArray(findings)) this.incidentListeners.forEach(cb => cb(findings));
+          } else {
+            console.warn('[BridgeClient] Polling incidents failed:', messageOf(incidents.reason));
+          }
+        });
     }, this.config.pollIntervalMs);
   }
 

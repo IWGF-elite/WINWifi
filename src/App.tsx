@@ -433,12 +433,12 @@ export default function App() {
           applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId)),
           enterpriseAssetsRef.current);
         setAccessPoints(resolvedAps);
-        setIncidents(previous => {
-          const live = reconcileLiveIncidents([], resolvedAps, previous);
-          threatEngine.setIncidents(live);
-          db.saveIncidents(live, projectId);
-          return live;
-        });
+        // The incidents listener runs in the same SSE frame, before React
+        // re-renders, so the ref is updated here to keep analyst-case pruning
+        // aligned with this scan. Incidents are owned by the incidents
+        // listener only: reconciling them here with a placeholder empty
+        // finding list erased every native incident on each poll tick.
+        accessPointsRef.current = resolvedAps;
         db.saveAccessPoints(projectId, resolvedAps);
         setDataSourceProfile('LIVE_WINDOWS');
         setLastLiveDataAt(Date.now());

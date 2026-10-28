@@ -1628,4 +1628,50 @@ runTest('T28: Desktop Shell Wording Hides Bridge Internals', () => {
   }
 });
 
+// 29. Polling fallback must keep native incidents alive
+runTest('T29: Polling Fallback Re-fetches Incidents Independently', () => {
+  const nativeSetInterval = globalThis.setInterval;
+  const ticks: Array<() => void> = [];
+  (globalThis as any).setInterval = (cb: () => void) => { ticks.push(cb); return 1 as any; };
+
+  const client = new (NativeBridgeClient as any)();
+  try {
+    let incidentCalls = 0;
+    client.state = 'CONNECTED';
+    client.getNetworks = async () => [];
+    // The counter is incremented inside the async body, which runs synchronously
+    // up to its first await, so the assertion below needs no timer pump.
+    client.getIncidents = async () => { incidentCalls++; return [{ id: 'NATIVE-1' }]; };
+
+    client.startPolling();
+    if (ticks.length !== 1) throw new Error('startPolling did not register a fallback tick');
+
+    ticks[0]();
+    if (incidentCalls !== 1) {
+      throw new Error(
+        `The polling fallback re-fetched incidents ${incidentCalls} times. While SSE is down it must fetch`
+        + ' incidents every tick, otherwise every native incident is erased from the store.'
+      );
+    }
+
+    // One endpoint failing must not suppress the other.
+    incidentCalls = 0;
+    client.getNetworks = () => Promise.reject(new Error('networks unavailable'));
+    ticks[0]();
+    if (incidentCalls !== 1) {
+      throw new Error('A failing networks endpoint suppressed the incidents poll');
+    }
+
+    // The App-level half of the same defect: incidents must never be reconciled
+    // with a placeholder empty finding list, which drops every native incident.
+    const appSource = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf8');
+    if (/reconcileLiveIncidents\(\s*\[\s*\]/.test(appSource)) {
+      throw new Error('App.tsx still reconciles incidents with a hardcoded empty findings array');
+    }
+  } finally {
+    (globalThis as any).setInterval = nativeSetInterval;
+    client.stopPolling();
+  }
+});
+
 console.log(`\nResults: ${passedCount}/${totalCount} tests passed.\n`);
