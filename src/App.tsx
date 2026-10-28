@@ -19,7 +19,8 @@ import {
   AnalystClassification,
   EnterpriseAssetRecord,
   EnterpriseScope,
-  SiteRecord
+  SiteRecord,
+  MaintenanceApprovalRecord
 } from './types';
 import { WifiEngine } from './services/wifiEngine';
 import { SqliteDatabaseService } from './services/storage';
@@ -42,6 +43,14 @@ import {
   serializeAssetCsv
 } from './services/assetRegistry';
 import { ensureScopeInDirectory } from './services/siteDirectory';
+import {
+  approveMaintenance,
+  createMaintenanceRequest,
+  findActiveApproval,
+  markApprovalUsed,
+  rejectMaintenance,
+  revokeMaintenance
+} from './services/maintenanceApproval';
 import type { AssetImportSummary } from './components/EnterpriseRegistry';
 
 // Components
@@ -175,6 +184,12 @@ export default function App() {
   const siteDirectoryRef = useRef(siteDirectory);
   useEffect(() => { siteDirectoryRef.current = siteDirectory; }, [siteDirectory]);
 
+  // Two-person, time-boxed approval for the only active action (network connect).
+  const [maintenanceApprovals, setMaintenanceApprovals] = useState<MaintenanceApprovalRecord[]>(
+    () => db.getMaintenanceApprovals(db.getCurrentProjectId()));
+  const maintenanceApprovalsRef = useRef(maintenanceApprovals);
+  useEffect(() => { maintenanceApprovalsRef.current = maintenanceApprovals; }, [maintenanceApprovals]);
+
   const [packets, setPackets] = useState<PcapPacket[]>([]);
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
   // A visual row/focus selection is not permission to open the inspection drawer.
@@ -231,6 +246,12 @@ export default function App() {
     enterpriseAssetsRef.current = next;
     setEnterpriseAssets(next);
     db.saveEnterpriseAssets(projectId, next);
+  }, [db]);
+
+  const commitMaintenanceApprovals = useCallback((next: MaintenanceApprovalRecord[], projectId: string) => {
+    maintenanceApprovalsRef.current = next;
+    setMaintenanceApprovals(next);
+    db.saveMaintenanceApprovals(next, projectId);
   }, [db]);
 
   // Native SQLite is authoritative when connected. Local-only records survive
@@ -479,8 +500,86 @@ export default function App() {
     }
   };
 
+  const handleRequestMaintenance = async (
+    ap: AccessPoint,
+    requester: string,
+    justification: string,
+    durationMinutes: number
+  ): Promise<void> => {
+    const projectId = currentProjectIdRef.current;
+    const result = createMaintenanceRequest(maintenanceApprovalsRef.current, {
+      action: 'Connect to network',
+      bssid: ap.bssid,
+      ssid: ap.ssid,
+      adapterId: selectedAdapterId,
+      requester,
+      justification,
+      durationMinutes
+    });
+    if (result.error || !result.record) {
+      throw new Error(result.error || 'The maintenance request could not be created.');
+    }
+    commitMaintenanceApprovals(result.records, projectId);
+    const log = db.appendLog({
+      level: 'INFO',
+      source: 'MAINTENANCE',
+      message: `Maintenance request ${result.record.id} created for ${result.record.ssid || '[hidden network]'} (${result.record.bssid}); pending approval by a different analyst until ${new Date(result.record.expiresAt).toLocaleString()}.`,
+    }, projectId);
+    setLogs(previous => [log, ...previous]);
+  };
+
+  const handleApproveMaintenance = async (id: string, approver: string): Promise<void> => {
+    const projectId = currentProjectIdRef.current;
+    const result = approveMaintenance(maintenanceApprovalsRef.current, id, approver);
+    if (result.error || !result.record) {
+      throw new Error(result.error || 'The maintenance approval could not be recorded.');
+    }
+    commitMaintenanceApprovals(result.records, projectId);
+    const log = db.appendLog({
+      level: 'SUCCESS',
+      source: 'MAINTENANCE',
+      message: `Maintenance request ${id} approved by ${result.record.approver} for ${result.record.ssid || '[hidden network]'} (${result.record.bssid}); connect allowed until ${new Date(result.record.expiresAt).toLocaleString()}.`,
+    }, projectId);
+    setLogs(previous => [log, ...previous]);
+  };
+
+  const handleRejectMaintenance = async (id: string, approver: string, note: string): Promise<void> => {
+    const projectId = currentProjectIdRef.current;
+    const result = rejectMaintenance(maintenanceApprovalsRef.current, id, approver, note);
+    if (result.error || !result.record) {
+      throw new Error(result.error || 'The maintenance rejection could not be recorded.');
+    }
+    commitMaintenanceApprovals(result.records, projectId);
+    const log = db.appendLog({
+      level: 'WARN',
+      source: 'MAINTENANCE',
+      message: `Maintenance request ${id} rejected by ${result.record.approver}${result.record.decisionNote ? `: ${result.record.decisionNote}` : '.'}`,
+    }, projectId);
+    setLogs(previous => [log, ...previous]);
+  };
+
+  const handleRevokeMaintenance = async (id: string): Promise<void> => {
+    const projectId = currentProjectIdRef.current;
+    const result = revokeMaintenance(maintenanceApprovalsRef.current, id);
+    if (result.error || !result.record) {
+      throw new Error(result.error || 'The maintenance approval could not be revoked.');
+    }
+    commitMaintenanceApprovals(result.records, projectId);
+    const log = db.appendLog({
+      level: 'WARN',
+      source: 'MAINTENANCE',
+      message: `Maintenance request ${id} was revoked; further connect attempts for ${result.record.bssid} require a new approval.`,
+    }, projectId);
+    setLogs(previous => [log, ...previous]);
+  };
+
   const handleAuthorizedConnect = async (ap: AccessPoint, password: string, confirmed: boolean): Promise<string> => {
     if (bridgeClient.getState() !== 'CONNECTED') throw new Error('Windows bridge is not connected.');
+    if (!confirmed) throw new Error('Connection blocked: confirm that you own or are authorized to test this network.');
+    const approval = findActiveApproval(maintenanceApprovalsRef.current, ap.bssid);
+    if (!approval) {
+      throw new Error('Connection blocked: this BSSID has no active maintenance approval. Request one in the inspection panel and have a different analyst approve it.');
+    }
     const result = await bridgeClient.connectAuthorizedNetwork({
       adapterId: selectedAdapterId,
       bssid: ap.bssid,
@@ -490,7 +589,13 @@ export default function App() {
       authorizedBssids: confirmed ? [ap.bssid] : []
     });
     if (result.state === 'Connected') setConnectedBssid(result.bssid);
-    const log = db.appendLog({ level: result.state === 'Failed' ? 'ERROR' : 'INFO', source: 'WLAN_CONNECT', message: `${result.state}: ${result.ssid || ap.ssid}. ${result.reason}` });
+    const used = markApprovalUsed(maintenanceApprovalsRef.current, approval.id);
+    if (!used.error) commitMaintenanceApprovals(used.records, currentProjectIdRef.current);
+    const log = db.appendLog({
+      level: result.state === 'Failed' ? 'ERROR' : 'INFO',
+      source: 'WLAN_CONNECT',
+      message: `${result.state}: ${result.ssid || ap.ssid}. ${result.reason} Approval ${approval.id} (approved by ${approval.approver}).`,
+    });
     setLogs(previous => [log, ...previous]);
     return `${result.state}: ${result.reason}`;
   };
@@ -979,6 +1084,9 @@ export default function App() {
     const localAssets = db.getEnterpriseAssets(projectId);
     enterpriseAssetsRef.current = localAssets;
     setEnterpriseAssets(localAssets);
+    const localApprovals = db.getMaintenanceApprovals(projectId);
+    maintenanceApprovalsRef.current = localApprovals;
+    setMaintenanceApprovals(localApprovals);
     setAccessPoints(applyAssetsToAccessPoints(savedAps, localAssets));
     setIncidents(savedIncidents);
     threatEngine.setIncidents(savedIncidents);
@@ -1467,6 +1575,9 @@ export default function App() {
                 onOpenCaptureGuide={() => setShowArchitectureModal(true)}
                 onOpenImport={() => setShowImportModal(true)}
                 onConnect={handleAuthorizedConnect}
+                maintenanceApprovals={maintenanceApprovals}
+                onRequestMaintenance={handleRequestMaintenance}
+                onApproveMaintenance={handleApproveMaintenance}
               />
             )}
           </div>
@@ -1608,6 +1719,10 @@ export default function App() {
             accessPoints={accessPoints}
             onToggleUIMode={handleToggleUIMode}
             onLoadLabScenario={handleLoadLabScenario}
+            maintenanceApprovals={maintenanceApprovals}
+            onApproveMaintenance={handleApproveMaintenance}
+            onRejectMaintenance={handleRejectMaintenance}
+            onRevokeMaintenance={handleRevokeMaintenance}
           />
         )}
 

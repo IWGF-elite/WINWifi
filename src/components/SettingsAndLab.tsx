@@ -14,22 +14,31 @@ import {
   ToggleRight,
   Code
 } from 'lucide-react';
-import { UIMode, SecurityPolicy, TrainingLabScenario, AccessPoint } from '../types';
+import { UIMode, SecurityPolicy, TrainingLabScenario, AccessPoint, MaintenanceApprovalRecord } from '../types';
 import { PolicyEngine, POLICY_CLASSIFICATION_ROUTES } from '../services/policyEngine';
 import { TRAINING_SCENARIOS } from '../services/offlineLab';
+import { MaintenanceApprovalCenter } from './MaintenanceApprovalCenter';
 
 interface SettingsAndLabProps {
   uiMode: UIMode;
   accessPoints: AccessPoint[];
   onToggleUIMode: (mode: UIMode) => void;
   onLoadLabScenario: (scenario: TrainingLabScenario) => void;
+  maintenanceApprovals: MaintenanceApprovalRecord[];
+  onApproveMaintenance: (id: string, approver: string) => Promise<void>;
+  onRejectMaintenance: (id: string, approver: string, note: string) => Promise<void>;
+  onRevokeMaintenance: (id: string) => Promise<void>;
 }
 
 export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
   uiMode,
   accessPoints,
   onToggleUIMode,
-  onLoadLabScenario
+  onLoadLabScenario,
+  maintenanceApprovals,
+  onApproveMaintenance,
+  onRejectMaintenance,
+  onRevokeMaintenance
 }) => {
   const policyEngine = PolicyEngine.getInstance();
   const [activePolicyId, setActivePolicyId] = useState(policyEngine.getActivePolicy().id);
@@ -252,6 +261,13 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
           </>
         )}
       </div>
+
+      <MaintenanceApprovalCenter
+        approvals={maintenanceApprovals}
+        onApprove={onApproveMaintenance}
+        onReject={onRejectMaintenance}
+        onRevoke={onRevokeMaintenance}
+      />
 
       {/* Section 3: Offline Training & Lab Workbench */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
