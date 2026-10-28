@@ -22,7 +22,6 @@ import {
   Unlock,
   Radio,
   Upload,
-  Sparkles,
   Terminal,
   RefreshCw,
   Server,
@@ -41,7 +40,6 @@ interface NetworkDiscoveryProps {
   dataSourceProfile?: DataSourceProfile;
   activeSourceLabel?: string;
   onOpenImport?: () => void;
-  onLoadBenchmark?: () => void;
   onRefreshScan?: () => void;
   onOpenBridgeConfig?: () => void;
   isDarkMode: boolean;
@@ -58,7 +56,6 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   dataSourceProfile = 'BENCHMARK',
   activeSourceLabel = 'Default',
   onOpenImport,
-  onLoadBenchmark,
   onRefreshScan,
   onOpenBridgeConfig,
   isDarkMode,
@@ -496,15 +493,6 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                           >
                             <Upload className="w-3.5 h-3.5" />
                             <span>Import .PCAP or Netsh</span>
-                          </button>
-                        )}
-                        {onLoadBenchmark && (
-                          <button
-                            onClick={onLoadBenchmark}
-                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5"
-                          >
-                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Load Benchmark</span>
                           </button>
                         )}
                       </div>

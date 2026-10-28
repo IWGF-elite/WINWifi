@@ -860,28 +860,6 @@ export default function App() {
     setLogs((prev) => [log, ...prev]);
   };
 
-  // Ingestion: Load Benchmark
-  const handleLoadBenchmark = () => {
-    const benchmarkAps = applyAnalystOverrides(engine.getBenchmarkAccessPoints().map((a) => ({
-      ...a,
-      dataSourceOrigin: 'TRAINING' as DataOrigin,
-    })), db.getAnalystOverrides(currentProjectId));
-    setAccessPoints(benchmarkAps);
-    db.saveAccessPoints(currentProjectId, benchmarkAps);
-    setPackets(engine.generatePackets(benchmarkAps));
-    setDataSourceProfile('BENCHMARK');
-    setActiveSourceLabel('NIST SP 800-153 Reference (4 APs)');
-    setInspectedBssid(null);
-    setSelectedBssid('F8:1A:67:8B:11:02');
-
-    const log = db.appendLog({
-      level: 'INFO',
-      source: 'BENCHMARK',
-      message: 'Reloaded NIST SP 800-153 compliance benchmark scenarios.',
-    });
-    setLogs((prev) => [log, ...prev]);
-  };
-
   // Load Offline Training Scenario
   const handleLoadLabScenario = (scenario: TrainingLabScenario) => {
     const taggedAps = applyAnalystOverrides(scenario.simulatedAPs.map((a) => ({
@@ -1757,7 +1735,6 @@ export default function App() {
             lastLiveDataAt={lastLiveDataAt}
             onOpenBridgeConfig={embeddedShell ? undefined : () => setShowBridgeModal(true)}
             onOpenImport={() => setShowImportModal(true)}
-            onLoadBenchmark={handleLoadBenchmark}
             onNavigate={handleNavigate}
             onSelectAP={(ap) => {
               setSelectedBssid(ap.bssid);
@@ -1845,7 +1822,6 @@ export default function App() {
                 dataSourceProfile={dataSourceProfile}
                 activeSourceLabel={activeSourceLabel}
                 onOpenImport={() => setShowImportModal(true)}
-                onLoadBenchmark={handleLoadBenchmark}
                 onRefreshScan={handleRefreshScan}
                 onOpenBridgeConfig={embeddedShell ? undefined : () => setShowBridgeModal(true)}
                 isDarkMode={isDarkMode}
@@ -2094,7 +2070,6 @@ export default function App() {
           onImportPcap={handleImportPcap}
           onImportPcapFile={handleImportPcapFile}
           onImportNetsh={handleImportNetsh}
-          onLoadBenchmark={handleLoadBenchmark}
           currentProfile={dataSourceProfile}
           isDarkMode={isDarkMode}
         />

@@ -36,7 +36,6 @@ interface CommandCenterDashboardProps {
   lastLiveDataAt?: number | null;
   onOpenBridgeConfig?: () => void;
   onOpenImport?: () => void;
-  onLoadBenchmark?: () => void;
   onNavigate: (tab: ActiveTab, filterParam?: string) => void;
   onSelectAP: (ap: AccessPoint) => void;
 }
@@ -53,7 +52,6 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
   lastLiveDataAt = null,
   onOpenBridgeConfig,
   onOpenImport,
-  onLoadBenchmark,
   onNavigate,
   onSelectAP
 }) => {
@@ -329,11 +327,10 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
         {!hasNetworkData ? (
           <div className="flex flex-col items-center gap-3 py-6 text-center text-slate-300">
             <Radio className="w-8 h-8 text-blue-400" />
-            <p className="max-w-xl text-sm text-slate-400">No Wi-Fi data is available yet. A hosted builder preview cannot read your PC’s adapter directly; use the local Windows bridge, import a capture, or load sample data.</p>
+            <p className="max-w-xl text-sm text-slate-400">No scan data yet.</p>
             <div className="flex flex-wrap justify-center gap-2">
               <button onClick={onOpenBridgeConfig} className="rounded-lg border border-blue-500/40 bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500">Connect Windows bridge</button>
               <button onClick={onOpenImport} className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700">Import capture</button>
-              <button onClick={onLoadBenchmark} className="rounded-lg border border-purple-500/40 bg-purple-500/10 px-3 py-2 text-xs font-semibold text-purple-200 hover:bg-purple-500/20">Load sample data</button>
             </div>
           </div>
         ) : attentionItems.length === 0 ? (
