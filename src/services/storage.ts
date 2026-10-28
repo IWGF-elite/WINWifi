@@ -2,6 +2,7 @@ import { AccessPoint, AnalystClassification, AuditProject, AuditLog, EvidenceIte
 import { normalizeSiteDirectory } from './siteDirectory';
 import { normalizeMaintenanceApprovals } from './maintenanceApproval';
 import { AuditChainState, MAX_AUDIT_RECORDS, normalizeAuditChain } from './auditChain';
+import { AlertRecord, MAX_ALERTS, normalizeAlerts } from './alerts';
 
 const DB_PREFIX = 'winwifi_sqlite_';
 
@@ -74,7 +75,7 @@ export class SqliteDatabaseService {
   public deleteProjectData(projectId: string): void {
     localStorage.removeItem(`${DB_PREFIX}access_points_${projectId}`);
     localStorage.removeItem(`${DB_PREFIX}analyst_overrides_${projectId}`);
-    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes', 'assets', 'sites', 'maintenance', 'audit_chain']) {
+    for (const kind of ['incidents', 'evidence', 'logs', 'handshakes', 'assets', 'sites', 'maintenance', 'audit_chain', 'alerts']) {
       localStorage.removeItem(this.scopedKey(kind, projectId));
     }
   }
@@ -211,6 +212,14 @@ export class SqliteDatabaseService {
       ? { ...state, records: state.records.slice(0, MAX_AUDIT_RECORDS) }
       : state;
     this.writeScoped('audit_chain', projectId, bounded);
+  }
+
+  public getAlerts(projectId: string = this.getCurrentProjectId()): AlertRecord[] {
+    return normalizeAlerts(this.readScoped<unknown>('alerts', projectId, []));
+  }
+
+  public saveAlerts(records: AlertRecord[], projectId: string = this.getCurrentProjectId()): void {
+    this.writeScoped('alerts', projectId, records.slice(0, MAX_ALERTS));
   }
 
   public getEnterpriseAssets(projectId: string = this.getCurrentProjectId()): EnterpriseAssetRecord[] {

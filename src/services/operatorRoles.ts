@@ -10,6 +10,7 @@ export type OperatorCapability =
   | 'request_maintenance'
   | 'approve_maintenance'
   | 'connect_network'
+  | 'manage_alerts'
   | 'manage_projects'
   | 'clear_logs'
   | 'manage_roles';
@@ -22,7 +23,8 @@ const AUDITOR: OperatorCapability[] = [
   'edit_assets',
   'manage_sites',
   'request_maintenance',
-  'connect_network'
+  'connect_network',
+  'manage_alerts'
 ];
 const ADMINISTRATOR: OperatorCapability[] = [
   ...AUDITOR,
@@ -43,7 +45,7 @@ export const ROLE_CAPABILITIES: Record<OperatorRole, OperatorCapability[]> = {
 
 export const ROLE_DESCRIPTIONS: Record<OperatorRole, string> = {
   Viewer: 'Read-only: inspect networks, policies, sites, and evidence in this project.',
-  Auditor: 'Analysis plus capture import, asset metadata edits, site edits, maintenance requests, and authorized connect attempts.',
+  Auditor: 'Analysis plus capture import, asset metadata edits, site edits, alert acknowledgement, maintenance requests, and authorized connect attempts.',
   Administrator: 'Everything an Auditor can do, plus asset/project deletion, maintenance decisions, log clearing, and role changes.'
 };
 

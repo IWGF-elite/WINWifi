@@ -60,6 +60,13 @@ import {
   requireCapability,
   sanitizeOperatorName
 } from './services/operatorRoles';
+import {
+  AlertRecord,
+  acknowledgeAlert,
+  evaluateAlerts,
+  reconcileAlerts,
+  summarizeAlerts
+} from './services/alerts';
 import type { AssetImportSummary } from './components/EnterpriseRegistry';
 
 // Components
@@ -68,6 +75,7 @@ import { CommandCenterDashboard } from './components/CommandCenterDashboard';
 import { AssetInventory } from './components/AssetInventory';
 import { ClientObserver } from './components/ClientObserver';
 import { ThreatCenter } from './components/ThreatCenter';
+import { AlertsCenter } from './components/AlertsCenter';
 import { IncidentCenter } from './components/IncidentCenter';
 import { EnterpriseProjectManager } from './components/EnterpriseProjectManager';
 import { ReportingCenter } from './components/ReportingCenter';
@@ -126,7 +134,8 @@ import {
   Sparkles,
   ToggleLeft,
   ToggleRight,
-  Radio
+  Radio,
+  BellRing
 } from 'lucide-react';
 
 export default function App() {
@@ -182,6 +191,32 @@ export default function App() {
       return next.every((ap, index) => ap === previous[index]) ? previous : next;
     });
   }, [enterpriseAssets]);
+
+  // Synthetic labs and offline snapshots are analysis material, not fresh
+  // observations, so alerts are generated only from live scans and captures.
+  useEffect(() => {
+    const operational = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH';
+    if (!operational || accessPoints.length === 0) return;
+    const projectId = currentProjectIdRef.current;
+    const result = reconcileAlerts(
+      alertsRef.current,
+      evaluateAlerts(accessPoints, enterpriseAssetsRef.current),
+      new Date());
+    if (result.added === 0 && result.resolved === 0 && result.updated === 0 && result.records.length === alertsRef.current.length) {
+      return;
+    }
+    alertsRef.current = result.records;
+    setAlerts(result.records);
+    db.saveAlerts(result.records, projectId);
+    if (result.added > 0 || result.resolved > 0) {
+      const log = db.appendLog({
+        level: result.added > 0 ? 'WARN' : 'INFO',
+        source: 'ALERTS',
+        message: `Alert reconciliation: ${result.added} new, ${result.resolved} resolved, ${result.updated} updated.`
+      }, projectId);
+      setLogs(previous => [log, ...previous]);
+    }
+  }, [accessPoints, enterpriseAssets, dataSourceProfile, db]);
   const [siteDirectory, setSiteDirectory] = useState<SiteRecord[]>(() => {
     const projectId = db.getCurrentProjectId();
     const raw = db.getSiteDirectory(projectId);
@@ -212,6 +247,10 @@ export default function App() {
   const auditChainRef = useRef(auditChain);
   useEffect(() => { auditChainRef.current = auditChain; }, [auditChain]);
   const [auditError, setAuditError] = useState('');
+
+  const [alerts, setAlerts] = useState<AlertRecord[]>(() => db.getAlerts(db.getCurrentProjectId()));
+  const alertsRef = useRef(alerts);
+  useEffect(() => { alertsRef.current = alerts; }, [alerts]);
 
   const [packets, setPackets] = useState<PcapPacket[]>([]);
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null);
@@ -448,6 +487,7 @@ export default function App() {
 
   const rogueFindings = accessPoints.filter(a => a.isRogueCandidate || a.classification === 'Rogue' || a.classification === 'Suspicious');
   const openIncidentCount = countOpenIncidents(incidents);
+  const alertSummary = summarizeAlerts(alerts);
 
   // Active Project & Selected AP
   const currentProject = projects.find((p) => p.id === currentProjectId) || projects[0];
@@ -1173,6 +1213,9 @@ export default function App() {
     auditChainRef.current = localAudit;
     setAuditChain(localAudit);
     setAuditError('');
+    const localAlerts = db.getAlerts(projectId);
+    alertsRef.current = localAlerts;
+    setAlerts(localAlerts);
     setAccessPoints(applyAssetsToAccessPoints(savedAps, localAssets));
     setIncidents(savedIncidents);
     threatEngine.setIncidents(savedIncidents);
@@ -1318,6 +1361,25 @@ export default function App() {
     commitAuditChain(next, currentProjectIdRef.current);
   };
 
+  const handleAcknowledgeAlert = async (id: string): Promise<void> => {
+    requireCapability(operatorRoleRef.current, 'manage_alerts', 'Acknowledging alerts');
+    const projectId = currentProjectIdRef.current;
+    const result = acknowledgeAlert(alertsRef.current, id, sanitizeOperatorName(operatorNameRef.current));
+    if (result.error || !result.record) {
+      throw new Error(result.error || 'The alert could not be acknowledged.');
+    }
+    alertsRef.current = result.records;
+    setAlerts(result.records);
+    db.saveAlerts(result.records, projectId);
+    recordAudit('ALERT_ACK', `${result.record.title} · ${result.record.bssid}`, `Alert ${id} acknowledged by ${result.record.acknowledgedBy}.`, projectId);
+    const log = db.appendLog({
+      level: 'INFO',
+      source: 'ALERTS',
+      message: `Alert ${id} (${result.record.severity}) acknowledged by ${result.record.acknowledgedBy} for ${result.record.ssid || '[hidden network]'} (${result.record.bssid}).`,
+    }, projectId);
+    setLogs(previous => [log, ...previous]);
+  };
+
   const handleAddEvidence = (incidentId: string, evidence: EvidenceItem) => {
     const projectId = currentProjectIdRef.current;
     const nextEvidence = [evidence, ...db.getEvidenceItems(projectId)];
@@ -1336,8 +1398,7 @@ export default function App() {
   return (
     <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
       isDarkMode ? 'bg-[#0b0d11] text-slate-100' : 'bg-[#eef0f6] text-slate-900'
-    }`}>
-      {showStartupReadiness && <StartupReadinessOverlay
+    }`}>      {showStartupReadiness && <StartupReadinessOverlay
         bridgeState={bridgeState}
         adapters={adapters}
         dataSourceProfile={dataSourceProfile}
@@ -1456,7 +1517,27 @@ export default function App() {
             )}
           </button>
 
-          {/* TAB 6: Investigations */}
+          {/* TAB 6: Local Operations Alerts */}
+          <button
+            onClick={() => handleNavigate('alerts')}
+            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'alerts'
+                ? 'border-amber-500 text-amber-400 bg-amber-500/5'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <BellRing className="w-3.5 h-3.5" />
+            <span>Alerts</span>
+            {alertSummary.active > 0 && (
+              <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                alertSummary.critical > 0 ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
+              }`}>
+                {alertSummary.active}
+              </span>
+            )}
+          </button>
+
+          {/* TAB 7: Investigations */}
           <button
             onClick={() => handleNavigate('investigations')}
             className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
@@ -1775,7 +1856,18 @@ export default function App() {
           />
         )}
 
-        {/* TAB 6: Investigations */}
+        {/* TAB 6: Local Operations Alerts */}
+        {activeTab === 'alerts' && (
+          <AlertsCenter
+            alerts={alerts}
+            dataSourceProfile={dataSourceProfile}
+            operatorName={operatorName}
+            canAcknowledge={can(operatorRole, 'manage_alerts')}
+            onAcknowledge={handleAcknowledgeAlert}
+          />
+        )}
+
+        {/* TAB 7: Investigations */}
         {activeTab === 'investigations' && (
           <IncidentCenter
             incidents={incidents}
