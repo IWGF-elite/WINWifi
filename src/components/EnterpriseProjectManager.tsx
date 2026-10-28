@@ -5,7 +5,6 @@ import {
   MapPin, 
   FolderPlus, 
   Database, 
-  Terminal, 
   Download, 
   Calendar, 
   Layers, 
@@ -18,7 +17,8 @@ import {
   Trash2
 } from 'lucide-react';
 import { AuditProject, AccessPoint, EnterpriseScope, DataSourceProfile, EnterpriseAssetRecord, SiteRecord } from '../types';
-import { SqlQueryResult, SqliteDatabaseService } from '../services/storage';
+import { NativeBridgeClient } from '../services/bridgeClient';
+import { NATIVE_TABLES, MAX_VIEW_ROWS, NativeTableView, toNativeTableView } from '../services/nativeDatabaseView';
 import { SiteDirectory } from './SiteDirectory';
 
 interface EnterpriseProjectManagerProps {
@@ -55,9 +55,10 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
   const [areaName, setAreaName] = useState('');
   const [assessmentName, setAssessmentName] = useState('');
   const [auditorName, setAuditorName] = useState('');
-  const [sqlQuery, setSqlQuery] = useState('SELECT bssid, ssid, channel, security, security_score FROM access_points ORDER BY security_score ASC LIMIT 10;');
-  const [queryResult, setQueryResult] = useState<SqlQueryResult | null>(null);
-  const [queryError, setQueryError] = useState('');
+  const [tableKey, setTableKey] = useState(NATIVE_TABLES[0].key);
+  const [tableView, setTableView] = useState<NativeTableView | null>(null);
+  const [tableStatus, setTableStatus] = useState<'IDLE' | 'LOADING' | 'READY' | 'ERROR'>('IDLE');
+  const [tableMessage, setTableMessage] = useState('');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const [projectToDelete, setProjectToDelete] = useState<AuditProject | null>(null);
@@ -92,13 +93,20 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
     setShowNewModal(false);
   };
 
-  const handleRunSql = () => {
+  const loadNativeTable = async (key: string) => {
+    const descriptor = NATIVE_TABLES.find(table => table.key === key);
+    if (!descriptor) return;
+    setTableKey(key);
+    setTableView(null);
+    setTableStatus('LOADING');
+    setTableMessage('');
     try {
-      setQueryError('');
-      setQueryResult(SqliteDatabaseService.getInstance().executeQuery(sqlQuery, accessPoints));
+      const records = await descriptor.load(NativeBridgeClient.getInstance());
+      setTableView(toNativeTableView(records));
+      setTableStatus('READY');
     } catch (error) {
-      setQueryResult(null);
-      setQueryError(error instanceof Error ? error.message : 'Query could not be run.');
+      setTableStatus('ERROR');
+      setTableMessage(error instanceof Error ? error.message : 'The native database is unreachable.');
     }
   };
 
@@ -208,7 +216,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
           </div>
         </div>
 
-        {/* Right 2/3: Baseline Comparison & SQLite Terminal */}
+        {/* Right 2/3: Baseline Comparison & Project Database */}
         <div className="lg:col-span-2 space-y-5">
           {/* Baseline Comparison Card */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
@@ -238,48 +246,71 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
             </div>
           </div>
 
-          {/* SQLite Terminal */}
+          {/* Native SQLite database, read-only */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
                 <Database className="w-4 h-4 text-blue-400" />
-                Local Data Query Preview (Supported SELECT Subset)
+                Project Database (Read-Only)
               </h3>
-              <button
-                onClick={handleRunSql}
-                className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1 transition-colors"
-              >
-                <Terminal className="w-3 h-3" /> Execute SQL
-              </button>
+              <div className="flex flex-wrap items-center gap-1">
+                {NATIVE_TABLES.map(table => (
+                  <button
+                    key={table.key}
+                    type="button"
+                    onClick={() => loadNativeTable(table.key)}
+                    className={`px-2 py-1 rounded text-[11px] font-mono transition-colors ${
+                      tableKey === table.key ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {table.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => loadNativeTable(tableKey)}
+                  disabled={tableStatus === 'LOADING'}
+                  className="px-2 py-1 rounded text-[11px] bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1"
+                >
+                  <RefreshCw className={`w-3 h-3 ${tableStatus === 'LOADING' ? 'animate-spin' : ''}`} /> Reload
+                </button>
+              </div>
             </div>
 
-            <div className="font-mono text-xs">
-              <input
-                type="text"
-                value={sqlQuery}
-                onChange={(e) => setSqlQuery(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-blue-300 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            {queryError && <p role="alert" className="mt-3 rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{queryError}</p>}
-            {/* Query Results Table */}
-            {queryResult && (
-              <div className="mt-3 overflow-x-auto border border-slate-800 rounded-lg">
-                <div className="border-b border-slate-800 px-2 py-1.5 text-[10px] text-slate-400">{queryResult.rowCount} rows · {queryResult.executionTimeMs} ms{queryResult.tableName ? ` · ${queryResult.tableName}` : ''}</div>
+            {tableStatus === 'ERROR' && (
+              <p role="alert" className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                {tableMessage || 'The native database is unreachable.'}
+              </p>
+            )}
+            {tableStatus === 'IDLE' && (
+              <p className="text-xs text-slate-400">Select a table to read the stored rows.</p>
+            )}
+            {tableView && (
+              <div className="mt-1 overflow-x-auto border border-slate-800 rounded-lg">
+                <div className="border-b border-slate-800 px-2 py-1.5 text-[10px] text-slate-400">
+                  {tableView.rowCount} row(s)
+                  {tableView.truncated ? ` · showing first ${MAX_VIEW_ROWS}` : ''}
+                  {' · read-only'}
+                </div>
                 <table className="w-full text-left text-xs font-mono">
                   <thead className="bg-slate-800/60 text-slate-400 text-[10px]">
                     <tr>
-                      {queryResult.columns.map(column => <th key={column} className="p-2">{column}</th>)}
+                      {tableView.columns.map(column => <th key={column} className="p-2">{column}</th>)}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/40 text-slate-300">
-                    {queryResult.rows.map((row, idx) => (
+                    {tableView.rows.map((row, idx) => (
                       <tr key={idx} className="hover:bg-slate-800/30">
-                        {row.map((value, columnIndex) => <td key={columnIndex} className="p-2">{value === null ? 'NULL' : String(value)}</td>)}
+                        {row.map((value, columnIndex) => <td key={columnIndex} className="p-2">{value}</td>)}
                       </tr>
                     ))}
-                    {queryResult.rows.length === 0 && <tr><td colSpan={Math.max(queryResult.columns.length, 1)} className="p-4 text-center text-slate-500">No rows returned.</td></tr>}
+                    {tableView.rows.length === 0 && (
+                      <tr>
+                        <td colSpan={Math.max(tableView.columns.length, 1)} className="p-4 text-center text-slate-500">
+                          No rows stored for this project.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

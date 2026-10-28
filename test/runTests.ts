@@ -92,6 +92,7 @@ import {
   buildEapolFrame,
   buildRadiotapPcap
 } from './fixtures';
+import { NATIVE_TABLES, MAX_VIEW_ROWS, toNativeTableView } from '../src/services/nativeDatabaseView';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -253,33 +254,39 @@ SSID 2 : Open_Public
   }
 });
 
-// 6. SQL query engine over the observed access-point table
-runTest('T6: SQL Query Engine Filtering, Projection & Schema Reads', () => {
-  const db = SqliteDatabaseService.getInstance();
+// 6. Read-only view over the native SQLite database
+runTest('T6: Native Database Table View & Bridge Read Wiring', () => {
+  const records = [
+    { bssid: 'AA:11:00:00:00:01', ssid: 'Fixture WPA3 Enterprise', channel: 36, pmfRequired: true, clients: [{ macAddress: 'AA:11:00:00:00:02' }], note: null },
+    { bssid: 'AA:11:00:00:00:07', ssid: 'Fixture Open', channel: 11, pmfRequired: false, wpsEnabled: true, clients: [] }
+  ];
 
-  const weak = db.executeQuery('SELECT * FROM access_points WHERE score < 50;', FIXTURE_ACCESS_POINTS);
-  if (weak.rowCount !== 2) throw new Error(`WHERE score < 50 returned ${weak.rowCount} rows, expected 2`);
-  for (const row of weak.rows) {
-    const score = row[row.length - 1];
-    if (typeof score !== 'number' || score >= 50) throw new Error(`Unfiltered row leaked: ${JSON.stringify(row)}`);
+  const view = toNativeTableView(records);
+  if (view.rowCount !== 2 || view.truncated) throw new Error(`Row accounting wrong: ${view.rowCount}/${view.truncated}`);
+  if (view.columns[0] !== 'bssid' || !view.columns.includes('wpsEnabled')) {
+    throw new Error(`Column union incomplete: ${view.columns.join(',')}`);
+  }
+  if (view.rows.length !== 2 || view.rows[0].length !== view.columns.length) {
+    throw new Error('Row width does not match the column set');
+  }
+  const cell = (row: number, column: string) => view.rows[row][view.columns.indexOf(column)];
+  if (cell(0, 'pmfRequired') !== '1' || cell(1, 'pmfRequired') !== '0') throw new Error('Boolean cells are not SQL-shaped');
+  if (cell(0, 'note') !== 'NULL') throw new Error('Null column not rendered as NULL');
+  if (cell(1, 'wpsEnabled') !== '1') throw new Error(`Present boolean not rendered: ${cell(1, 'wpsEnabled')}`);
+  if (cell(0, 'wpsEnabled') !== 'NULL') throw new Error(`Absent column rendered as ${cell(0, 'wpsEnabled')}`);
+  if (cell(0, 'clients') !== '[{\"macAddress\":\"AA:11:00:00:00:02\"}]') {
+    throw new Error(`Nested rows are not serialised: ${cell(0, 'clients')}`);
   }
 
-  const projected = db.executeQuery('SELECT ssid, bssid, channel FROM access_points ORDER BY channel LIMIT 3;', FIXTURE_ACCESS_POINTS);
-  if (projected.columns.join(',') !== 'ssid,bssid,channel') {
-    throw new Error(`Column projection lost: ${projected.columns.join(',')}`);
+  const capped = toNativeTableView(Array.from({ length: 250 }, (_, index) => ({ id: index })));
+  if (capped.rows.length !== MAX_VIEW_ROWS || !capped.truncated || capped.rowCount !== 250) {
+    throw new Error(`Row cap not enforced: ${capped.rows.length}/${capped.truncated}`);
   }
-  if (projected.rowCount !== 3) throw new Error(`LIMIT 3 returned ${projected.rowCount} rows`);
-  if (projected.rows[0][2] !== 1) throw new Error(`ORDER BY channel ascending failed: first row is ${projected.rows[0][2]}`);
+  if (toNativeTableView([]).columns.length !== 0) throw new Error('Empty result set reported columns');
 
-  const wps = db.executeQuery("SELECT bssid FROM access_points WHERE wps = 1;", FIXTURE_ACCESS_POINTS);
-  if (wps.rowCount !== 1) throw new Error(`WPS filter returned ${wps.rowCount} rows, expected 1`);
-
-  const five = db.executeQuery("SELECT bssid FROM access_points WHERE band = '5 GHz';", FIXTURE_ACCESS_POINTS);
-  if (five.rowCount !== 2) throw new Error(`5 GHz filter returned ${five.rowCount} rows, expected 2`);
-
-  const schema = db.executeQuery("SELECT name FROM sqlite_master WHERE type='table';", FIXTURE_ACCESS_POINTS);
-  if (schema.tableName !== 'sqlite_master' || !schema.rows.some(row => row[1] === 'access_points')) {
-    throw new Error('Schema query did not list the access_points table');
+  if (NATIVE_TABLES.length !== 7) throw new Error(`Expected 7 native tables, declared ${NATIVE_TABLES.length}`);
+  if (NATIVE_TABLES.some(table => typeof table.load !== 'function')) {
+    throw new Error('A declared table has no read path');
   }
 });
 

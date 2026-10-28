@@ -13,12 +13,89 @@ import {
   Layers,
   HardDrive
 } from 'lucide-react';
-import { SqliteDatabaseService } from '../services/storage';
+import { NativeBridgeClient } from '../services/bridgeClient';
+import { NATIVE_TABLES, toNativeTableView } from '../services/nativeDatabaseView';
 import { WifiEngine, isWebView2Host } from '../services/wifiEngine';
 import { PcapService } from '../services/pcapParser';
 import { CapabilityMatrixService } from '../services/capabilityMatrix';
 import { ThreatEngine } from '../services/threatEngine';
 import { AccessPoint } from '../types';
+
+const macBytes = (mac: string): number[] => mac.split(':').map(part => parseInt(part, 16));
+
+const informationElement = (tag: number, body: number[]): number[] => [tag, body.length, ...body];
+
+const buildBeacon = (bssid: string, ssid: string, channel: number, akmSuiteType?: number): Uint8Array => {
+  const ap = macBytes(bssid);
+  const ssidBytes = Array.from(new TextEncoder().encode(ssid));
+  const bytes: number[] = [
+    0x80, 0x00, 0x00, 0x00,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    ...ap, ...ap, 0x00, 0x20,
+    0, 0, 0, 0, 0, 0, 0, 0, 0x64, 0x00,
+    akmSuiteType === undefined ? 0x01 : 0x11, 0x00
+  ];
+  bytes.push(...informationElement(0, ssidBytes));
+  bytes.push(...informationElement(1, [0x8c, 0x12, 0x98, 0x24]));
+  bytes.push(...informationElement(3, [channel]));
+  if (akmSuiteType !== undefined) {
+    bytes.push(...informationElement(48, [
+      0x01, 0x00, 0x00, 0x0f, 0xac, 0x04, 0x01, 0x00,
+      0x00, 0x0f, 0xac, 0x04, 0x01, 0x00, 0x00, 0x0f, 0xac, akmSuiteType, 0x00, 0x00
+    ]));
+  }
+  return new Uint8Array(bytes);
+};
+
+const buildEapolKey = (
+  apBssid: string,
+  clientMac: string,
+  step: 'M1' | 'M2',
+  nonce: number[],
+  mic: number[],
+  replayCounter: number
+): Uint8Array => {
+  const ap = macBytes(apBssid);
+  const client = macBytes(clientMac);
+  const fromAp = step === 'M1';
+  const keyInfo = fromAp ? 0x0082 : 0x010a;
+  const bytes: number[] = [
+    0x08, 0x00, 0x00, 0x00,
+    ...(fromAp ? client : ap), ...(fromAp ? ap : client), ...ap, 0x00, 0x20,
+    0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00, 0x88, 0x8e,
+    0x02, 0x03, 0x00, 0x5f, 0x02,
+    (keyInfo >> 8) & 0xff, keyInfo & 0xff, 0x00, 0x10,
+    0, 0, 0, 0, 0, 0, 0, replayCounter
+  ];
+  bytes.push(...nonce, ...new Array(16).fill(0), ...new Array(16).fill(0), ...mic, 0x00, 0x00);
+  return new Uint8Array(bytes);
+};
+
+const wrapRadiotapPcap = (frames: Uint8Array[]): ArrayBuffer => {
+  const radiotapLength = 8;
+  const totalSize = 24 + frames.reduce((sum, frame) => sum + 16 + radiotapLength + frame.length, 0);
+  const capture = new ArrayBuffer(totalSize);
+  const view = new DataView(capture);
+  const bytes = new Uint8Array(capture);
+  view.setUint32(0, 0xa1b2c3d4, true);
+  view.setUint16(4, 2, true);
+  view.setUint16(6, 4, true);
+  view.setUint32(16, 65535, true);
+  view.setUint32(20, 127, true);
+  let offset = 24;
+  frames.forEach((frame, index) => {
+    const captured = radiotapLength + frame.length;
+    view.setUint32(offset, 1710000000 + index, true);
+    view.setUint32(offset + 4, index * 1000, true);
+    view.setUint32(offset + 8, captured, true);
+    view.setUint32(offset + 12, captured, true);
+    offset += 16;
+    view.setUint16(offset + 2, radiotapLength, true);
+    bytes.set(frame, offset + radiotapLength);
+    offset += captured;
+  });
+  return capture;
+};
 
 interface TestResult {
   id: string;
@@ -81,11 +158,11 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
     },
     {
       id: 'T6',
-      name: 'SQLite 3 Relational Query Engine & Persistence Store',
+      name: 'Native Project Database Read Path',
       category: 'Storage',
       status: 'PENDING',
       durationMs: 0,
-      details: 'Executes SELECT WHERE filters, ORDER BY clauses, and DDL schema integrity checks.',
+      details: 'Reads stored rows through the local bridge and renders them as a read-only table.',
     },
     {
       id: 'T7',
@@ -125,57 +202,20 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
             updated[i].status = 'FAILED';
             updated[i].details = 'Runtime host detection does not match the actual environment.';
           }
-        } 
+        }
+        // T2: Radiotap + beacon frame dissection
         else if (updated[i].id === 'T2') {
-          const pcapService = PcapService.getInstance();
-          const frames = [0, 1, 2, 3, 4].map(index => {
-            const ssidBytes = Array.from(new TextEncoder().encode(`Self Test Beacon ${index}`));
-            const frame = new Uint8Array(24 + 12 + 2 + ssidBytes.length);
-            const frameView = new DataView(frame.buffer);
-            frameView.setUint16(0, 0x0080, true);
-            frame.set([0xff, 0xff, 0xff, 0xff, 0xff, 0xff], 4);
-            for (let b = 0; b < 12; b++) {
-              frame[10 + b] = 0x02 + index * 16 + b;
-            }
-            const ieOffset = 24 + 12;
-            frame[ieOffset] = 0;
-            frame[ieOffset + 1] = ssidBytes.length;
-            frame.set(ssidBytes, ieOffset + 2);
-            return frame;
-          });
-
-          const radiotapLength = 8;
-          const totalSize = 24 + frames.reduce((sum, frame) => sum + 16 + radiotapLength + frame.length, 0);
-          const capture = new ArrayBuffer(totalSize);
-          const view = new DataView(capture);
-          const bytes = new Uint8Array(capture);
-          view.setUint32(0, 0xa1b2c3d4, true);
-          view.setUint16(4, 2, true);
-          view.setUint16(6, 4, true);
-          view.setUint32(16, 65535, true);
-          view.setUint32(20, 127, true);
-          let offset = 24;
-          frames.forEach((frame, index) => {
-            const captured = radiotapLength + frame.length;
-            view.setUint32(offset, 1710000000 + index, true);
-            view.setUint32(offset + 4, index * 1000, true);
-            view.setUint32(offset + 8, captured, true);
-            view.setUint32(offset + 12, captured, true);
-            offset += 16;
-            view.setUint16(offset + 2, radiotapLength, true);
-            bytes.set(frame, offset + radiotapLength);
-            offset += captured;
-          });
-          const parsed = pcapService.parseBinaryPcap(capture);
-
-          if (parsed.packets.length === frames.length && parsed.accessPoints.length > 0) {
+          const frames = [0, 1, 2, 3, 4].map(index =>
+            buildBeacon(`02:00:00:00:0${index}:0`, `Self Test Beacon ${index}`, 1 + index * 5, 2));
+          const parsed = PcapService.getInstance().parseBinaryPcap(wrapRadiotapPcap(frames));
+          if (parsed.packets.length === frames.length && parsed.accessPoints.length === frames.length) {
             updated[i].status = 'PASSED';
-            updated[i].details = `Decoded ${parsed.packets.length} frames (${parsed.summary.linkType}) with valid Radiotap dBm and 802.11 IEs.`;
+            updated[i].details = `Decoded ${parsed.packets.length} frames (${parsed.summary.linkType}); ${parsed.accessPoints.length} BSS entries recovered from beacon elements.`;
           } else {
             updated[i].status = 'FAILED';
-            updated[i].details = `Expected ${frames.length} decoded packets, received ${parsed.packets.length}.`;
+            updated[i].details = `Expected ${frames.length} packets and BSS entries, received ${parsed.packets.length}/${parsed.accessPoints.length}.`;
           }
-        } 
+        }
         // T3: Frequency Math
         else if (updated[i].id === 'T3') {
           const ch6 = PcapService.getChannelDetails(6);
@@ -201,18 +241,38 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
         } 
         // T4: EAPOL metadata and honest capability reporting
         else if (updated[i].id === 'T4') {
+          const apBssid = '02:00:00:00:0f:01';
+          const clientMac = '02:00:00:00:0f:02';
+          const anonce = Array.from({ length: 32 }, (_, b) => 0xa1 + (b % 16));
+          const snonce = Array.from({ length: 32 }, (_, b) => 0x1b + (b % 16));
+          const mic = Array.from({ length: 16 }, (_, b) => 0xf0 - b);
+          const toHex = (values: number[]) => values.map(b => b.toString(16).padStart(2, '0')).join('');
+          const frames = [
+            buildBeacon(apBssid, 'Self Test Handshake', 44, 1),
+            buildEapolKey(apBssid, clientMac, 'M1', anonce, new Array(16).fill(0), 1),
+            buildEapolKey(apBssid, clientMac, 'M2', snonce, mic, 2)
+          ];
+          const parsed = PcapService.getInstance().parseBinaryPcap(wrapRadiotapPcap(frames));
+          const hs = parsed.handshakes[0];
           const hashcatCapability = CapabilityMatrixService.getInstance()
             .getCapabilities()
             .find(cap => cap.id === 'CAP_HASHCAT_EXPORT');
-          const honest = hashcatCapability?.status === 'Not Verified'
-            && /does not emit/i.test(hashcatCapability.technicalDetails);
+          const honest = hashcatCapability?.status === 'Not Verified' && /does not emit/i.test(hashcatCapability.technicalDetails);
 
-          if (honest) {
-            updated[i].status = 'PASSED';
-            updated[i].details = 'Capability matrix marks Hashcat 22000 export as Not Verified; no handshake is fabricated to prove it.';
-          } else {
+          if (!hs || !hs.isComplete || hs.capturedSteps.length !== 2) {
+            updated[i].status = 'FAILED';
+            updated[i].details = hs
+              ? `EAPOL steps incomplete: ${hs.capturedSteps.join(', ')}`
+              : 'No EAPOL handshake decoded from the M1/M2 test frames.';
+          } else if (hs.anonce !== toHex(anonce).toUpperCase() || hs.snonce !== toHex(snonce).toUpperCase()) {
+            updated[i].status = 'FAILED';
+            updated[i].details = 'ANonce and SNonce were mis-attributed between M1 and M2.';
+          } else if (!honest) {
             updated[i].status = 'FAILED';
             updated[i].details = 'Capability matrix still overstates Hashcat 22000 export.';
+          } else {
+            updated[i].status = 'PASSED';
+            updated[i].details = `M1+M2 decoded from ${frames.length} frames; 22000 line ${hs.hashcatFormat ? 'built from the captured bytes' : 'withheld'} and export reported as Not Verified.`;
           }
         } 
 
@@ -248,18 +308,19 @@ SSID 2 : Open_Public
             updated[i].details = 'Netsh parser failed to extract access point attributes.';
           }
         } 
-        // T6: SQLite 3 Query Engine
+        // T6: read-only view over the native project database
         else if (updated[i].id === 'T6') {
-          const db = SqliteDatabaseService.getInstance();
-          const resWhere = db.executeQuery('SELECT * FROM access_points WHERE score < 50;', []);
-          const resLimit = db.executeQuery('SELECT ssid, bssid, channel FROM access_points ORDER BY channel LIMIT 3;', []);
-
-          if (resWhere.columns.length > 0 && resLimit.columns.length === 3) {
+          const descriptor = NATIVE_TABLES.find(table => table.key === 'access_points');
+          if (!descriptor) throw new Error('access_points table is not registered');
+          const view = toNativeTableView(await descriptor.load(NativeBridgeClient.getInstance()));
+          const rowAccounting = view.rowCount >= view.rows.length
+            && view.truncated === (view.rowCount > view.rows.length);
+          if (rowAccounting && (view.rowCount === 0 || view.columns.includes('bssid'))) {
             updated[i].status = 'PASSED';
-            updated[i].details = `Query engine validated against the live project rows: ${resWhere.rowCount} row(s) below 50, projected columns ${resLimit.columns.join(', ')}.`;
+            updated[i].details = `Read ${view.rowCount} stored row(s) across ${view.columns.length} column(s) from the native project database.`;
           } else {
             updated[i].status = 'FAILED';
-            updated[i].details = 'Query execution failed to return expected column structure.';
+            updated[i].details = `Native table read returned inconsistent rows or columns: ${view.columns.join(', ') || '(none)'}`;
           }
         } 
 
