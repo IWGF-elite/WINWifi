@@ -75,10 +75,33 @@ export interface LocalNetworkInfo {
   prefixLength: number;
   gatewayIp: string;
   dnsServers: string[];
+  dhcpServers?: string[];
   status: 'Available' | 'Unavailable';
   reason: string;
   scannedAt?: string;
+  portScanMode?: string;
+  portsScanned?: number;
+  cancelled?: boolean;
   devices?: LanDeviceRecord[];
+}
+
+export interface LocalConnectionRecord {
+  protocol: 'TCP' | 'UDP' | string;
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string;
+  remotePort: number;
+  state: string;
+  processId: number;
+  processName: string;
+}
+
+export interface LocalNetworkActivity {
+  status: 'Available' | 'Unavailable';
+  reason: string;
+  observedAt: string;
+  trafficBytesStatus: string;
+  connections: LocalConnectionRecord[];
 }
 
 export interface LanOpenPort {

@@ -381,7 +381,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
           <div className={`p-3 rounded-xl border ${isDarkMode ? 'bg-[#14161d] border-[#252934]' : 'bg-slate-50 border-slate-200'}`}>
             <div className="text-[11px] text-slate-400 font-medium">Security Protocol</div>
-            <div className="text-sm font-bold text-slate-100 mt-1 truncate">{ap.security}</div>
+            <div className="text-sm font-bold text-slate-100 mt-1 truncate">{ap.security === 'OWE (Enhanced Open)' ? 'Enhanced Open (OWE)' : ap.security}</div>
             <div className="text-[10px] text-slate-400 mt-0.5">Cipher: {ap.cipher}</div>
           </div>
 

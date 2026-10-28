@@ -16,6 +16,7 @@ import { AuditProject, AccessPoint, DataSourceProfile, EnterpriseAssetRecord, Si
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { NATIVE_TABLES, MAX_VIEW_ROWS, NativeTableView, toNativeTableView } from '../services/nativeDatabaseView';
 import { SiteDirectory } from './SiteDirectory';
+import { StorageMigrationPreview } from './StorageMigrationPreview';
 
 interface EnterpriseProjectManagerProps {
   currentProject: AuditProject;
@@ -243,6 +244,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
           </div>
 
           {/* Native SQLite database, read-only */}
+          <StorageMigrationPreview />
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">

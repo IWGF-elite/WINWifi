@@ -251,6 +251,15 @@ namespace WinWiFi.Data
                     last_seen TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY (project_id, network_id, ip_address)
                 );
+
+                CREATE TABLE IF NOT EXISTS browser_storage_snapshots (
+                    import_id TEXT NOT NULL,
+                    storage_key TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    record_count INTEGER NOT NULL,
+                    imported_at TEXT NOT NULL,
+                    PRIMARY KEY (import_id, storage_key)
+                );
             ";
 
             using var cmd = new SqliteCommand(ddl, conn);
@@ -376,6 +385,55 @@ namespace WinWiFi.Data
             }
 
             return list;
+        }
+
+        public async Task<BrowserStorageSnapshotImportResult> ImportBrowserStorageSnapshotAsync(
+            string importId, IEnumerable<BrowserStorageSnapshotEntry> entries, CancellationToken cancellationToken = default)
+        {
+            if (!Guid.TryParse(importId, out _)) throw new ArgumentException("A valid import ID is required.", nameof(importId));
+            var snapshotEntries = entries?.ToList() ?? throw new ArgumentNullException(nameof(entries));
+            if (snapshotEntries.Count is 0 or > 500) throw new ArgumentOutOfRangeException(nameof(entries), "Snapshot must contain between 1 and 500 storage records.");
+            foreach (var entry in snapshotEntries)
+            {
+                if (entry is null || string.IsNullOrEmpty(entry.StorageKey) || entry.PayloadJson is null
+                    || !entry.StorageKey.StartsWith("winwifi_sqlite_", StringComparison.Ordinal)
+                    || entry.StorageKey.Length > 256 || entry.PayloadJson.Length > 5 * 1024 * 1024 || entry.RecordCount < 0)
+                    throw new ArgumentException("Snapshot contains an invalid or oversized browser storage record.", nameof(entries));
+                using var parsed = JsonDocument.Parse(entry.PayloadJson);
+            }
+
+            await _writeLock.WaitAsync(cancellationToken);
+            try
+            {
+                using var conn = await OpenConnectionAsync(cancellationToken);
+                using var transaction = conn.BeginTransaction();
+                try
+                {
+                    const string sql = @"INSERT INTO browser_storage_snapshots (import_id, storage_key, payload_json, record_count, imported_at)
+                        VALUES (@import, @key, @payload, @count, @time);";
+                    int recordTotal = 0;
+                    string importedAt = DateTimeOffset.UtcNow.ToString("O");
+                    foreach (var entry in snapshotEntries)
+                    {
+                        using var cmd = new SqliteCommand(sql, conn, transaction);
+                        cmd.Parameters.AddWithValue("@import", importId);
+                        cmd.Parameters.AddWithValue("@key", entry.StorageKey);
+                        cmd.Parameters.AddWithValue("@payload", entry.PayloadJson);
+                        cmd.Parameters.AddWithValue("@count", entry.RecordCount);
+                        cmd.Parameters.AddWithValue("@time", importedAt);
+                        await cmd.ExecuteNonQueryAsync(cancellationToken);
+                        recordTotal = checked(recordTotal + entry.RecordCount);
+                    }
+                    transaction.Commit();
+                    return new BrowserStorageSnapshotImportResult(importId, snapshotEntries.Count, recordTotal, importedAt);
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+            finally { _writeLock.Release(); }
         }
 
         public async Task SaveProjectAsync(AuditProject project, CancellationToken cancellationToken = default)

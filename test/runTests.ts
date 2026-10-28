@@ -6,7 +6,7 @@ import { WifiEngine, isWebView2Host } from '../src/services/wifiEngine';
 import { CapabilityMatrixService } from '../src/services/capabilityMatrix';
 import { SqliteDatabaseService } from '../src/services/storage';
 import { ThreatEngine } from '../src/services/threatEngine';
-import { NativeBridgeClient } from '../src/services/bridgeClient';
+import { NativeBridgeClient, estimateLocalNetworkScanTimeout } from '../src/services/bridgeClient';
 import { PolicyEngine } from '../src/services/policyEngine';
 import {
   mapNativeFindingsToIncidents,
@@ -79,6 +79,7 @@ import {
 import {
   MAX_ALERTS,
   acknowledgeAlert,
+  countAlertEligibleAccessPoints,
   evaluateAlerts,
   normalizeAlerts,
   reconcileAlerts,
@@ -540,6 +541,17 @@ runTest('T12: Bridge Serialization & Property Naming Contract', () => {
   if (cleanAp.isRogueCandidate !== false) throw new Error('A clean access point was aliased as a rogue candidate');
   const explicitCandidate = (bridge as any).tagOrigin([{ bssid: 'AA:00:00:00:00:04', isRogue: false, isRogueCandidate: true }], 'LIVE_WINDOWS')[0];
   if (explicitCandidate.isRogueCandidate !== true) throw new Error('An explicit isRogueCandidate was overwritten by the alias');
+});
+
+runTest('T12A: Local scan request allowance follows subnet size and port rate', () => {
+  const subnet = { prefixLength: 24, devices: [] } as any;
+  const common = estimateLocalNetworkScanTimeout({ fullPortScan: false }, subnet);
+  const fullAt100 = estimateLocalNetworkScanTimeout({ fullPortScan: true, probesPerSecond: 100 }, subnet);
+  const fullAt25 = estimateLocalNetworkScanTimeout({ fullPortScan: true, probesPerSecond: 25 }, subnet);
+  const largerSubnet = estimateLocalNetworkScanTimeout({ fullPortScan: false }, { prefixLength: 20, devices: [] } as any);
+  if (common <= 5_000 || fullAt100 <= common || fullAt25 <= fullAt100 || largerSubnet <= common) {
+    throw new Error('Network scan transport allowance did not adapt to actual scan cost inputs');
+  }
 });
 
 runTest('T13: SSE Failure Falls Back and Reconnects', () => {
@@ -1533,8 +1545,14 @@ runTest('T25: Alert Rules, Deduplication & Acknowledgement', () => {
   if (evaluateAlerts([base()], []).length !== 0) {
     throw new Error('An unenrolled, clean access point raised an alert');
   }
+  if (countAlertEligibleAccessPoints([base()], []) !== 0 || countAlertEligibleAccessPoints([base()], [asset('02:00:00:00:00:01')]) !== 1) {
+    throw new Error('Alert scope eligibility does not follow enrolled asset records');
+  }
 
-  const rogue = evaluateAlerts([base({ bssid: '0200000000aa', isRogueCandidate: true, rogueEvidence: ['BSSID mismatch'], rogueConfidence: 92 })], []);
+  const scopedBaseline = base({ classification: 'Trusted', approvedStatus: 'Approved' });
+  const outOfScopeRogue = evaluateAlerts([base({ bssid: '02:00:00:00:00:AA', isRogueCandidate: true })], []);
+  if (outOfScopeRogue.length !== 0) throw new Error('Out-of-scope rogue candidate raised an operational alert');
+  const rogue = evaluateAlerts([scopedBaseline, base({ bssid: '0200000000aa', classification: 'Rogue', isRogueCandidate: true, rogueEvidence: ['BSSID mismatch'], rogueConfidence: 92 })], []);
   if (rogue.length !== 1 || rogue[0].ruleId !== 'ROGUE_AP' || rogue[0].severity !== 'Critical' || rogue[0].bssid !== '02:00:00:00:00:AA') {
     throw new Error('The rogue rule did not fire or canonicalize the BSSID');
   }
@@ -1543,8 +1561,9 @@ runTest('T25: Alert Rules, Deduplication & Acknowledgement', () => {
   }
 
   const duplicated = evaluateAlerts([
-    base({ bssid: '02:00:00:00:00:02', isRogueCandidate: true }),
-    base({ bssid: '02:00:00:00:00:02', isRogueCandidate: true })
+    scopedBaseline,
+    base({ bssid: '02:00:00:00:00:02', classification: 'Rogue', isRogueCandidate: true }),
+    base({ bssid: '02:00:00:00:00:02', classification: 'Rogue', isRogueCandidate: true })
   ], []);
   if (duplicated.length !== 1) {
     throw new Error('Duplicate observations produced duplicate alert candidates');
@@ -1555,6 +1574,8 @@ runTest('T25: Alert Rules, Deduplication & Acknowledgement', () => {
   if (weak.length !== 1 || weak[0].ruleId !== 'WEAK_ENCRYPTION' || weak[0].severity !== 'High') {
     throw new Error('An enrolled open network did not raise a high-severity weak-encryption alert');
   }
+  const oweAlerts = evaluateAlerts([base({ bssid: '02:00:00:00:00:0A', security: 'OWE (Enhanced Open)', cipher: 'CCMP (AES)' })], [asset('02:00:00:00:00:0A')]);
+  if (oweAlerts.some(candidate => candidate.ruleId === 'WEAK_ENCRYPTION')) throw new Error('OWE was mislabeled as unencrypted open Wi-Fi');
   const wep = evaluateAlerts([base({ bssid: '02:00:00:00:00:04', security: 'WEP-64/128', cipher: 'WEP' })], [asset('02:00:00:00:00:04')]);
   if (!wep.some(candidate => candidate.ruleId === 'WEAK_ENCRYPTION' && candidate.severity === 'Critical')) {
     throw new Error('WEP did not raise a critical alert');

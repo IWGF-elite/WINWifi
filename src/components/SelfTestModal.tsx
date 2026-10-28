@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { FlaskConical, CheckCircle2, XCircle, RotateCw, X } from 'lucide-react';
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { NATIVE_TABLES, toNativeTableView } from '../services/nativeDatabaseView';
-import { WifiEngine, isWebView2Host } from '../services/wifiEngine';
 import { PcapService } from '../services/pcapParser';
 import { CapabilityMatrixService } from '../services/capabilityMatrix';
 import { ThreatEngine } from '../services/threatEngine';
@@ -87,7 +86,7 @@ const wrapRadiotapPcap = (frames: Uint8Array[]): ArrayBuffer => {
 interface TestResult {
   id: string;
   name: string;
-  category: 'Sandbox' | 'PCAP' | 'Crypt' | 'Protocol' | 'Storage' | 'Security';
+  category: 'Runtime' | 'PCAP' | 'Crypt' | 'Protocol' | 'Storage' | 'Security';
   status: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED';
   durationMs: number;
   details: string;
@@ -105,11 +104,11 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
   const [tests, setTests] = useState<TestResult[]>([
     {
       id: 'T1',
-      name: 'Runtime Host & Capability Boundary Check',
-      category: 'Sandbox',
+      name: 'Runtime Availability Check',
+      category: 'Runtime',
       status: 'PENDING',
       durationMs: 0,
-      details: 'Detects WebView2 vs. browser host, confirms no direct wlanapi.dll access, and validates the PCAP/Netsh fallback.',
+      details: 'Checks the active runtime and available network data sources.',
     },
     {
       id: 'T2',
@@ -178,16 +177,15 @@ export const SelfTestModal: React.FC<SelfTestModalProps> = ({
       await new Promise((r) => setTimeout(r, 120));
 
       try {
-        // T1: Sandbox & Capabilities
+        // T1: Current Windows service availability
         if (updated[i].id === 'T1') {
-          const caps = WifiEngine.getInstance().getSystemCapabilities();
-          const expectedHost = isWebView2Host() ? 'Windows Desktop Native Host' : 'Browser Sandboxed DOM (Web Container)';
-          if (caps.environment === expectedHost && !caps.nativeWlanApiAccess && caps.pcapDissectorActive) {
+          const health = await NativeBridgeClient.getInstance().checkHealth();
+          if (health.status === 'healthy' && health.isWindows) {
             updated[i].status = 'PASSED';
-            updated[i].details = `${expectedHost} detected. Direct wlanapi.dll access unavailable; bridge or file dissector required.`;
+            updated[i].details = `Windows service responded at ${health.timestampUtc}.`;
           } else {
             updated[i].status = 'FAILED';
-            updated[i].details = 'Runtime host detection does not match the actual environment.';
+            updated[i].details = 'Windows service health check did not pass.';
           }
         }
         // T2: Radiotap + beacon frame dissection
@@ -366,8 +364,8 @@ SSID 2 : Open_Public
               <FlaskConical className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm font-bold">Automated Self-Test &amp; Capability Audit Suite</h2>
-              <p className="text-xs text-slate-400">Verifying engine logic, cryptographic validation, and sandbox compliance</p>
+              <h2 className="text-sm font-bold">Self-Test</h2>
+              <p className="text-xs text-slate-400">Running checks for available data and analysis functions</p>
             </div>
           </div>
 

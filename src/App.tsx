@@ -33,6 +33,7 @@ import {
   countOpenIncidents
 } from './services/incidentMapper';
 import { mapStationClients } from './services/stationClientMapper';
+import { isSuspiciousAccessPoint } from './services/threatMetrics';
 import {
   applyAssetsToAccessPoints,
   formatUtcTimestamp,
@@ -65,6 +66,7 @@ import {
   AlertRecord,
   acknowledgeAlert,
   evaluateAlerts,
+  countAlertEligibleAccessPoints,
   reconcileAlerts,
   summarizeAlerts
 } from './services/alerts';
@@ -515,7 +517,7 @@ export default function App() {
     .map((a) => a.handshake)
     .filter((h): h is HandshakeInfo => !!h);
 
-  const rogueFindings = accessPoints.filter(a => a.isRogueCandidate || a.classification === 'Rogue' || a.classification === 'Suspicious');
+  const rogueFindings = accessPoints.filter(isSuspiciousAccessPoint);
   const openIncidentCount = countOpenIncidents(incidents);
   const alertSummary = summarizeAlerts(alerts);
 
@@ -1623,7 +1625,7 @@ export default function App() {
             }`}
           >
             <Laptop className="w-3.5 h-3.5 text-blue-400" />
-            <span>Native C# WPF</span>
+            <span>System Capabilities</span>
             <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
               EXE
             </span>
@@ -1832,8 +1834,11 @@ export default function App() {
         {activeTab === 'alerts' && (
           <AlertsCenter
             alerts={alerts}
+            openInvestigationsCount={countOpenIncidents(incidents)}
             operatorName={operatorName}
             canAcknowledge={can(operatorRole, 'manage_alerts')}
+            liveObservationCount={dataSourceProfile === 'LIVE_WINDOWS' ? accessPoints.length : 0}
+            alertEligibleObservationCount={countAlertEligibleAccessPoints(accessPoints, enterpriseAssets)}
             onAcknowledge={handleAcknowledgeAlert}
           />
         )}

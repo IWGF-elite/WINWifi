@@ -189,7 +189,7 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-semibold tracking-tight">Windows Native Bridge Configuration</h3>
-              <p className="text-xs text-slate-400">Connect React to Windows WlanApi / NDIS Hardware Scanner</p>
+              <p className="text-xs text-slate-400">Configure the local Windows service connection.</p>
             </div>
           </div>
           <button

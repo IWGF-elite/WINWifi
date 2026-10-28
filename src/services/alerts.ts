@@ -179,6 +179,20 @@ function isRelevant(ap: AccessPoint, asset?: EnterpriseAssetRecord): boolean {
   );
 }
 
+/** Count live observations eligible for operational alert rules under project enrollment/classification. */
+export function countAlertEligibleAccessPoints(
+  accessPoints: AccessPoint[],
+  assets: EnterpriseAssetRecord[]
+): number {
+  const assetsByMac = new Set(assets
+    .map(asset => normalizeMac(asset.macAddress))
+    .filter((mac): mac is string => Boolean(mac)));
+  return accessPoints.filter(ap => {
+    const bssid = normalizeMac(ap.bssid);
+    return isRelevant(ap) || Boolean(bssid && assetsByMac.has(bssid));
+  }).length;
+}
+
 /** Evaluates the current observations; alerts never fire on synthetic lab data by themselves. */
 export function evaluateAlerts(
   accessPoints: AccessPoint[],
@@ -192,6 +206,14 @@ export function evaluateAlerts(
 
   const candidates: AlertCandidate[] = [];
   const seen = new Set<string>();
+  const scopedSsids = new Set(accessPoints
+    .filter(ap => isRelevant(ap, assetsByMac.get(normalizeMac(ap.bssid) || '')))
+    .map(ap => sanitize(ap.ssid, 64).toLocaleLowerCase())
+    .filter(Boolean));
+  for (const asset of assets) {
+    if (asset.ssid && (asset.approvalStatus === 'Approved' || asset.approvalStatus === 'Unapproved' || asset.approvalStatus === 'Decommissioned'))
+      scopedSsids.add(sanitize(asset.ssid, 64).toLocaleLowerCase());
+  }
   const push = (candidate: AlertCandidate) => {
     const key = `${candidate.ruleId}|${candidate.bssid}`;
     if (seen.has(key)) return;
@@ -206,7 +228,8 @@ export function evaluateAlerts(
     const relevant = isRelevant(ap, asset);
     const ssid = sanitize(ap.ssid, 64) || '[hidden network]';
 
-    if (ap.isRogueCandidate) {
+    const rogueIsInScope = relevant || (ssid !== '[hidden network]' && scopedSsids.has(ssid.toLocaleLowerCase()));
+    if (ap.isRogueCandidate && rogueIsInScope) {
       push({
         ruleId: 'ROGUE_AP',
         severity: 'Critical',
@@ -228,7 +251,8 @@ export function evaluateAlerts(
       });
     }
 
-    if (relevant && /WEP|Open/i.test(ap.security)) {
+    const isUnencrypted = /\bopen\b/i.test(ap.security) && !/OWE|Enhanced Open/i.test(ap.security);
+    if (relevant && (/WEP/i.test(ap.security) || isUnencrypted)) {
       push({
         ruleId: 'WEAK_ENCRYPTION',
         severity: /WEP/i.test(ap.security) ? 'Critical' : 'High',

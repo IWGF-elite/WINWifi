@@ -29,6 +29,8 @@ namespace WinWiFi.Services
         private readonly string? _dashboardRoot;
 
         private CancellationTokenSource? _cts;
+        private readonly object _localScanSync = new();
+        private CancellationTokenSource? _localNetworkScanCts;
         private Task? _listenerTask;
         private readonly ConcurrentDictionary<string, StreamWriter> _sseClients = new();
         // Scanner events (networks, diagnostics, state) fire concurrently on
@@ -489,8 +491,16 @@ namespace WinWiFi.Services
                             request.QueryString["adapterId"] ?? _activeAdapterId));
                         break;
 
+                    case "/api/local-network/activity":
+                        await WriteJsonAsync(response, await LocalNetworkActivityService.GetAsync(_cts?.Token ?? CancellationToken.None));
+                        break;
+
                     case "/api/local-network/scan":
                         await HandleLocalNetworkScanAsync(request, response);
+                        break;
+
+                    case "/api/local-network/scan/cancel":
+                        await HandleCancelLocalNetworkScanAsync(request, response);
                         break;
 
                     case "/api/local-network/devices":
@@ -515,6 +525,10 @@ namespace WinWiFi.Services
 
                     case "/api/projects/select":
                         await HandleProjectSelectAsync(request, response);
+                        break;
+
+                    case "/api/storage/browser-snapshot/import":
+                        await HandleBrowserStorageSnapshotImportAsync(request, response);
                         break;
 
                     case "/api/access-points":
@@ -755,6 +769,62 @@ namespace WinWiFi.Services
             public bool IsKnown { get; set; }
         }
 
+        private sealed class LocalNetworkScanRequest
+        {
+            public bool FullPortScan { get; set; }
+            public int ProbesPerSecond { get; set; } = 100;
+        }
+
+        private sealed class BrowserStorageSnapshotImportRequest
+        {
+            public string ImportId { get; set; } = string.Empty;
+            public List<BrowserStorageSnapshotEntry> Entries { get; set; } = new();
+        }
+
+        private async Task HandleBrowserStorageSnapshotImportAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to import a browser storage snapshot.");
+                return;
+            }
+
+            byte[]? body = await ReadBodyAsync(request, response, 20 * 1024 * 1024, "Browser storage snapshot exceeds the 20 MB limit.");
+            if (body is null) return;
+            BrowserStorageSnapshotImportRequest? snapshot;
+            try { snapshot = JsonSerializer.Deserialize<BrowserStorageSnapshotImportRequest>(body, JsonOptions); }
+            catch (JsonException)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_snapshot", "Browser storage snapshot JSON is invalid.");
+                return;
+            }
+
+            if (snapshot?.Entries is null || snapshot.Entries.Count == 0)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "empty_snapshot", "No browser storage records were provided.");
+                return;
+            }
+
+            try
+            {
+                var result = await _storage.ImportBrowserStorageSnapshotAsync(snapshot.ImportId, snapshot.Entries, _cts?.Token ?? CancellationToken.None);
+                await WriteJsonAsync(response, result);
+            }
+            catch (ArgumentException ex)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_snapshot", ex.Message);
+            }
+            catch (Exception ex)
+            {
+                response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                await WriteJsonErrorAsync(response, HttpStatusCode.InternalServerError, "snapshot_import_failed", ex.Message);
+            }
+        }
+
         private async Task HandleLocalNetworkScanAsync(HttpListenerRequest request, HttpListenerResponse response)
         {
             if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
@@ -765,8 +835,51 @@ namespace WinWiFi.Services
             }
 
             string adapterId = request.QueryString["adapterId"] ?? _activeAdapterId ?? string.Empty;
+            LocalNetworkScanRequest scanOptions;
+            try { scanOptions = await JsonSerializer.DeserializeAsync<LocalNetworkScanRequest>(request.InputStream, JsonOptions) ?? new(); }
+            catch { scanOptions = new(); }
+            CancellationTokenSource? scanCts = null;
+            bool scanInProgress;
+            lock (_localScanSync)
+            {
+                scanInProgress = _localNetworkScanCts is not null;
+                if (!scanInProgress)
+                {
+                    scanCts = CancellationTokenSource.CreateLinkedTokenSource(_cts?.Token ?? CancellationToken.None);
+                    _localNetworkScanCts = scanCts;
+                }
+            }
+            if (scanInProgress)
+            {
+                response.StatusCode = (int)HttpStatusCode.Conflict;
+                await WriteJsonErrorAsync(response, HttpStatusCode.Conflict, "scan_in_progress", "A local network scan is already running.");
+                return;
+            }
+            if (scanCts is null) throw new InvalidOperationException("Local scan cancellation source was not initialized.");
             string projectId = ResolveProjectId(request) ?? _activeProjectId ?? "proj-001";
-            var snapshot = await LocalNetworkService.ScanAsync(adapterId);
+            LocalNetworkInfo snapshot;
+            try
+            {
+                snapshot = await LocalNetworkService.ScanAsync(adapterId, scanCts.Token,
+                    scanOptions.FullPortScan, scanOptions.ProbesPerSecond);
+            }
+            catch (OperationCanceledException) when (scanCts.IsCancellationRequested)
+            {
+                snapshot = LocalNetworkService.GetNetworkInfo(adapterId);
+                snapshot.Cancelled = true;
+                snapshot.Reason = "Scan cancelled by the operator.";
+                snapshot.PortScanMode = scanOptions.FullPortScan ? "Full TCP range (cancelled)" : "Common ports (cancelled)";
+                await WriteJsonAsync(response, snapshot);
+                return;
+            }
+            finally
+            {
+                lock (_localScanSync)
+                {
+                    if (ReferenceEquals(_localNetworkScanCts, scanCts)) _localNetworkScanCts = null;
+                }
+                scanCts.Dispose();
+            }
             if (snapshot.Status != "Available" || string.IsNullOrWhiteSpace(snapshot.NetworkId))
             {
                 await WriteJsonAsync(response, snapshot);
@@ -799,6 +912,23 @@ namespace WinWiFi.Services
 
             await _storage.SaveLanDevicesAsync(projectId, snapshot.NetworkId, snapshot.Devices);
             await WriteJsonAsync(response, snapshot);
+        }
+
+        private async Task HandleCancelLocalNetworkScanAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to cancel the active scan.");
+                return;
+            }
+            bool requested;
+            lock (_localScanSync)
+            {
+                requested = _localNetworkScanCts is not null;
+                _localNetworkScanCts?.Cancel();
+            }
+            await WriteJsonAsync(response, new { status = requested ? "cancelling" : "idle", cancelRequested = requested });
         }
 
         private async Task HandleLocalNetworkDevicesAsync(HttpListenerRequest request, HttpListenerResponse response)

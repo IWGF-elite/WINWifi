@@ -1,4 +1,4 @@
-import { Cpu, CheckCircle2, XCircle, AlertTriangle, X, Server } from 'lucide-react';
+import { CheckCircle2, X, XCircle } from 'lucide-react';
 import { BridgeHealthStatus } from '../types';
 
 interface ArchitectureModalProps {
@@ -7,193 +7,66 @@ interface ArchitectureModalProps {
   bridgeStatus: BridgeHealthStatus | null;
 }
 
-export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({
-  onClose,
-  isDarkMode,
-  bridgeStatus,
-}) => {
-  const caps = bridgeStatus?.capabilities;
-  const nativeWlanActive = caps?.nativeWlanAvailable === true;
-  const monitorActive = caps?.monitorModeSupported === true;
-  const sqliteActive = caps?.sqliteAvailable === true;
-  const parserActive = caps?.eapolParserAvailable === true;
-  const StatusIcon = ({ active }: { active: boolean }) => active
-    ? <CheckCircle2 className="w-4 h-4" />
-    : <XCircle className="w-4 h-4" />;
+export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ onClose, isDarkMode, bridgeStatus }) => {
+  const capabilities = bridgeStatus?.capabilities;
+  const rows = [
+    {
+      name: 'Windows WLAN scan',
+      available: capabilities?.nativeWlanAvailable === true,
+      status: capabilities?.nativeWlanAvailable === true ? 'Available' : 'Unavailable',
+      detail: capabilities?.nativeWlanReason || 'No current adapter result.'
+    },
+    {
+      name: 'Passive 802.11 capture',
+      available: capabilities?.monitorModeSupported === true,
+      status: capabilities?.monitorModeSupported === true ? 'Available' : capabilities?.npcapInstalled ? 'Adapter or driver unavailable' : 'Capture driver required',
+      detail: capabilities?.monitorModeReason || 'No monitor-mode result is available.'
+    },
+    {
+      name: 'PCAP / PCAPNG import',
+      available: capabilities?.eapolParserAvailable === true,
+      status: capabilities?.eapolParserAvailable === true ? 'Available' : 'Unavailable',
+      detail: capabilities?.eapolParserReason || 'No parser status is available.'
+    },
+    {
+      name: 'Network snapshot import',
+      available: capabilities?.nativeWlanAvailable === true,
+      status: capabilities?.nativeWlanAvailable === true ? 'Available' : 'Unavailable',
+      detail: 'Reads wireless network information reported by Windows.'
+    },
+    {
+      name: 'Local audit storage',
+      available: capabilities?.sqliteAvailable === true,
+      status: capabilities?.sqliteAvailable === true ? 'Available' : 'Unavailable',
+      detail: capabilities?.sqliteReason || 'No storage status is available.'
+    },
+    {
+      name: 'EAPOL handshake export',
+      available: false,
+      status: 'Not verified',
+      detail: 'Hash export is available only when all required values are present in imported capture data.'
+    },
+    {
+      name: 'OWE detection',
+      available: false,
+      status: 'Not verified on this PC',
+      detail: 'No real OWE network or capture has been verified on this PC.'
+    }
+  ];
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-      <div className={`w-full max-w-2xl rounded-xl border shadow-2xl overflow-hidden flex flex-col transition-colors ${
-        isDarkMode ? 'bg-[#181a20] border-[#2c303b] text-slate-200' : 'bg-white border-slate-200 text-slate-800'
-      }`}>
-        {/* Header */}
-        <div className={`flex items-center justify-between px-5 py-4 border-b ${
-          isDarkMode ? 'border-[#252934] bg-[#1d2028]' : 'border-slate-200 bg-slate-50'
-        }`}>
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-purple-600/15 text-purple-400">
-              <Cpu className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold">Runtime Architecture &amp; Capability Boundaries</h2>
-              <p className="text-xs text-slate-400">Measured from the active local C# bridge and selected Wi-Fi adapter</p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-slate-700/30 text-slate-400 hover:text-slate-200"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto text-xs">
-          {/* Environment Notice */}
-          <div className={`p-4 rounded-lg border space-y-2 ${
-            isDarkMode ? 'bg-[#14161c] border-[#292f3e]' : 'bg-slate-50 border-slate-200'
-          }`}>
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-300">Active Execution Environment:</span>
-              <span className="px-2 py-0.5 rounded font-mono text-[11px] bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                {bridgeStatus?.engine || 'Bridge status unavailable'}
-              </span>
-            </div>
-            <p className="text-slate-400 leading-relaxed text-[11px]">
-              The dashboard runs in WebView2, while the local .NET bridge performs native WLAN, SQLite, and PCAP work. Statuses below come from a live native capability probe instead of browser-sandbox assumptions.
-            </p>
-          </div>
-
-          {/* Detailed Capabilities Table */}
-          <div className="space-y-2">
-            <h3 className="font-bold text-slate-300">Hardware &amp; API Capability Matrix</h3>
-            <div className={`border rounded-lg overflow-hidden divide-y ${
-              isDarkMode ? 'border-[#282c38] divide-[#242834]' : 'border-slate-200 divide-slate-200'
-            }`}>
-              {/* Row 1: Direct wlanapi.dll */}
-              <div className="p-3 flex items-start gap-3">
-                <div className={`p-1 rounded mt-0.5 ${nativeWlanActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                  <StatusIcon active={nativeWlanActive} />
-                </div>
-                <div className="flex-1">
-                  <div className={`flex items-center justify-between font-semibold ${nativeWlanActive ? 'text-emerald-300' : ''}`}>
-                    <span>Direct Windows WLAN API (wlanapi.dll)</span>
-                    <span className={`text-[10px] uppercase font-mono ${nativeWlanActive ? 'text-emerald-400' : 'text-red-400'}`}>{nativeWlanActive ? 'Active via C# bridge' : 'Unavailable'}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    {caps?.nativeWlanReason || 'The local bridge has not reported a native capability result yet.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Row 2: passive Npcap monitor mode */}
-              <div className="p-3 flex items-start gap-3">
-                <div className={`p-1 rounded mt-0.5 ${monitorActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
-                  <StatusIcon active={monitorActive} />
-                </div>
-                <div className="flex-1">
-                  <div className={`flex items-center justify-between font-semibold ${monitorActive ? 'text-emerald-300' : ''}`}>
-                    <span>Npcap Passive 802.11 Monitor Mode</span>
-                    <span className={`text-[10px] uppercase font-mono ${monitorActive ? 'text-emerald-400' : 'text-amber-400'}`}>{monitorActive ? 'Available' : caps?.npcapInstalled ? 'Adapter unsupported' : 'Npcap required'}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    {caps?.monitorModeReason || 'The local bridge has not run the Npcap probe yet.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Row 3: PCAP Parser */}
-              <div className="p-3 flex items-start gap-3">
-                <div className={`p-1 rounded mt-0.5 ${parserActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                  <StatusIcon active={parserActive} />
-                </div>
-                <div className="flex-1">
-                  <div className={`flex items-center justify-between font-semibold ${parserActive ? 'text-emerald-300' : ''}`}>
-                    <span>Libpcap 2.4 &amp; Radiotap Binary Dissector</span>
-                    <span className={`text-[10px] uppercase font-mono ${parserActive ? 'text-emerald-400' : 'text-red-400'}`}>{parserActive ? 'Active in C# bridge' : 'Unavailable'}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    {caps?.eapolParserReason || 'Awaiting native bridge capability status.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Row 4: Netsh CLI Ingest */}
-              <div className="p-3 flex items-start gap-3">
-                <div className={`p-1 rounded mt-0.5 ${sqliteActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                  <StatusIcon active={sqliteActive} />
-                </div>
-                <div className="flex-1">
-                  <div className={`flex items-center justify-between font-semibold ${sqliteActive ? 'text-emerald-300' : ''}`}>
-                    <span>Windows Netsh CLI Live Importer</span>
-                    <span className={`text-[10px] uppercase font-mono ${sqliteActive ? 'text-emerald-400' : 'text-red-400'}`}>{sqliteActive ? 'Active in C# bridge' : 'Unavailable'}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Directly ingests real live wireless data from Windows command prompt (<code className="text-blue-400">netsh wlan show networks mode=bssid</code>) without needing special driver privileges.
-                  </p>
-                </div>
-              </div>
-
-              {/* Row 5: SQLite 3 Store */}
-              <div className="p-3 flex items-start gap-3">
-                <div className="p-1 rounded bg-emerald-500/10 text-emerald-400 mt-0.5">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between font-semibold text-emerald-300">
-                    <span>Relational SQLite 3 Persistent Storage</span>
-                    <span className="text-[10px] text-emerald-400 uppercase font-mono">Fully Functional</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    {caps?.sqliteReason || 'Awaiting native bridge capability status.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Row 6: EAPOL metadata only */}
-              <div className="p-3 flex items-start gap-3">
-                <div className="p-1 rounded bg-amber-500/10 text-amber-400 mt-0.5">
-                  <AlertTriangle className="w-4 h-4" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between font-semibold text-amber-300">
-                    <span>EAPOL Forensic Metadata (Hashcat 22000 export not implemented)</span>
-                    <span className="text-[10px] text-amber-400 uppercase font-mono">Metadata only</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Imported captures provide EAPOL frame metadata. Nonce, MIC, and export fields are shown only when present in parsed capture data.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Native Companion Bridge Info */}
-          <div className={`p-4 rounded-lg border space-y-2 ${
-            isDarkMode ? 'bg-[#14161c] border-[#292f3e]' : 'bg-slate-50 border-slate-200'
-          }`}>
-            <h4 className="font-semibold text-slate-300 flex items-center gap-1.5">
-              <Server className="w-3.5 h-3.5 text-blue-400" />
-              <span>Native Windows Desktop Companion Integration</span>
-            </h4>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              In an enterprise Windows installation, the application connects to a local C#/.NET 8 native daemon via WebSocket or Named Pipes (<code className="text-blue-400">localhost:9280/winwifi</code>). The companion daemon loads <code className="text-blue-400">wlanapi.dll</code> and Npcap kernel drivers to stream raw RF frames directly into this analytical UI.
-            </p>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className={`px-5 py-3 border-t flex justify-end ${
-          isDarkMode ? 'border-[#252934] bg-[#1d2028]' : 'border-slate-200 bg-slate-50'
-        }`}>
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
-          >
-            Acknowledge &amp; Close
-          </button>
-        </div>
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="capability-title">
+    <div className={`flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border shadow-2xl ${isDarkMode ? 'border-[#2c303b] bg-[#181a20] text-slate-200' : 'border-slate-200 bg-white text-slate-800'}`}>
+      <header className={`flex items-center justify-between border-b px-5 py-4 ${isDarkMode ? 'border-[#252934] bg-[#1d2028]' : 'border-slate-200 bg-slate-50'}`}>
+        <div><h2 id="capability-title" className="text-sm font-bold">System Capabilities</h2><p className="mt-0.5 text-xs text-slate-400">{bridgeStatus?.status === 'healthy' ? 'Current Windows adapter and local service status' : 'Local service is not connected'}</p></div>
+        <button onClick={onClose} aria-label="Close capabilities" className="rounded p-1 text-slate-400 hover:bg-slate-700/30 hover:text-slate-200"><X className="h-4 w-4" /></button>
+      </header>
+      <div className="space-y-2 overflow-y-auto p-4">
+        {rows.map(row => <div key={row.name} className={`flex items-start gap-3 rounded-lg border p-3 ${isDarkMode ? 'border-slate-800 bg-slate-950/50' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={row.available ? 'mt-0.5 text-emerald-400' : 'mt-0.5 text-amber-400'}>{row.available ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}</div>
+          <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">{row.name}</span><span className={`text-[10px] font-mono uppercase ${row.available ? 'text-emerald-400' : 'text-amber-300'}`}>{row.status}</span></div><p className="mt-1 text-[11px] text-slate-400">{row.detail}</p></div>
+        </div>)}
       </div>
+      <footer className={`flex justify-end border-t px-5 py-3 ${isDarkMode ? 'border-[#252934] bg-[#1d2028]' : 'border-slate-200 bg-slate-50'}`}><button onClick={onClose} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500">Close</button></footer>
     </div>
-  );
+  </div>;
 };

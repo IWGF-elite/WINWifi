@@ -10,8 +10,11 @@ import {
 
 interface AlertsCenterProps {
   alerts: AlertRecord[];
+  openInvestigationsCount: number;
   operatorName: string;
   canAcknowledge: boolean;
+  liveObservationCount: number;
+  alertEligibleObservationCount: number;
   onAcknowledge: (id: string) => Promise<void>;
 }
 
@@ -35,8 +38,11 @@ const formatTime = (iso: string): string => {
 
 export const AlertsCenter: React.FC<AlertsCenterProps> = ({
   alerts,
+  openInvestigationsCount,
   operatorName,
   canAcknowledge,
+  liveObservationCount,
+  alertEligibleObservationCount,
   onAcknowledge
 }) => {
   const [statusFilter, setStatusFilter] = useState<'Active' | 'Open' | 'Acknowledged' | 'Resolved' | 'All'>('Active');
@@ -93,13 +99,23 @@ export const AlertsCenter: React.FC<AlertsCenterProps> = ({
         <p className="mt-3 text-[11px] text-slate-500">
           Alerts are computed from current observations and enrolled assets. Nothing is sent to an external service.
         </p>
+        {liveObservationCount > 0 && alertEligibleObservationCount === 0 && alerts.length === 0 && (
+          <p className="mt-2 rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-200" role="status">
+            {liveObservationCount} live access points are visible, but none are enrolled or classified as trusted/corporate/approved for operational alerting. Review and add authorized networks in Projects &amp; Scope to enable scoped alerts. Unenrolled networks remain visible without being treated as managed assets.
+          </p>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
           <div className="text-[10px] uppercase tracking-wider text-slate-500">Active</div>
           <div className="mt-1 text-xl font-bold text-slate-100">{summary.active}</div>
           <div className="text-[10px] text-slate-500">{summary.open} open · {summary.acknowledged} acknowledged</div>
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500">Open investigations</div>
+          <div className="mt-1 text-xl font-bold text-slate-100">{openInvestigationsCount}</div>
+          <div className="text-[10px] text-slate-500">Cases in progress</div>
         </div>
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
           <div className="text-[10px] uppercase tracking-wider text-slate-500">Critical</div>

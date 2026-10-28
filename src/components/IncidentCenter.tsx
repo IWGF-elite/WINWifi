@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { AccessPoint, EvidenceItem, IncidentRecord, UIMode } from '../types';
 import { ThreatEngine } from '../services/threatEngine';
+import { countOpenIncidents } from '../services/incidentMapper';
 
 interface IncidentCenterProps {
   incidents: IncidentRecord[];
@@ -38,6 +39,7 @@ export const IncidentCenter: React.FC<IncidentCenterProps> = ({
   const [evidenceType, setEvidenceType] = useState<EvidenceItem['type']>('note');
 
   const selectedIncident = incidents.find(i => i.id === selectedIncidentId) || incidents[0];
+  const openCaseCount = countOpenIncidents(incidents);
   const targetAccessPoint = selectedIncident?.bssidTarget
     ? accessPoints.find(ap => ap.bssid.toUpperCase() === selectedIncident.bssidTarget?.toUpperCase())
     : undefined;
@@ -130,7 +132,7 @@ export const IncidentCenter: React.FC<IncidentCenterProps> = ({
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-100">Wireless Incident Investigation Center</h1>
+              <h1 className="text-lg font-bold text-slate-100">Wireless Incident Investigation Center · {openCaseCount} open</h1>
               <p className="text-xs text-slate-400 mt-0.5">
                 Defensive incident management tracking triage, evidence trails, auditor notes, and verified remediations.
               </p>

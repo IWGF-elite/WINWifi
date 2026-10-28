@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { AccessPoint, AnalystClassification, IncidentRecord, SecurityChange, UIMode, ActiveTab } from '../types';
 import { countOpenIncidents } from '../services/incidentMapper';
+import { isSuspiciousAccessPoint } from '../services/threatMetrics';
 
 interface ThreatCenterProps {
   accessPoints: AccessPoint[];
@@ -42,7 +43,7 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
   }, [accessPoints]);
 
   // Filter rogue candidates
-  const rogueAPs = accessPoints.filter(a => a.isRogueCandidate || a.classification === 'Rogue' || a.classification === 'Suspicious');
+  const rogueAPs = accessPoints.filter(isSuspiciousAccessPoint);
   const openCases = countOpenIncidents(incidents);
 
   const handleAnalystOverride = (bssid: string, status: 'Trusted' | 'False Positive' | 'Confirmed Rogue') => {

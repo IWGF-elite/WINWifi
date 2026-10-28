@@ -264,10 +264,10 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           <button
             onClick={onOpenArchitecture}
             className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20 transition-colors"
-            title="Inspect Runtime Security Architecture & Capabilities"
+            title="View system capabilities"
           >
             <Cpu className="w-3 h-3 text-purple-400" />
-            <span className="hidden md:inline">Architecture</span>
+            <span className="hidden md:inline">Capabilities</span>
           </button>
 
           <button

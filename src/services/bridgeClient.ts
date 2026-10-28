@@ -9,7 +9,8 @@ import {
   DataOrigin,
   EnterpriseAssetRecord,
   SecurityChange,
-  LocalNetworkInfo
+  LocalNetworkInfo,
+  LocalNetworkActivity
 } from '../types';
 import {
   BridgeErrorKind,
@@ -27,6 +28,30 @@ const messageOf = (reason: unknown): string => {
   if (reason instanceof Error) return reason.message;
   return String(reason);
 };
+
+/** Bounded transport allowance for a real host/port scan, based on target subnet and scan rate. */
+export function estimateLocalNetworkScanTimeout(
+  options: { fullPortScan?: boolean; probesPerSecond?: number },
+  subnet?: Pick<LocalNetworkInfo, 'prefixLength' | 'devices'>
+): number {
+  const prefixLength = subnet?.prefixLength ?? 24;
+  const hostCount = prefixLength >= 1 && prefixLength <= 30
+    ? Math.min(4096, Math.max(1, 2 ** (32 - prefixLength) - 2))
+    : 254;
+  const knownHosts = Math.max(0, subnet?.devices?.filter(device => device.isOnline).length ?? 0);
+  const expectedResponders = Math.min(hostCount, Math.max(4, knownHosts + 2));
+  const commonScanTimeout = Math.min(
+    20 * 60_000,
+    20_000 + Math.ceil(hostCount / 48) * 1_000 + expectedResponders * 3_000
+  );
+  if (!options.fullPortScan) return commonScanTimeout;
+
+  const probesPerSecond = Math.max(1, Math.min(250, options.probesPerSecond ?? 100));
+  return Math.min(
+    24 * 60 * 60_000,
+    commonScanTimeout + Math.ceil(expectedResponders * 65_535 * 1_000 / probesPerSecond * 1.25)
+  );
+}
 
 const DEFAULT_CONFIG: BridgeConfig = {
   baseUrl: 'http://127.0.0.1:38989',
@@ -335,10 +360,10 @@ export class NativeBridgeClient {
 
   // ================= Network Request Helper with Timeout =================
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit = {}, timeoutMs = this.config.timeoutMs): Promise<T> {
     const url = `${this.config.baseUrl.replace(/\/$/, '')}${endpoint}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(url, {
@@ -374,7 +399,7 @@ export class NativeBridgeClient {
     } catch (err: any) {
       clearTimeout(timer);
       if (err.name === 'AbortError') {
-        throw new Error(`Bridge timeout: Request to ${endpoint} exceeded ${this.config.timeoutMs}ms.`);
+        throw new Error(`Bridge timeout: Request to ${endpoint} exceeded ${timeoutMs}ms.`);
       }
       throw err;
     }
@@ -401,14 +426,38 @@ export class NativeBridgeClient {
     return await this.request<LocalNetworkInfo>('/api/local-network' + query);
   }
 
+  public async getLocalNetworkActivity(): Promise<LocalNetworkActivity> {
+    // Windows' connection table query starts a PowerShell worker on older
+    // desktop builds. Give this read-only inventory its own bounded allowance
+    // so normal connection data does not inherit the 5s heartbeat deadline.
+    return await this.request<LocalNetworkActivity>('/api/local-network/activity', {}, 12_000);
+  }
+
+  public async importBrowserStorageSnapshot(snapshot: { importId: string; entries: Array<{ storageKey: string; payloadJson: string; recordCount: number }> }): Promise<{ importId: string; importedKeys: number; importedRecords: number; importedAt: string }> {
+    return await this.request('/api/storage/browser-snapshot/import', { method: 'POST', body: JSON.stringify(snapshot) });
+  }
+
   public async getLocalNetworkDevices(adapterId: string): Promise<LocalNetworkInfo> {
     const query = adapterId ? '?adapterId=' + encodeURIComponent(adapterId) : '';
     return await this.request<LocalNetworkInfo>('/api/local-network/devices' + query);
   }
 
-  public async scanLocalNetwork(adapterId: string): Promise<LocalNetworkInfo> {
+  public async scanLocalNetwork(
+    adapterId: string,
+    options: { fullPortScan?: boolean; probesPerSecond?: number } = {},
+    subnet?: Pick<LocalNetworkInfo, 'prefixLength' | 'devices'>
+  ): Promise<LocalNetworkInfo> {
     const query = adapterId ? '?adapterId=' + encodeURIComponent(adapterId) : '';
-    return await this.request<LocalNetworkInfo>('/api/local-network/scan' + query, { method: 'POST' });
+    // This endpoint performs a real subnet discovery, name resolution and TCP
+    // connect probes. Estimate the bounded request window from the selected
+    // subnet and known responders rather than applying the heartbeat timeout.
+    // Full-range probing can legitimately take many minutes per host.
+    const timeoutMs = estimateLocalNetworkScanTimeout(options, subnet);
+    return await this.request<LocalNetworkInfo>('/api/local-network/scan' + query, { method: 'POST', body: JSON.stringify(options) }, timeoutMs);
+  }
+
+  public async cancelLocalNetworkScan(): Promise<void> {
+    await this.request('/api/local-network/scan/cancel', { method: 'POST' });
   }
 
   public async setLanDeviceKnown(networkId: string, ipAddress: string, isKnown: boolean): Promise<void> {

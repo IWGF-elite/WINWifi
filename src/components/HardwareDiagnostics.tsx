@@ -24,7 +24,6 @@ import {
   CapabilityStatus
 } from '../types';
 import { CapabilityMatrixService } from '../services/capabilityMatrix';
-import { isWebView2Host } from '../services/wifiEngine';
 
 interface HardwareDiagnosticsProps {
   adapter?: WifiAdapter;
@@ -147,16 +146,14 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
             </div>
             <div>
               <div className="text-xs text-slate-500 font-mono">
-                {bridgeState === 'CONNECTED' ? 'ACTIVE WINDOWS WIRELESS TRANSCEIVER' : 'HOST RUNTIME ENVIRONMENT'}
+                {bridgeState === 'CONNECTED' ? 'ACTIVE WINDOWS WIRELESS ADAPTER' : 'LIVE DATA UNAVAILABLE'}
               </div>
               <h1 className="text-lg font-bold text-slate-100 mt-0.5">
                 {bridgeState === 'CONNECTED'
                   ? bridgeStatus?.activeAdapterName || 'Windows NDIS Wireless Adapter'
                   : dataSourceProfile === 'REAL_PCAP'
-                    ? 'Imported 802.11 Packet Forensics Session'
-                    : isWebView2Host()
-                      ? 'Windows Desktop Host (Bridge Offline)'
-                      : 'Browser Sandbox Web Container (Bridge Offline)'}
+                    ? 'Imported 802.11 Capture'
+                    : 'Windows network data unavailable'}
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
                 {bridgeState === 'CONNECTED' ? (
@@ -166,11 +163,9 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
                     Cycles: <span className="text-emerald-400 font-semibold">{bridgeStatus?.scanCyclesCompleted || 0}</span>
                   </>
                 ) : dataSourceProfile === 'REAL_PCAP' ? (
-                  <>Decoded offline Libpcap/PCAPNG capture stream. Full promiscuous frame dissector active.</>
+                  <>Imported wireless capture data.</>
                 ) : (
-                  <>
-                    Native Windows WLAN API (wlanapi.dll) requires the <span className="text-blue-400 font-semibold">WinWiFi.Desktop bridge</span> running on this PC.
-                  </>
+                  <>Reconnect the Windows service to refresh adapter data.</>
                 )}
               </p>
             </div>
@@ -275,7 +270,7 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
                 <th className="py-3 px-4">Capability &amp; Domain</th>
                 <th className="py-3 px-4">Category</th>
                 <th className="py-3 px-4">Operating Status</th>
-                <th className="py-3 px-4">Technical Rationale &amp; Windows NDIS Architecture</th>
+                <th className="py-3 px-4">Details</th>
                 <th className="py-3 px-4">Prerequisites / Driver</th>
               </tr>
             </thead>
@@ -376,18 +371,6 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
         </div>
       </div>
 
-      {/* Defensive Ethics & Transparency Charter */}
-      <div className="bg-slate-900/80 border border-blue-900/40 rounded-xl p-4 text-xs space-y-2">
-        <div className="flex items-center gap-2 text-blue-400 font-bold">
-          <ShieldCheck className="w-4 h-4" />
-          <span>Defensive Audit &amp; Data Integrity Commitment</span>
-        </div>
-        <p className="text-slate-300 leading-relaxed text-[11px]">
-          WinWiFi is architected exclusively for defensive wireless auditing, configuration compliance, and forensic packet inspection. 
-          Client station details require imported frames. Handshake details require parsed capture evidence.
-          Offensive capabilities (packet injection, deauthentication jamming, evil twin rogue generation) are prohibited by design.
-        </p>
-      </div>
     </div>
   );
 };

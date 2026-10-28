@@ -22,6 +22,8 @@ import {
   DataSourceProfile,
   BridgeConnectionState 
 } from '../types';
+import { countOpenIncidents } from '../services/incidentMapper';
+import { countSuspiciousAccessPoints } from '../services/threatMetrics';
 
 interface CommandCenterDashboardProps {
   accessPoints: AccessPoint[];
@@ -57,7 +59,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
   const hasNetworkData = totalNetworks > 0;
   const approvedNetworks = accessPoints.filter(a => a.approvedStatus === 'Approved').length;
   const unknownNetworks = accessPoints.filter(a => a.approvedStatus === 'Pending Review' || a.approvedStatus === 'Unapproved' || !a.approvedStatus).length;
-  const rogueNetworks = accessPoints.filter(a => a.isRogueCandidate || a.classification === 'Rogue').length;
+  const rogueNetworks = countSuspiciousAccessPoints(accessPoints);
 
   const criticalIssuesCount = accessPoints.reduce((acc, ap) => acc + (ap.issues || []).filter(i => i.severity === 'CRITICAL').length, 0);
   const highIssuesCount = accessPoints.reduce((acc, ap) => acc + (ap.issues || []).filter(i => i.severity === 'HIGH').length, 0);
@@ -66,7 +68,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
     ? Math.round(accessPoints.reduce((sum, ap) => sum + (ap.securityScore ?? 100), 0) / totalNetworks)
     : null;
 
-  const openIncidents = (incidents || []).filter(i => i.status === 'Open' || i.status === 'Investigating').length;
+  const openIncidents = countOpenIncidents(incidents || []);
 
   // Band counts
   const band24Count = accessPoints.filter(a => a.band === '2.4 GHz').length;
@@ -331,7 +333,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
         ) : attentionItems.length === 0 ? (
           <div className="text-center py-8 text-slate-400 text-sm">
             <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2 opacity-80" />
-            All discovered wireless infrastructure conforms to current security policies. No high-priority alerts.
+            No command-center items are active. Review per-network risk factors and pending scope decisions in Networks and Projects &amp; Scope.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Download, RefreshCw, Search, Router, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
-import { LanDeviceRecord, LocalNetworkInfo } from '../types';
+import { Activity, Download, RefreshCw, Search, Router, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
+import { LanDeviceRecord, LocalNetworkActivity, LocalNetworkInfo } from '../types';
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { downloadBlob } from '../services/download';
 
@@ -13,27 +13,50 @@ const dateText = (value: string) => value ? new Date(value).toLocaleString() : '
 
 export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
   const [network, setNetwork] = useState<LocalNetworkInfo | null>(null);
+  const [activity, setActivity] = useState<LocalNetworkActivity | null>(null);
   const [devices, setDevices] = useState<LanDeviceRecord[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState('');
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<Sort>('ip');
   const [selected, setSelected] = useState<LanDeviceRecord | null>(null);
+  const [fullPortScan, setFullPortScan] = useState(false);
+  const [probesPerSecond, setProbesPerSecond] = useState(100);
 
   const load = async () => {
     if (!adapterId) { setNetwork(null); setDevices([]); return; }
-    try {
-      const [info, saved] = await Promise.all([
-        NativeBridgeClient.getInstance().getLocalNetworkInfo(adapterId),
-        NativeBridgeClient.getInstance().getLocalNetworkDevices(adapterId)
-      ]);
+    const bridge = NativeBridgeClient.getInstance();
+    setLoading(true);
+    setActivityLoading(true);
+    setError('');
+    setActivityError('');
+    const infoTask = bridge.getLocalNetworkInfo(adapterId).then(info => {
       setNetwork(info);
-      setDevices(saved.devices || []);
-      setError('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+    }).catch(reason => {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    });
+    const devicesTask = bridge.getLocalNetworkDevices(adapterId).then(saved => {
+      const savedDevices = saved.devices || [];
+      setDevices(savedDevices);
+      setNetwork(current => current ? { ...current, devices: savedDevices } : current);
+    }).catch(reason => {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    });
+    const activityTask = bridge.getLocalNetworkActivity().then(currentActivity => {
+      setActivity(currentActivity);
+      setActivityError(currentActivity.status === 'Available' ? '' : currentActivity.reason || 'Windows did not return connection data.');
+    }).catch(reason => {
+      setActivityError(reason instanceof Error ? reason.message : String(reason));
+    }).finally(() => {
+      setActivityLoading(false);
+    });
+    await Promise.all([infoTask, devicesTask]);
+    setLoading(false);
+    await activityTask;
   };
 
   useEffect(() => { void load(); }, [adapterId]);
@@ -43,9 +66,14 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
     setBusy(true);
     setError('');
     try {
-      const result = await NativeBridgeClient.getInstance().scanLocalNetwork(adapterId);
+      const result = await NativeBridgeClient.getInstance().scanLocalNetwork(
+        adapterId,
+        { fullPortScan, probesPerSecond },
+        network || undefined
+      );
       setNetwork(result);
       setDevices(result.devices || []);
+      if (result.cancelled) setError(result.reason || 'Scan cancelled.');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -68,6 +96,20 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
       return a.ipAddress.localeCompare(b.ipAddress, undefined, { numeric: true });
     });
   }, [devices, filter, search, sort]);
+
+  const remoteIpSummary = useMemo(() => {
+    const byIp = new Map<string, { tcp: number; udp: number; processes: Set<string> }>();
+    for (const connection of activity?.connections || []) {
+      if (!connection.remoteAddress || connection.remotePort <= 0) continue;
+      const current = byIp.get(connection.remoteAddress) || { tcp: 0, udp: 0, processes: new Set<string>() };
+      if (connection.protocol === 'TCP') current.tcp++;
+      else current.udp++;
+      current.processes.add(connection.processName || `PID ${connection.processId}`);
+      byIp.set(connection.remoteAddress, current);
+    }
+    return [...byIp.entries()].map(([ipAddress, counts]) => ({ ipAddress, ...counts }))
+      .sort((a, b) => (b.tcp + b.udp) - (a.tcp + a.udp) || a.ipAddress.localeCompare(b.ipAddress, undefined, { numeric: true }));
+  }, [activity]);
 
   const exportCsv = () => {
     const fields = ['IP', 'MAC', 'Vendor', 'Hostname', 'Type', 'Online', 'Known', 'New', 'Randomized MAC', 'First seen', 'Last seen', 'OS hint', 'Open TCP services'];
@@ -96,17 +138,47 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={exportCsv} disabled={!visible.length} className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-40"><Download className="mr-1 inline h-3.5 w-3.5" />CSV</button>
         <button type="button" onClick={() => downloadBlob(new Blob([JSON.stringify(visible, null, 2)], { type: 'application/json' }), 'winwifi-local-device-inventory.json')} disabled={!visible.length} className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-40">JSON</button>
-        <button type="button" onClick={() => void scan()} disabled={!adapterId || busy} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
-          <RefreshCw className={'mr-1 inline h-3.5 w-3.5 ' + (busy ? 'animate-spin' : '')} />{busy ? 'Scanning…' : 'Scan local network'}
-        </button>
+        {!busy && <label className="flex items-center gap-1 text-[10px] text-slate-400"><input type="checkbox" checked={fullPortScan} onChange={e => setFullPortScan(e.target.checked)} />Full TCP range</label>}
+        {fullPortScan && !busy && <label className="text-[10px] text-slate-400">Rate <select value={probesPerSecond} onChange={e => setProbesPerSecond(Number(e.target.value))} className="rounded border border-slate-700 bg-slate-950 px-1.5 py-1 text-slate-200"><option value={25}>25/s</option><option value={50}>50/s</option><option value={100}>100/s</option><option value={250}>250/s</option></select></label>}
+        {!busy ? <button type="button" onClick={() => void scan()} disabled={!adapterId} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"><RefreshCw className="mr-1 inline h-3.5 w-3.5" />{fullPortScan ? 'Scan all TCP ports' : 'Scan local network'}</button> : <button type="button" onClick={() => void NativeBridgeClient.getInstance().cancelLocalNetworkScan()} className="rounded-md bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white">Cancel scan</button>}
       </div>
     </div>
     {network?.status === 'Available' && <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
       <div className="rounded bg-slate-950/70 p-3"><div className="text-slate-500">Gateway</div>
         {network.gatewayIp ? <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-slate-200"><span>{network.gatewayIp}</span><a href={'http://' + network.gatewayIp + '/'} target="_blank" rel="noreferrer" className="rounded bg-blue-700 px-2 py-1 font-sans text-white">Open router page</a></div> : <div className="mt-1 text-slate-400">Not reported by Windows</div>}
       </div>
-      <div className="rounded bg-slate-950/70 p-3 sm:col-span-2"><div className="text-slate-500">DNS servers</div><div className="mt-1 break-all font-mono text-slate-200">{network.dnsServers?.length ? network.dnsServers.join(' · ') : 'Not reported by Windows'}</div></div>
+      <div className="rounded bg-slate-950/70 p-3"><div className="text-slate-500">DNS servers</div><div className="mt-1 break-all font-mono text-slate-200">{network.dnsServers?.length ? network.dnsServers.join(' · ') : 'Not reported by Windows'}</div></div>
+      <div className="rounded bg-slate-950/70 p-3"><div className="text-slate-500">DHCP servers</div><div className="mt-1 break-all font-mono text-slate-200">{network.dhcpServers?.length ? network.dhcpServers.join(' · ') : 'Not reported by Windows'}</div></div>
     </div>}
+    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-200"><Activity className="h-3.5 w-3.5 text-cyan-400" />Current PC connections</div>
+        <button type="button" onClick={() => void load()} disabled={!adapterId || busy || loading || activityLoading} className="rounded border border-slate-700 px-2 py-1 text-[10px] text-slate-300 disabled:opacity-40">{loading || activityLoading ? 'Refreshing…' : 'Refresh'}</button>
+      </div>
+      {activity?.status === 'Available' ? <>
+        <p className="mt-1 text-[10px] text-slate-500">Windows TCP connections and UDP endpoints with process ownership · checked {dateText(activity.observedAt)}</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <div className="rounded bg-slate-900 p-2 text-[10px] text-slate-300">{activity.connections.filter(c => c.protocol === 'TCP' && c.remotePort > 0).length} TCP connections</div>
+          <div className="rounded bg-slate-900 p-2 text-[10px] text-slate-300">{activity.connections.filter(c => c.protocol === 'UDP').length} UDP endpoints</div>
+          <div className="rounded bg-slate-900 p-2 text-[10px] text-slate-300">{remoteIpSummary.length} remote IPs in current TCP connections</div>
+        </div>
+        <div className="mt-2 max-h-36 overflow-auto rounded border border-slate-800">
+          <table className="min-w-full text-left text-[10px]"><thead className="sticky top-0 bg-slate-900 text-slate-500"><tr>{['Remote IP', 'TCP flows', 'Processes'].map(h => <th key={h} className="px-2 py-1.5">{h}</th>)}</tr></thead>
+            <tbody>{remoteIpSummary.map(row => <tr key={row.ipAddress} className="border-t border-slate-800 text-slate-300"><td className="px-2 py-1 font-mono">{row.ipAddress}</td><td className="px-2 py-1">{row.tcp}</td><td className="px-2 py-1">{[...row.processes].join(', ')}</td></tr>)}</tbody>
+          </table>
+          {!remoteIpSummary.length && <p className="p-2 text-[10px] text-slate-500">Windows reported no remote TCP endpoints. Per-IP byte totals are unavailable without packet capture.</p>}
+        </div>
+        <div className="mt-2 max-h-52 overflow-auto rounded border border-slate-800">
+          <table className="min-w-full text-left text-[10px]"><thead className="sticky top-0 bg-slate-900 text-slate-500"><tr>{['Protocol', 'Local endpoint', 'Remote endpoint', 'State', 'Process'].map(h => <th key={h} className="px-2 py-1.5">{h}</th>)}</tr></thead>
+            <tbody>{activity.connections.slice(0, 500).map((c, i) => <tr key={`${c.protocol}-${c.localAddress}-${c.localPort}-${c.remoteAddress}-${c.remotePort}-${c.processId}-${i}`} className="border-t border-slate-800 text-slate-300">
+              <td className="px-2 py-1">{c.protocol}</td><td className="px-2 py-1 font-mono">{c.localAddress}:{c.localPort}</td><td className="px-2 py-1 font-mono">{c.remoteAddress ? `${c.remoteAddress}:${c.remotePort}` : '—'}</td><td className="px-2 py-1">{c.state}</td><td className="px-2 py-1">{c.processName} ({c.processId})</td>
+            </tr>)}</tbody>
+          </table>
+          {activity.connections.length > 500 && <p className="p-2 text-[10px] text-slate-500">Showing 500 of {activity.connections.length} endpoints. Refine through Windows networking tools for the full list.</p>}
+          {!activity.connections.length && <p className="p-3 text-[10px] text-slate-500">Windows returned no active TCP connections or UDP endpoints.</p>}
+        </div>
+      </> : <p className="mt-2 text-[10px] text-amber-300" aria-live="polite">{activityLoading ? 'Reading the current Windows connection table…' : activityError || activity?.reason || 'Windows connection data unavailable.'}</p>}
+    </div>
     <div className="mt-3 flex flex-wrap items-center gap-2">
       <label className="relative min-w-[180px] flex-1"><Search className="absolute left-2 top-2 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search IP, MAC, vendor, hostname" className="w-full rounded border border-slate-700 bg-slate-950 py-1.5 pl-7 pr-2 text-xs text-slate-200" /></label>
       <select value={filter} onChange={e => setFilter(e.target.value as Filter)} className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200">
@@ -120,6 +192,8 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
       {network?.scannedAt && <span className="text-[10px] text-slate-500">Last scan {dateText(network.scannedAt)}</span>}
     </div>
     {error && <div className="mt-2 rounded border border-rose-800 bg-rose-950/40 p-2 text-xs text-rose-300">{error}</div>}
+    {busy && <div className="mt-2 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-[11px] text-amber-200" role="status" aria-live="polite">{fullPortScan ? `Probing ports 1–65535 on discovered hosts at ${probesPerSecond} attempts per second. The duration depends on responding devices; the scan can be cancelled at any time.` : 'Discovering devices and checking common services on the selected network. This can take several seconds; the scan can be cancelled at any time.'}</div>}
+    {network?.scannedAt && <p className="mt-2 text-[10px] text-slate-500">{network.portScanMode || 'Common ports'} · {network.portsScanned ?? 0} port attempts{network.cancelled ? ' · cancelled' : ''}</p>}
     <div className="mt-3 overflow-auto rounded border border-slate-800">
       <table className="min-w-full text-left text-[11px]">
         <thead className="bg-slate-950 text-slate-400"><tr>{['State', 'IP address', 'MAC address', 'Vendor', 'Hostname', 'Type', 'Ports', 'Review'].map(h => <th key={h} className="whitespace-nowrap px-2 py-2">{h}</th>)}</tr></thead>

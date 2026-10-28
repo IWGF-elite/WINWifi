@@ -35,10 +35,12 @@ public static class LocalNetworkService
         (9000, "HTTP alternate", false, ""), (9100, "JetDirect", false, "")
     };
 
-    public static async Task<LocalNetworkInfo> ScanAsync(string? adapterId, CancellationToken cancellationToken = default)
+    public static async Task<LocalNetworkInfo> ScanAsync(string? adapterId, CancellationToken cancellationToken = default, bool fullPortScan = false, int probesPerSecond = 100)
     {
+        probesPerSecond = Math.Clamp(probesPerSecond, 1, 250);
         var result = GetNetworkInfo(adapterId);
         if (result.Status != "Available") return result;
+        result.PortScanMode = fullPortScan ? $"Full TCP range (rate-limited to {probesPerSecond}/s)" : "Common ports";
 
         var hosts = EnumerateHosts(result.LocalIp, result.PrefixLength).ToArray();
         if (hosts.Length > 4096)
@@ -58,6 +60,7 @@ public static class LocalNetworkService
                 var reply = await ping.SendPingAsync(ip, 350).WaitAsync(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
                 return reply.Status == IPStatus.Success ? reply : null;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch { return null; }
             finally { gate.Release(); }
         })).ConfigureAwait(false);
@@ -76,6 +79,7 @@ public static class LocalNetworkService
             online.Keys.Concat(ssdp.Keys).Distinct(StringComparer.OrdinalIgnoreCase), result.LocalIp, cancellationToken).ConfigureAwait(false);
         string now = DateTimeOffset.UtcNow.ToString("O");
         using var portGate = new SemaphoreSlim(48);
+        var fullRangePacer = new ProbePacer(probesPerSecond);
         foreach (string ip in addresses)
         {
             neighbors.TryGetValue(ip, out string? mac);
@@ -120,15 +124,21 @@ public static class LocalNetworkService
             }
             if (string.IsNullOrWhiteSpace(device.Hostname))
             {
-                device.Hostname = await ResolveNetBiosNameAsync(ip, cancellationToken).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(device.Hostname)) device.Evidence.Add("NetBIOS name from Windows nbtstat response");
+                var netBios = await ResolveNetBiosNameAsync(ip, cancellationToken).ConfigureAwait(false);
+                device.Hostname = netBios.Name;
+                device.Evidence.Add(netBios.Evidence);
             }
             if (string.IsNullOrWhiteSpace(device.Hostname) && ssdp.TryGetValue(ip, out ssdpInfo) && !string.IsNullOrWhiteSpace(ssdpInfo.Hostname))
             {
                 device.Hostname = ssdpInfo.Hostname;
                 device.Evidence.Add("Host name from SSDP description URL");
             }
-            if (isOnline) device.OpenPorts = await ProbePortsAsync(ip, portGate, cancellationToken).ConfigureAwait(false);
+            if (isOnline)
+            {
+                var probeResult = await ProbePortsAsync(ip, portGate, cancellationToken, fullPortScan, probesPerSecond, fullRangePacer).ConfigureAwait(false);
+                device.OpenPorts = probeResult.OpenPorts;
+                result.PortsScanned += probeResult.PortsScanned;
+            }
             if (device.OpenPorts.Any(p => p.Port == 554))
             {
                 if (device.DeviceType != "Gateway") device.DeviceType = "RTSP media endpoint";
@@ -186,6 +196,9 @@ public static class LocalNetworkService
                 .Select(g => g.Address)
                 .FirstOrDefault(g => g.AddressFamily == AddressFamily.InterNetwork)?.ToString() ?? string.Empty,
             DnsServers = properties.DnsAddresses.Select(d => d.ToString()).ToList(),
+            DhcpServers = OperatingSystem.IsWindows()
+                ? properties.DhcpServerAddresses.Select(d => d.ToString()).ToList()
+                : new List<string>(),
             Status = "Available"
         };
     }
@@ -435,7 +448,9 @@ public static class LocalNetworkService
         return string.Join('.', labels);
     }
 
-    private static async Task<string> ResolveNetBiosNameAsync(string ip, CancellationToken cancellationToken)
+    private sealed record NetBiosResult(string Name, string Evidence);
+
+    private static async Task<NetBiosResult> ResolveNetBiosNameAsync(string ip, CancellationToken cancellationToken)
     {
         try
         {
@@ -449,46 +464,112 @@ public static class LocalNetworkService
             start.ArgumentList.Add("-A");
             start.ArgumentList.Add(ip);
             using var process = Process.Start(start);
-            if (process is null) return string.Empty;
+            if (process is null) return new(string.Empty, "NetBIOS query unavailable: Windows did not start nbtstat.exe.");
             Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             try { await process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromMilliseconds(900), cancellationToken).ConfigureAwait(false); }
-            catch (TimeoutException) { process.Kill(entireProcessTree: true); return string.Empty; }
+            catch (TimeoutException) { process.Kill(entireProcessTree: true); return new(string.Empty, "NetBIOS query to UDP 137 timed out with no response."); }
             string output = await outputTask.ConfigureAwait(false);
             Match match = Regex.Match(output, @"(?im)^\s*([^\s<]+)\s+<00>\s+UNIQUE\b");
-            return match.Success ? match.Groups[1].Value : string.Empty;
+            if (match.Success) return new(match.Groups[1].Value, "NetBIOS name returned by Windows nbtstat query.");
+            string detail = output.Split('\r', '\n').Select(line => line.Trim()).FirstOrDefault(line =>
+                line.Contains("host not found", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("no response", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("timed out", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+            return new(string.Empty, detail.Length > 0
+                ? $"NetBIOS query returned no name: {detail}"
+                : "NetBIOS query to UDP 137 returned no name response.");
         }
         catch (OperationCanceledException) { throw; }
-        catch { return string.Empty; }
+        catch (Exception ex) { return new(string.Empty, $"NetBIOS query unavailable: {ex.Message}"); }
     }
 
-    private static async Task<List<LanOpenPort>> ProbePortsAsync(string ip, SemaphoreSlim gate, CancellationToken cancellationToken)
+    private sealed record PortProbeResult(List<LanOpenPort> OpenPorts, int PortsScanned);
+
+    private sealed class ProbePacer
+    {
+        private readonly long _interval;
+        private readonly object _sync = new();
+        private long _next;
+
+        public ProbePacer(int perSecond) => _interval = Math.Max(1, Stopwatch.Frequency / perSecond);
+
+        public async Task WaitAsync(CancellationToken cancellationToken)
+        {
+            long target;
+            long now = Stopwatch.GetTimestamp();
+            lock (_sync)
+            {
+                target = Math.Max(now, _next);
+                _next = target + _interval;
+            }
+            if (target > now)
+                await Task.Delay(TimeSpan.FromSeconds((target - now) / (double)Stopwatch.Frequency), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<PortProbeResult> ProbePortsAsync(string ip, SemaphoreSlim gate, CancellationToken cancellationToken, bool fullPortScan, int probesPerSecond, ProbePacer fullRangePacer)
     {
         var open = new List<LanOpenPort>();
-        var tasks = ProbePorts.Select(async item =>
+        if (!fullPortScan)
         {
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            var tasks = ProbePorts.Select(async item =>
             {
-                using var client = new TcpClient();
-                await client.ConnectAsync(ip, item.Port)
-                    .WaitAsync(TimeSpan.FromMilliseconds(450), cancellationToken).ConfigureAwait(false);
-                string banner = await ReadServiceBannerAsync(client, item.Port, ip, cancellationToken).ConfigureAwait(false);
-                bool adminPage = IsAdministrativePage(banner);
-                lock (open)
-                    open.Add(new LanOpenPort
-                    {
-                        Port = item.Port,
-                        Service = item.Name,
-                        Banner = banner,
-                        RiskFlag = item.Risk || adminPage,
-                        RiskReason = item.Risk ? item.Reason : adminPage ? "The HTTP response indicates a possible administrative sign-in page; verify access controls." : string.Empty
-                    });
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try { await ProbeSinglePortAsync(ip, item.Port, item.Name, item.Risk, item.Reason, open, cancellationToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+                finally { gate.Release(); }
+            });
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            return new(open.OrderBy(p => p.Port).ToList(), ProbePorts.Length);
+        }
+
+        var pacer = new ProbePacer(probesPerSecond);
+        int nextPort = 0;
+        int scanned = 0;
+        int workerCount = Math.Min(32, probesPerSecond);
+        var fullTasks = Enumerable.Range(0, workerCount).Select(async _ =>
+        {
+            while (true)
+            {
+                int port = Interlocked.Increment(ref nextPort);
+                if (port > 65535) return;
+                await fullRangePacer.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    string name = ProbePorts.FirstOrDefault(item => item.Port == port).Name ?? "Unknown TCP service";
+                    var known = ProbePorts.FirstOrDefault(item => item.Port == port);
+                    await ProbeSinglePortAsync(ip, port, name, known.Risk, known.Reason, open, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+                finally
+                {
+                    Interlocked.Increment(ref scanned);
+                    gate.Release();
+                }
             }
-            catch { }
-            finally { gate.Release(); }
         });
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-        return open.OrderBy(p => p.Port).ToList();
+        await Task.WhenAll(fullTasks).ConfigureAwait(false);
+        return new(open.OrderBy(p => p.Port).ToList(), scanned);
+    }
+
+    private static async Task ProbeSinglePortAsync(string ip, int port, string service, bool risky, string riskReason, List<LanOpenPort> open, CancellationToken cancellationToken)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(ip, port).WaitAsync(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+        string banner = await ReadServiceBannerAsync(client, port, ip, cancellationToken).ConfigureAwait(false);
+        bool adminPage = IsAdministrativePage(banner);
+        lock (open)
+            open.Add(new LanOpenPort
+            {
+                Port = port,
+                Service = service,
+                Banner = banner,
+                RiskFlag = risky || adminPage,
+                RiskReason = risky ? riskReason : adminPage ? "The HTTP response indicates a possible administrative sign-in page; verify access controls." : string.Empty
+            });
     }
 
     private static async Task<string> ReadServiceBannerAsync(TcpClient client, int port, string host, CancellationToken cancellationToken)

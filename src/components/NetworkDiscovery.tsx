@@ -40,6 +40,10 @@ interface NetworkDiscoveryProps {
 
 type SortField = 'rssi' | 'ssid' | 'channel' | 'securityScore' | 'clients' | 'dataPacketCount';
 
+const isUnencryptedNetwork = (security: string) =>
+  security.includes('Open') && !security.includes('OWE') && !security.includes('Enhanced Open');
+const securityLabel = (security: string) => security === 'OWE (Enhanced Open)' ? 'Enhanced Open (OWE)' : security;
+
 export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   accessPoints,
   selectedBssid,
@@ -76,7 +80,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
       
       let matchesSecurity = true;
       if (securityFilter === 'OPEN_WEP') {
-        matchesSecurity = ap.security.includes('Open') || ap.security.includes('WEP');
+        matchesSecurity = isUnencryptedNetwork(ap.security) || ap.security.includes('WEP');
       } else if (securityFilter === 'WPA2') {
         matchesSecurity = ap.security.includes('WPA2');
       } else if (securityFilter === 'WPA3') {
@@ -571,12 +575,12 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                     {/* Security & Cipher */}
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-1.5">
-                        {ap.security.includes('Open') ? (
+                        {isUnencryptedNetwork(ap.security) ? (
                           <Unlock className="w-3 h-3 text-amber-500" />
                         ) : (
                           <Lock className="w-3 h-3 text-blue-400" />
                         )}
-                        <span className="font-medium text-slate-200">{ap.security}</span>
+                        <span className="font-medium text-slate-200">{securityLabel(ap.security)}</span>
                       </div>
                       <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
                         <span>Cipher: {ap.cipher}</span>
