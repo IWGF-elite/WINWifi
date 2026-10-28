@@ -105,12 +105,6 @@ namespace WinWiFi.ViewModels
         private ObservableCollection<EvidenceItem> _evidenceItems = new();
 
         [ObservableProperty]
-        private ObservableCollection<OfflineLabScenario> _labScenarios = new();
-
-        [ObservableProperty]
-        private OfflineLabScenario? _selectedLabScenario;
-
-        [ObservableProperty]
         private string _newIncidentNoteText = string.Empty;
 
         // UI State
@@ -350,13 +344,7 @@ namespace WinWiFi.ViewModels
             }
             pSw.Stop();
             Projects = new ObservableCollection<AuditProject>(projs);
-            CurrentProject = Projects.FirstOrDefault() ?? new AuditProject
-            {
-                Id = $"proj-{Guid.NewGuid():N}",
-                Name = "Default Wireless Audit Workspace",
-                Location = "HQ Campus",
-                AuditorName = "Senior SecOps Engineer"
-            };
+            CurrentProject = Projects.FirstOrDefault();
             SelectedProject = CurrentProject;
             AddLog("INFO", "STARTUP", $"SQLite repository verified ({projs.Count} project(s) in {pSw.ElapsedMilliseconds}ms).");
 
@@ -413,20 +401,6 @@ namespace WinWiFi.ViewModels
             {
                 AddLog("WARN", "ADAPTER_MGR", $"No physical Wi-Fi interface detected or running without elevation ({aSw.ElapsedMilliseconds}ms). PCAP & Netsh analysis ready.");
             }
-
-            // 4. Initialize Offline Lab Scenarios
-            InitializationProgress = 90;
-            InitializationStatus = "Configuring lab scenarios & metrics...";
-            LabScenarios = new ObservableCollection<OfflineLabScenario>
-            {
-                new() { Id = "LAB-01", Title = "Modern Enterprise Baseline (WPA3-SAE / PMF)", Category = "Compliant", Difficulty = "Beginner", Description = "Enterprise deployment adhering to NIST SP 800-153 with mandatory PMF.", LearningObjective = "Verify SAE and MFPR bit flags.", ApCount = 2, TargetThreat = "None" },
-                new() { Id = "LAB-02", Title = "Evil Twin Rogue AP Downgrade", Category = "Attack Scenario", Difficulty = "Intermediate", Description = "Attacker broadcasts corporate SSID with Open / WEP encryption to harvest credentials.", LearningObjective = "Identify security profile divergence.", ApCount = 2, TargetThreat = "Rogue AP / Clone" },
-                new() { Id = "LAB-03", Title = "Legacy WEP Warehouse Network", Category = "Vulnerability", Difficulty = "Beginner", Description = "Deprecated WEP-128 static shared key in logistics warehouse.", LearningObjective = "Detect unencrypted IVs and NIST §4.2 failure.", ApCount = 1, TargetThreat = "Insecure Encryption" },
-                new() { Id = "LAB-04", Title = "WPS External Registrar PIN Flaw", Category = "Vulnerability", Difficulty = "Intermediate", Description = "Access Point with active WPS registrar susceptible to Pixie Dust offline brute force.", LearningObjective = "Decode Tag 221 sub-element 0x1044.", ApCount = 1, TargetThreat = "WPS Active" },
-                new() { Id = "LAB-05", Title = "Missing PMF & Deauth Vulnerability", Category = "Vulnerability", Difficulty = "Intermediate", Description = "High-density AP without 802.11w support vulnerable to Layer-2 deauth injection.", LearningObjective = "Verify RSN Capabilities Bit 6 & 7.", ApCount = 1, TargetThreat = "PMF Disabled" },
-                new() { Id = "LAB-06", Title = "EAPOL 4-Way Handshake Capture", Category = "Forensics", Difficulty = "Advanced", Description = "Complete Message 1-4 exchange for offline Hashcat Mode 22000 verification.", LearningObjective = "Inspect ANonce, SNonce, and MIC validation.", ApCount = 1, TargetThreat = "Key Exchange" }
-            };
-            SelectedLabScenario = LabScenarios.FirstOrDefault();
 
             RecalculateMetrics();
 

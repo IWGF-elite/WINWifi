@@ -131,16 +131,4 @@ namespace WinWiFi.Models
         public string Sha256Checksum { get; set; } = string.Empty;
         public string PayloadSummary { get; set; } = string.Empty;
     }
-
-    public class OfflineLabScenario
-    {
-        public string Id { get; set; } = string.Empty; // "LAB-01"
-        public string Title { get; set; } = string.Empty;
-        public string Category { get; set; } = "Enterprise Baseline";
-        public string Difficulty { get; set; } = "Beginner";
-        public string Description { get; set; } = string.Empty;
-        public string LearningObjective { get; set; } = string.Empty;
-        public int ApCount { get; set; } = 2;
-        public string TargetThreat { get; set; } = "None";
-    }
 }
