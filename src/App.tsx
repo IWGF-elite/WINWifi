@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   AccessPoint, 
   ClientDevice,
@@ -134,8 +134,6 @@ import {
   Cpu, 
   Sliders,
   Sparkles,
-  ToggleLeft,
-  ToggleRight,
   Radio,
   BellRing
 } from 'lucide-react';
@@ -382,10 +380,6 @@ export default function App() {
   // Subscribe to Native Windows Bridge events (SSE & Polling)
   useEffect(() => {
     threatEngine.setIncidents(incidents);
-    const projectId = db.getCurrentProjectId();
-    const stored = db.getIncidents(projectId);
-    const containsLegacyCases = !stored || stored.some(incident => incident.id.startsWith('NATIVE-AP-'));
-    if (containsLegacyCases) db.saveIncidents(incidents, projectId);
   // Keep the incident engine aligned with the user's persisted incident records.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

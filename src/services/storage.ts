@@ -113,7 +113,22 @@ export class SqliteDatabaseService {
   }
 
   public saveIncidents(incidents: IncidentRecord[], projectId: string = this.getCurrentProjectId()): void {
-    this.writeScoped('incidents', projectId, incidents);
+    const key = this.scopedKey('incidents', projectId);
+    let preservedLegacy: IncidentRecord[] = [];
+    try {
+      const existing = localStorage.getItem(key);
+      const records = existing ? JSON.parse(existing) as IncidentRecord[] : [];
+      if (Array.isArray(records)) preservedLegacy = records.filter(incident => incident?.id?.startsWith('NATIVE-AP-'));
+    } catch {
+      // Keep the incoming save usable when a legacy payload is malformed.
+    }
+    const incomingIds = new Set(incidents.map(incident => incident.id));
+    // Old auto-generated per-AP cases are hidden from the current incident
+    // view, but preserve them in storage until the operator approves cleanup.
+    this.writeScoped('incidents', projectId, [
+      ...incidents,
+      ...preservedLegacy.filter(incident => !incomingIds.has(incident.id))
+    ]);
   }
 
   public getEvidenceItems(projectId: string = this.getCurrentProjectId()): EvidenceItem[] {

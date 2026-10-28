@@ -613,6 +613,32 @@ runTest('T14: Policy Selection and Evidence Persistence', () => {
   }
 });
 
+runTest('T14A: Preserve legacy native AP cases until operator approval', () => {
+  const values = new Map<string, string>();
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear()
+    }
+  });
+  try {
+    const db = SqliteDatabaseService.getInstance();
+    const legacyCase = { id: 'NATIVE-AP-legacy-record', title: 'Legacy case' } as any;
+    db.saveIncidents([legacyCase], 'proj-legacy-preserve');
+    db.saveIncidents([], 'proj-legacy-preserve');
+    if (!db.getIncidents('proj-legacy-preserve')?.some(incident => incident.id === legacyCase.id)) {
+      throw new Error('An existing legacy case was deleted by an ordinary incident save.');
+    }
+  } finally {
+    if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
+    else delete (globalThis as any).localStorage;
+  }
+});
+
 runTest('T15: Findings vs Incidents Split, Deduplication & Stable IDs', () => {
   const finding = {
     id: 'THR-EVIL_TWIN-001122334455',
