@@ -45,6 +45,9 @@ interface NetworkDetailPanelProps {
   maintenanceApprovals?: MaintenanceApprovalRecord[];
   onRequestMaintenance?: (ap: AccessPoint, requester: string, justification: string, durationMinutes: number) => Promise<void>;
   onApproveMaintenance?: (id: string, approver: string) => Promise<void>;
+  canRequestMaintenance?: boolean;
+  canApproveMaintenance?: boolean;
+  canConnect?: boolean;
 }
 
 export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
@@ -59,6 +62,9 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   maintenanceApprovals,
   onRequestMaintenance,
   onApproveMaintenance,
+  canRequestMaintenance = true,
+  canApproveMaintenance = true,
+  canConnect = true,
 }) => {
   const [copiedHashcat, setCopiedHashcat] = useState(false);
   const [copiedBssid, setCopiedBssid] = useState(false);
@@ -92,7 +98,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
     record.status === 'Pending' && Date.parse(record.expiresAt) > Date.now()) ?? null;
 
   const handleRequestApproval = async () => {
-    if (!onRequestMaintenance) return;
+    if (!onRequestMaintenance || !canRequestMaintenance) return;
     setMaintenanceBusy(true);
     setMaintenanceError('');
     setMaintenanceMessage('');
@@ -108,7 +114,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   };
 
   const handleInlineApprove = async () => {
-    if (!onApproveMaintenance || !pendingApproval) return;
+    if (!onApproveMaintenance || !pendingApproval || !canApproveMaintenance) return;
     setMaintenanceBusy(true);
     setMaintenanceError('');
     setMaintenanceMessage('');
@@ -142,7 +148,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
   const handleConnect = async () => {
     if (!onConnect) return;
-    if (!activeApproval) {
+    if (!activeApproval || !canConnect) {
       setConnectionMessage('Connection blocked: an active maintenance approval is required for this BSSID.');
       return;
     }
@@ -293,7 +299,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => void handleInlineApprove()}
-                  disabled={inlineApprover.trim().length < 2 || maintenanceBusy || !onApproveMaintenance}
+                  disabled={inlineApprover.trim().length < 2 || maintenanceBusy || !onApproveMaintenance || !canApproveMaintenance}
                   className="rounded bg-emerald-600 px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {maintenanceBusy ? 'Recording…' : 'Approve for this BSSID'}
@@ -342,11 +348,12 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
               <button
                 type="button"
                 onClick={() => void handleRequestApproval()}
-                disabled={maintenanceBusy || !onRequestMaintenance}
+                disabled={maintenanceBusy || !onRequestMaintenance || !canRequestMaintenance}
                 className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 font-semibold text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {maintenanceBusy ? 'Recording…' : 'Request approval'}
               </button>
+              {!canRequestMaintenance && <p className="text-[10px] text-amber-300">The current local role cannot request maintenance approvals. Switch roles in Settings.</p>}
             </div>
           )}
 
@@ -362,8 +369,9 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
             <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-100">Connect on Windows</h3><p className="mt-1 text-[11px] text-slate-400">Uses the Windows WLAN profile store. WinWiFi does not retain the password.</p></div><Radio className="h-4 w-4 text-blue-400" /></div>
             <div className="mt-3 flex overflow-hidden rounded border border-slate-700 bg-slate-950 focus-within:border-blue-500"><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} placeholder="Password, or leave empty for an existing Windows profile" className="min-w-0 flex-1 bg-transparent px-2.5 py-2 text-slate-100 outline-none" /><button type="button" onClick={() => setShowPassword(value => !value)} className="border-l border-slate-700 px-2.5 text-slate-300 hover:bg-slate-800" title={showPassword ? 'Hide password' : 'Show password'} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
             <label className="mt-2 flex items-start gap-2 text-[11px] text-slate-300"><input type="checkbox" checked={authorizationConfirmed} onChange={event => setAuthorizationConfirmed(event.target.checked)} className="mt-0.5" />I own or am authorized to connect to {ap.ssid} ({ap.bssid}) in this audit scope.</label>
-            <button onClick={handleConnect} disabled={!authorizationConfirmed || !activeApproval} className="mt-3 rounded bg-blue-600 px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Connect</button>
+            <button onClick={handleConnect} disabled={!authorizationConfirmed || !activeApproval || !canConnect} className="mt-3 rounded bg-blue-600 px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Connect</button>
             {!activeApproval && <p className="mt-2 text-[11px] text-amber-300">An active maintenance approval for {ap.bssid} is required before Connect is enabled.</p>}
+            {!canConnect && <p className="mt-2 text-[11px] text-amber-300">The current local role cannot start a connection. Switch roles in Settings.</p>}
             {connectionMessage && <p className="mt-2 text-[11px] text-slate-300" role="status">{connectionMessage}</p>}
           </section>
         )}

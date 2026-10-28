@@ -37,6 +37,13 @@ files without any native backend.
 - Two-person, time-boxed maintenance approval (15–480 minutes) scoped to one
   BSSID; a connect action stays disabled until a different analyst approves the
   request, every attempt is logged, and approvals are revocable
+- Local operator roles (Viewer, Auditor, Administrator) that gate destructive
+  and active actions; this is a desktop-local guardrail, not authentication
+- A project-scoped SHA-256 hash-chained audit trail for project, asset, site,
+  maintenance, and connection events, with integrity verification, JSON
+  export, and explicit chain rotation. The chain detects edits, reordering,
+  and gaps inside itself; because it is stored locally, truncation of the
+  newest records requires an externally stored head hash to detect
 - Connect to networks directly from the app (using a password you provide)
 
 ## Defensive scope
