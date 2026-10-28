@@ -35,10 +35,13 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [selectedBssid, setSelectedBssid] = useState<string>('all');
+  const isLiveMode = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
+  const isPcap = dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED';
+  const hasObservationSource = isLiveMode || isPcap;
 
   // Flatten all clients from all APs
   const allClients: (ClientDevice & { apSsid: string; apChannel: number; apSecurity: string })[] = [];
-  (accessPoints || []).forEach(ap => {
+  (hasObservationSource ? accessPoints : []).forEach(ap => {
     (ap.clients || []).forEach(cl => {
       allClients.push({
         ...cl,
@@ -53,7 +56,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
   // point they were seen on; an unproven association still belongs in the table,
   // it just has no access point row to join against.
   const merged = new Map<string, ClientDevice & { apSsid: string; apChannel: number; apSecurity: string }>();
-  (stationClients || []).forEach(cl => {
+  (hasObservationSource ? stationClients : []).forEach(cl => {
     const key = `${cl.macAddress}|${cl.apBssid}`;
     if (allClients.some(row => `${row.macAddress}|${row.apBssid}` === key)) return;
     const ap = (accessPoints || []).find(candidate => candidate.bssid?.toLowerCase() === cl.apBssid?.toLowerCase());
@@ -91,10 +94,6 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
     return <Laptop className="w-4 h-4 text-purple-400" />;
   };
 
-  const isLiveMode = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
-  const isPcap = dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED';
-  const isTrainingDataset = !isLiveMode && !isPcap && allClients.length > 0;
-
   return (
     <div className="space-y-5 pb-8">
       {isLiveMode && <LanDeviceInventory adapterId={selectedAdapterId} />}
@@ -105,15 +104,10 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
             <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="space-y-1">
               <div className="font-bold text-amber-300 text-sm flex items-center gap-2">
-                <span>Windows WLAN Architecture Notice: Client Station Observation Restricted</span>
-                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono">
-                  NOT EXPOSED BY WINDOWS NDIS
-                </span>
+                <span>Client stations are not available from this scan</span>
               </div>
               <p className="text-slate-300 leading-relaxed text-xs">
-                The Windows Native WiFi API (<code className="text-amber-200 font-mono">wlanapi.dll</code>) intentionally restricts user mode to Infrastructure Access Point (BSSID) metadata. 
-                In compliance with strict platform integrity guidelines, <strong className="text-white">WinWiFi does not fabricate synthetic clients in live production mode</strong>. 
-                Observing active station MACs and probe requests on Windows requires a promiscuous capture driver (<strong className="text-amber-300">Npcap with raw 802.11 support</strong>) or importing an offline capture file.
+                Windows WLAN scanning does not expose connected station MAC addresses. Import an authorized 802.11 capture to inspect client frames.
               </p>
               <div className="pt-2 flex flex-wrap gap-2">
                 {onOpenImport && (
@@ -139,28 +133,18 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
             VERIFIED FORENSIC DATA
           </span>
         </div>
-      ) : isTrainingDataset ? (
-        <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 text-xs text-purple-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-purple-400" />
-            <span className="font-semibold">Training dataset — these client records are synthetic lab fixtures, not live or captured observations.</span>
-          </div>
-          <span className="px-2 py-0.5 rounded bg-purple-500/20 font-mono text-[10px] font-bold">
-            SYNTHETIC / NOT LIVE
-          </span>
-        </div>
       ) : null}
 
       {/* Header with KPI cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm">
           <div className="text-xs text-slate-400 font-medium flex items-center justify-between">
-            <span>{isTrainingDataset ? 'Training Fixtures' : 'Observed Stations'}</span>
+            <span>Observed Stations</span>
             <Laptop className="w-4 h-4 text-blue-400" />
           </div>
           <div className="text-2xl font-bold text-slate-100 mt-1">{allClients.length}</div>
           <div className="text-[11px] text-slate-500 mt-1">
-            {isTrainingDataset ? 'Synthetic lab records — not live observations' : 'Actively transmitting clients'}
+            {hasObservationSource ? 'From current scan or imported capture' : 'No current scan or capture data'}
           </div>
         </div>
 

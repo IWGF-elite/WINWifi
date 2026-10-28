@@ -8,7 +8,6 @@ import {
   Cpu, 
   Activity, 
   ArrowUpRight, 
-  Clock, 
   Layers, 
   CheckCircle2, 
   Sparkles,
@@ -160,7 +159,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
               </div>
               <p className="text-sm text-slate-400 mt-0.5">
                 {!hasNetworkData
-                  ? 'No network observations are loaded. Connect the Windows bridge, import a capture, or open the training sample to begin an assessment.'
+                  ? 'No network observations are loaded. Start a Windows WLAN scan or import a capture.'
                   : uiMode === 'beginner'
                   ? 'Overall security score based on encryption safety, rogue threats, and router settings.' 
                   : 'NIST SP 800-153 compliance posture across enumerated 802.11 physical transmitters and BSSIDs.'}

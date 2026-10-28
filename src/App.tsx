@@ -591,7 +591,7 @@ export default function App() {
   // Immediate Hardware Scan Refresh
   const handleRefreshScan = async () => {
     if (bridgeClient.getState() !== 'CONNECTED') {
-      setBridgeNotice('Refresh requires the WinWiFi Windows bridge. Connect it or load sample data to explore the dashboard.');
+      setBridgeNotice('Refresh requires the local Windows bridge. Start the desktop app or import a capture file.');
       setShowBridgeModal(true);
       return;
     }
@@ -850,13 +850,13 @@ export default function App() {
     setLogs((prev) => [log, ...prev]);
   };
 
-  // Capture Handshake: Strictly gated to Training Labs only. Never fakes handshakes in production mode.
+  // Handshake records are populated from imported capture bytes only.
   const handleCaptureHandshake = useCallback((ap: AccessPoint) => {
     if (dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'REAL_PCAP') {
       const log = db.appendLog({
         level: 'WARN',
         source: 'HANDSHAKE_VALIDATOR',
-        message: `Live cryptographic handshake capture for "${ap.ssid}" (${ap.bssid}) blocked: WinWiFi strictly prohibits synthesizing fake 4-way handshakes in production mode. Promiscuous 802.11 monitor capture driver (Npcap or equivalent) required.`,
+        message: `Live handshake capture is unavailable for "${ap.ssid}" (${ap.bssid}). Import an authorized 802.11 capture to inspect EAPOL frames.`,
       });
       setLogs((prev) => [log, ...prev]);
       setShowArchitectureModal(true);
@@ -866,7 +866,7 @@ export default function App() {
     const log = db.appendLog({
       level: 'WARN',
       source: 'HANDSHAKE_VALIDATOR',
-      message: `Handshake capture is unavailable without an imported monitor-mode capture. No synthetic handshake was created for "${ap.ssid}".`,
+      message: `No imported handshake capture is available for "${ap.ssid}" (${ap.bssid}).`,
     });
     setLogs((prev) => [log, ...prev]);
   }, [dataSourceProfile, db]);
@@ -1964,6 +1964,7 @@ export default function App() {
         <ReportingModal
           accessPoints={accessPoints}
           project={currentProject}
+          dataSourceProfile={dataSourceProfile}
           onClose={() => setShowReportModal(false)}
           isDarkMode={isDarkMode}
         />

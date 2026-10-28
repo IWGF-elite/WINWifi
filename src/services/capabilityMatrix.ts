@@ -1,4 +1,4 @@
-import { HardwareCapability, CapabilityStatus, DataSourceProfile, BridgeConnectionState } from '../types';
+import { HardwareCapability, DataSourceProfile, BridgeConnectionState } from '../types';
 
 export class CapabilityMatrixService {
   private static instance: CapabilityMatrixService;
@@ -89,7 +89,7 @@ export class CapabilityMatrixService {
         status: isPcapActive ? 'Supported' : 'Driver Required',
         technicalDetails: 'Intercepting WPA2/WPA3 4-way authentication exchanges (M1-M4) and PMKID tags requires promiscuous capture of raw IEEE 802.11 EAPOL control frames.',
         windowsRestriction: 'Windows handles WPA key exchanges inside the NDIS kernel 802.1X supplicant and does not expose raw EAPOL packets to unprivileged user space.',
-        prerequisite: 'Driver Required: Npcap raw 802.11 driver, Linux airodump-ng capture, or any standard PCAP import. (Synthetic handshakes are restricted exclusively to Training Mode).',
+        prerequisite: 'A compatible 802.11 capture driver or an imported PCAP/PCAPNG file is required.',
         dataOriginMapping: isPcapActive ? 'IMPORTED' : 'EXTERNAL_TOOL',
       },
       {
@@ -127,9 +127,9 @@ export class CapabilityMatrixService {
         name: 'EAPOL / PMKID Forensic Metadata (Hashcat 22000 export)',
         category: 'Cryptographic & Forensics',
         status: 'Not Verified',
-        technicalDetails: 'Native bridge imports retain EAPOL message steps, replay counter, and key-descriptor version only. WinWiFi does not emit a verified Hashcat 22000 hash line from native captures. Training-lab fixtures may display placeholder hash strings; those are synthetic and must not be treated as export evidence.',
+        technicalDetails: 'Native bridge imports retain EAPOL message steps, replay counter, and key-descriptor version only. Hash export is unavailable unless the required values are present in the imported capture.',
         windowsRestriction: 'No verified hashline generator is connected to the native capture parser.',
-        prerequisite: 'Not available for native imports. Treat any displayed hash line as training data.',
+        prerequisite: 'Required nonce and MIC fields must be present in imported capture data.',
         dataOriginMapping: 'IMPORTED',
       },
       {

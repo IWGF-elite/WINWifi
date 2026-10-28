@@ -745,8 +745,8 @@ runTest('T16: Capability Matrix Honesty', () => {
     .find(cap => cap.id === 'CAP_HASHCAT_EXPORT');
   if (!hashcat) throw new Error('Hashcat capability is missing from the matrix');
   if (hashcat.status === 'Supported') throw new Error('Hashcat export must not be reported as supported');
-  if (!/does not emit/i.test(hashcat.technicalDetails)) {
-    throw new Error('Hashcat capability details do not disclose missing export support');
+  if (!/unavailable unless/i.test(hashcat.technicalDetails)) {
+    throw new Error('Hash export requirements are not stated accurately');
   }
 });
 
@@ -765,8 +765,8 @@ runTest('T17: Runtime Label & Version Consistency', () => {
   }
 
   const clients = read('src/components/ClientObserver.tsx');
-  if (!clients.includes('SYNTHETIC / NOT LIVE') || !clients.includes('isTrainingDataset')) {
-    throw new Error('Client screen no longer labels training clients as synthetic');
+  if (clients.includes('isTrainingDataset') || clients.includes('SYNTHETIC / NOT LIVE')) {
+    throw new Error('Client screen exposes training records in the live view');
   }
 
   const dashboard = read('src/components/CommandCenterDashboard.tsx');

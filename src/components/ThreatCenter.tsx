@@ -1,17 +1,11 @@
 import React, { useState } from 'react';
 import { 
   Flame, 
-  ShieldAlert, 
-  AlertTriangle, 
   CheckCircle2, 
-  RefreshCw, 
   Check, 
   X, 
   ArrowRight, 
   Clock, 
-  SlidersHorizontal,
-  ChevronDown,
-  ChevronUp,
   FileText
 } from 'lucide-react';
 import { AccessPoint, AnalystClassification, IncidentRecord, SecurityChange, UIMode, ActiveTab } from '../types';
@@ -114,11 +108,14 @@ export const ThreatCenter: React.FC<ThreatCenterProps> = ({
         <div className="space-y-4">
           {rogueAPs.length === 0 ? (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-10 text-center text-slate-400">
-              <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-3 opacity-80" />
-              <h3 className="text-sm font-semibold text-slate-200">No Rogue APs or Evil Twins Detected</h3>
+              <CheckCircle2 className="w-10 h-10 text-slate-500 mx-auto mb-3 opacity-80" />
+              <h3 className="text-sm font-semibold text-slate-200">{accessPoints.length ? 'No suspicious access points in current observations' : 'No wireless observations to analyze'}</h3>
               <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
-                All discovered wireless transmitters match authorized baselines or display unique, non-colliding broadcast SSIDs.
+                {accessPoints.length
+                  ? `Checked ${accessPoints.length} observed access point${accessPoints.length === 1 ? '' : 's'}. This result does not confirm authorization or safety.`
+                  : 'Start a scan or import a capture to analyze observed access points.'}
               </p>
+              {!accessPoints.length && <button onClick={() => onNavigate('networks')} className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">Open Networks</button>}
             </div>
           ) : (
             rogueAPs.map(ap => (

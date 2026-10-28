@@ -1,14 +1,12 @@
 import { downloadBlob } from '../services/download';
 import React, { useState } from 'react';
-import { AccessPoint, AuditProject } from '../types';
+import { AccessPoint, AuditProject, DataSourceProfile } from '../types';
 import { 
   FileText, 
   Printer, 
   Download, 
   X, 
-  ShieldCheck, 
   AlertTriangle, 
-  CheckCircle2,
   Calendar,
   User,
   MapPin
@@ -17,6 +15,7 @@ import {
 interface ReportingModalProps {
   accessPoints: AccessPoint[];
   project: AuditProject;
+  dataSourceProfile: DataSourceProfile;
   onClose: () => void;
   isDarkMode: boolean;
 }
@@ -24,6 +23,7 @@ interface ReportingModalProps {
 export const ReportingModal: React.FC<ReportingModalProps> = ({
   accessPoints = [],
   project,
+  dataSourceProfile,
   onClose,
   isDarkMode,
 }) => {
@@ -33,7 +33,13 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
   const vulnerableAps = accessPoints.filter((a) => a.securityScore < 70);
   const rogueAps = accessPoints.filter((a) => a.isRogueCandidate);
   const handshakes = accessPoints.filter((a) => !!a.handshake);
-  const avgScore = Math.round(accessPoints.reduce((acc, a) => acc + a.securityScore, 0) / (totalAps || 1));
+  const avgScore = totalAps ? Math.round(accessPoints.reduce((acc, a) => acc + a.securityScore, 0) / totalAps) : null;
+  const lastObserved = accessPoints.map(ap => Date.parse(ap.lastSeen)).filter(Number.isFinite).sort((a, b) => b - a)[0];
+  const observationTime = lastObserved ? new Date(lastObserved).toLocaleString() : 'Unavailable';
+  const sourceLabel = dataSourceProfile === 'LIVE_WINDOWS' ? 'Live Windows WLAN scan' : dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED' ? 'Imported capture (not live)' : dataSourceProfile === 'REAL_NETSH' ? 'Imported Windows snapshot (not live)' : 'Saved scan (not live)';
+  const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+  const remediationActions = accessPoints.flatMap(ap => (ap.issues || []).map(issue => ({ ssid: ap.ssid, bssid: ap.bssid, title: issue.title, recommendation: issue.recommendation })))
+    .filter((item, index, all) => all.findIndex(candidate => candidate.title === item.title && candidate.recommendation === item.recommendation) === index);
 
   const handlePrint = () => {
     window.print();
@@ -45,7 +51,7 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Wi-Fi Security Audit Report - ${project.name}</title>
+  <title>Wi-Fi Security Audit Report - ${escapeHtml(project.name)}</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #1e293b; line-height: 1.6; }
     h1 { color: #0f172a; border-bottom: 2px solid #3b82f6; padding-bottom: 8px; }
@@ -64,15 +70,17 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
 <body>
   <h1>Wireless Local Area Network (WLAN) Security Audit Report</h1>
   <div class="meta-box">
-    <strong>Project:</strong> ${project.name}<br>
-    <strong>Target Location:</strong> ${project.location}<br>
-    <strong>Auditor:</strong> ${project.auditorName}<br>
+    <strong>Project:</strong> ${escapeHtml(project.name)}<br>
+    <strong>Target Location:</strong> ${escapeHtml(project.location)}<br>
+    <strong>Auditor:</strong> ${escapeHtml(project.auditorName)}<br>
     <strong>Assessment Standard:</strong> NIST Special Publication 800-153<br>
-    <strong>Date of Execution:</strong> ${new Date().toLocaleDateString()}
+    <strong>Observation source:</strong> ${sourceLabel}<br>
+    <strong>Last observed:</strong> ${escapeHtml(observationTime)}<br>
+    <strong>Report generated:</strong> ${new Date().toLocaleString()}
   </div>
 
   <h2>1. Executive Summary & Security Posture</h2>
-  <p>An authorized wireless security evaluation was performed across the radio frequency spectrum (2.4 GHz, 5 GHz, 6 GHz). Overall Wireless Security Index scored <strong>${avgScore}/100</strong>.</p>
+  <p>This report summarizes the available observations. ${totalAps ? `Average security score: <strong>${avgScore}/100</strong>.` : 'No access point observations are available; no security score was calculated.'}</p>
   
   <div class="stat-grid">
     <div class="stat-card"><strong>${totalAps}</strong>Discovered APs</div>
@@ -91,10 +99,10 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
     <tbody>
       ${accessPoints.map(a => `
         <tr>
-          <td><strong>${a.ssid}</strong></td>
-          <td><code>${a.bssid}</code></td>
-          <td>${a.band} (CH ${a.channel})</td>
-          <td>${a.security}</td>
+          <td><strong>${escapeHtml(a.ssid)}</strong></td>
+          <td><code>${escapeHtml(a.bssid)}</code></td>
+          <td>${escapeHtml(a.band)} (CH ${escapeHtml(a.channel)})</td>
+          <td>${escapeHtml(a.security)}</td>
           <td>${a.wpsEnabled ? 'Enabled (At Risk)' : 'Disabled'}</td>
           <td>${a.pmfRequired ? 'Enforced' : 'Disabled'}</td>
           <td>${a.securityScore}/100</td>
@@ -103,13 +111,8 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
     </tbody>
   </table>
 
-  <h2>3. High-Priority Remediation Actions</h2>
-  <ul>
-    <li><strong>Rogue AP Decommissioning:</strong> Immediately locate and physically isolate unauthorized SSIDs spoofing legitimate enterprise identifiers.</li>
-    <li><strong>Deprecate Legacy WEP/TKIP:</strong> Terminate any remaining 802.11b/g or TKIP networks to prevent keystream recovery.</li>
-    <li><strong>Disable WPS Globally:</strong> Enforce router policy to disable Wi-Fi Protected Setup PIN registration on all administrative APs.</li>
-    <li><strong>Enforce 802.11w PMF:</strong> Upgrade SSIDs to require Protected Management Frames to defend against deauthentication attacks.</li>
-  </ul>
+  <h2>3. Remediation Actions</h2>
+  ${remediationActions.length ? `<ul>${remediationActions.map(item => `<li><strong>${escapeHtml(item.title)}</strong> — ${escapeHtml(item.recommendation)} <small>(${escapeHtml(item.ssid)}, ${escapeHtml(item.bssid)})</small></li>`).join('')}</ul>` : '<p>No remediation actions were generated from the available observations.</p>'}
 </body>
 </html>`;
 
@@ -184,7 +187,7 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
               <Calendar className="w-4 h-4 text-emerald-400" />
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-semibold">Assessment Timestamp</span>
-                <div className="font-semibold text-slate-200">{new Date().toLocaleString()}</div>
+              <div className="font-semibold text-slate-200">{sourceLabel} · {observationTime}</div>
               </div>
             </div>
           </div>
@@ -195,7 +198,7 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
               isDarkMode ? 'bg-[#14161d] border-[#252934]' : 'bg-slate-50 border-slate-200'
             }`}>
               <div className="text-[10px] text-slate-400 uppercase font-semibold">Overall Health Index</div>
-              <div className="text-2xl font-bold text-blue-400 mt-1">{avgScore}/100</div>
+              <div className="text-2xl font-bold text-blue-400 mt-1">{avgScore === null ? '—' : `${avgScore}/100`}</div>
               <div className="text-[10px] text-slate-500 mt-0.5">Fleet-wide Average</div>
             </div>
 
@@ -253,6 +256,7 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
                   </div>
                 </div>
               ))}
+              {accessPoints.every(ap => !ap.issues?.length) && <p className="rounded-lg border border-slate-700 p-3 text-slate-400">No findings are recorded for the available observations.</p>}
             </div>
           </div>
         </div>

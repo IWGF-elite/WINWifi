@@ -1,17 +1,4 @@
-import React from 'react';
-import { 
-  ShieldAlert, 
-  Cpu, 
-  Layers, 
-  CheckCircle2, 
-  XCircle, 
-  AlertTriangle, 
-  X, 
-  Server, 
-  HardDrive, 
-  Terminal,
-  ExternalLink
-} from 'lucide-react';
+import { Cpu, CheckCircle2, XCircle, AlertTriangle, X, Server } from 'lucide-react';
 import { BridgeHealthStatus } from '../types';
 
 interface ArchitectureModalProps {
@@ -174,7 +161,7 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({
                     <span className="text-[10px] text-amber-400 uppercase font-mono">Metadata only</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    The native importer records EAPOL message steps, replay counter, and key-descriptor version. It does not expose nonce/MIC material or generate Hashcat 22000 hash lines; training-lab fixtures are synthetic and labeled as such.
+                    Imported captures provide EAPOL frame metadata. Nonce, MIC, and export fields are shown only when present in parsed capture data.
                   </p>
                 </div>
               </div>

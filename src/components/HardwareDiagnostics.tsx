@@ -7,17 +7,13 @@ import {
   ShieldCheck, 
   Radio, 
   Server, 
-  Layers, 
   Terminal, 
   HelpCircle,
-  Sparkles,
-  ExternalLink,
   Filter,
   Check,
   Copy,
   Info,
-  Download,
-  FileCode
+  Download
 } from 'lucide-react';
 import { 
   WifiAdapter, 
@@ -25,8 +21,7 @@ import {
   DataSourceProfile, 
   BridgeConnectionState, 
   BridgeHealthStatus,
-  CapabilityStatus,
-  HardwareCapability 
+  CapabilityStatus
 } from '../types';
 import { CapabilityMatrixService } from '../services/capabilityMatrix';
 import { isWebView2Host } from '../services/wifiEngine';
@@ -389,8 +384,7 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
         </div>
         <p className="text-slate-300 leading-relaxed text-[11px]">
           WinWiFi is architected exclusively for defensive wireless auditing, configuration compliance, and forensic packet inspection. 
-          Misleading synthetic telemetry has been purged from production mode:
-          client devices are strictly extracted from real frame decodes, and cryptographic handshakes require real forensic packet evidence or explicit offline training lab selection. 
+          Client station details require imported frames. Handshake details require parsed capture evidence.
           Offensive capabilities (packet injection, deauthentication jamming, evil twin rogue generation) are prohibited by design.
         </p>
       </div>

@@ -91,7 +91,7 @@ export const AlertsCenter: React.FC<AlertsCenterProps> = ({
           </div>
         </div>
         <p className="mt-3 text-[11px] text-slate-500">
-          Alerts are computed and stored locally in this project. Nothing is sent to an external service. Synthetic training and benchmark profiles never generate alerts.
+          Alerts are computed from current observations and enrolled assets. Nothing is sent to an external service.
         </p>
       </div>
 

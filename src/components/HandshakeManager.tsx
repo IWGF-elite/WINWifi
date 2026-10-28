@@ -8,12 +8,8 @@ import {
   ShieldCheck, 
   AlertCircle, 
   Terminal, 
-  FileText,
   Clock,
-  Sparkles,
-  ExternalLink,
-  Info,
-  Layers
+  Info
 } from 'lucide-react';
 
 interface HandshakeManagerProps {
@@ -48,6 +44,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
   };
 
   const isLive = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
+  const observedHandshakes = handshakes.filter(h => h.origin !== 'TRAINING' && !h.isSimulated);
 
   return (
     <div className="space-y-5 pb-8">
@@ -68,7 +65,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
 
           <div className="flex items-center gap-2">
             <span className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono font-bold">
-              Captured Records: {handshakes.length}
+              Captured Records: {observedHandshakes.length}
             </span>
             {onOpenImport && (
               <button
@@ -87,15 +84,12 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
       <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-xs text-slate-300 flex items-start gap-3">
         <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
         <div className="space-y-1 text-[11px] leading-relaxed">
-          <strong className="text-slate-200">Defensive Forensics &amp; Provenance Policy:</strong> In accordance with strict platform integrity, 
-          WinWiFi never fabricates synthetic 4-way handshakes in live production mode. 
-          Capturing live EAPOL nonces on Windows requires a promiscuous 802.11 monitor capture pipeline (e.g. Npcap or an equivalent capture driver) and importing the resulting .pcap file.
-          Simulated vectors are restricted strictly to offline Training Labs.
+          Windows WLAN scans do not provide EAPOL frames. Handshake details are shown only when present in an imported capture.
         </div>
       </div>
 
       {/* Handshakes List */}
-      {handshakes.length === 0 ? (
+      {observedHandshakes.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-10 text-center space-y-3">
           <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
           <div className="text-sm font-semibold text-slate-200">No Cryptographic Handshakes In Session</div>
@@ -107,7 +101,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
               </>
             ) : (
               <>
-                No verified EAPOL 4-Way or PMKID frames have been imported yet. Import an 802.11 packet capture (.pcap / .pcapng) or load the Training Lab scenario.
+                No EAPOL 4-way or PMKID frames are available. Import an 802.11 capture file (.pcap or .pcapng).
               </>
             )}
           </p>
@@ -134,8 +128,8 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
         </div>
       ) : (
         <div className="space-y-3">
-          {handshakes.map((h, idx) => {
-            const isForensic = h.origin === 'IMPORTED' || (!h.isSimulated && h.origin !== 'TRAINING');
+          {observedHandshakes.map((h, idx) => {
+            const isForensic = h.origin === 'IMPORTED';
             return (
               <div
                 key={`${h.apBssid}-${idx}`}
@@ -156,11 +150,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
                           <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
                             IMPORTED FORENSIC DATA
                           </span>
-                        ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-bold border border-purple-500/30">
-                            TRAINING MODE LAB
-                          </span>
-                        )}
+                        ) : null}
                       </div>
                       <div className="text-[11px] text-slate-400 font-mono flex flex-wrap items-center gap-2 mt-0.5">
                         <span>AP: {h.apBssid}</span>
@@ -221,7 +211,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
                   <div>
                     <div className="flex items-center justify-between text-slate-400 text-[11px] mb-1">
                       <span className="font-semibold text-slate-300">
-                        {isForensic ? 'Browser-parsed' : 'Synthetic training'} Mode 22000 hashline (not verified by native bridge):
+                        Imported capture hash line (not validated):
                       </span>
                       <button
                         onClick={() => handleCopy(h.hashcatFormat!, idx)}

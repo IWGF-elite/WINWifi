@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AccessPoint, HandshakeInfo, SecurityIssue, DataSourceProfile, MaintenanceApprovalRecord } from '../types';
+import { AccessPoint, DataSourceProfile, MaintenanceApprovalRecord } from '../types';
 import { 
   ShieldAlert, 
   ShieldCheck, 
@@ -7,18 +7,12 @@ import {
   Key, 
   Radio, 
   Users, 
-  Cpu, 
-  Terminal, 
   Copy, 
   Check, 
-  Download, 
   Sparkles, 
-  Info,
   X,
   ChevronDown,
   ChevronUp,
-  HelpCircle,
-  Settings,
   Eye,
   EyeOff,
   KeyRound,
@@ -518,7 +512,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
               EAPOL 4-Way Handshake &amp; PMKID Status
             </h3>
 
-            {!ap.handshake ? (
+            {!ap.handshake || ap.handshake.origin !== 'IMPORTED' || ap.handshake.isSimulated ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] text-slate-400 italic">
                     Capture Driver / Monitor Mode Required
@@ -541,20 +535,14 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
                   )}
                 </div>
             ) : (
-              <span className={`px-2 py-0.5 rounded font-semibold text-[11px] flex items-center gap-1 border ${
-                ap.handshake.origin === 'IMPORTED' || (!ap.handshake.isSimulated && ap.handshake.origin !== 'TRAINING')
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                  : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-              }`}>
+              <span className="px-2 py-0.5 rounded font-semibold text-[11px] flex items-center gap-1 border bg-emerald-500/20 text-emerald-300 border-emerald-500/30">
                 <Check className="w-3 h-3" />
-                {ap.handshake.origin === 'IMPORTED' || (!ap.handshake.isSimulated && ap.handshake.origin !== 'TRAINING')
-                  ? 'Verified Forensic Handshake (PCAP)'
-                  : 'Training Lab Handshake (Simulated)'}
+                Imported Capture
               </span>
             )}
           </div>
 
-          {ap.handshake ? (
+          {ap.handshake && ap.handshake.origin === 'IMPORTED' && !ap.handshake.isSimulated ? (
             <div className={`p-3 rounded-xl border font-mono text-[11px] space-y-2.5 ${
               isDarkMode ? 'bg-[#14161d] border-[#262a36]' : 'bg-slate-50 border-slate-200'
             }`}>
@@ -601,7 +589,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
               {ap.handshake.hashcatFormat && (
                 <div className="pt-2 border-t border-slate-700/30">
                   <div className="flex items-center justify-between text-slate-400 text-[10px] mb-1">
-                    <span>Mode 22000 line (training / browser-parsed, not native-verified):</span>
+                    <span>Imported capture hash line (not validated):</span>
                     <button
                       onClick={handleCopyHashcat}
                       className="flex items-center gap-1 text-blue-400 hover:text-blue-300"
@@ -623,7 +611,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
               <Radio className="w-6 h-6 mx-auto mb-1.5 opacity-40 text-blue-400" />
               <p>No active EAPOL key exchange recorded for this AP during current session.</p>
               <p className="text-[11px] text-slate-500 mt-1">
-                The training lab can load a synthetic handshake fixture; it is not a captured or exportable credential record.
+                Handshake details appear here after an authorized capture is imported.
               </p>
             </div>
           )}
