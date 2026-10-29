@@ -116,7 +116,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const origin = getOriginBadge();
 
   return (
-    <header className={`select-none border-b transition-colors duration-200 ${
+    <header className={`relative z-30 isolate select-none border-b transition-colors duration-200 ${
       isDarkMode 
         ? 'bg-[#181a20] border-[#2c303b] text-slate-200' 
         : 'bg-[#f3f4f8] border-[#e2e4ea] text-slate-800'

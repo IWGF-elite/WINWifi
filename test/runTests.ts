@@ -7,6 +7,8 @@ import { CommandCenterDashboard } from '../src/components/CommandCenterDashboard
 import { WalkModePanel } from '../src/components/WalkModePanel';
 import { NetworkDiscovery } from '../src/components/NetworkDiscovery';
 import { ClientObserver } from '../src/components/ClientObserver';
+import { formatScanAge } from '../src/components/LanDeviceInventory';
+import { TitleBar } from '../src/components/TitleBar';
 import { PcapService } from '../src/services/pcapParser';
 import { WifiEngine, isWebView2Host } from '../src/services/wifiEngine';
 import { CapabilityMatrixService } from '../src/services/capabilityMatrix';
@@ -2107,6 +2109,36 @@ runTest('T35: Client View Does Not Report Zero When WLAN Scan Cannot See Station
   }
   if (!markup.includes('A standard Windows WLAN scan cannot report nearby client devices')) {
     throw new Error('The client view does not explain why a packet capture is needed');
+  }
+});
+
+runTest('T36: Device Scan Age Advances At Second Resolution', () => {
+  const scannedAt = '2026-10-29T12:00:00.000Z';
+  if (formatScanAge(scannedAt, Date.parse(scannedAt)) !== 'Updated 0s ago') {
+    throw new Error('A just-completed scan is not shown as current');
+  }
+  if (formatScanAge(scannedAt, Date.parse(scannedAt) + 5_000) !== 'Updated 5s ago') {
+    throw new Error('The device scan age does not advance at second resolution');
+  }
+  if (formatScanAge(undefined) !== 'No completed scan yet') {
+    throw new Error('The inventory invents a scan timestamp before a scan completes');
+  }
+});
+
+runTest('T37: Header Actions Stay Above Floating Page Content', () => {
+  const markup = renderToStaticMarkup(createElement(TitleBar, {
+    isDarkMode: true, onToggleDarkMode: () => undefined,
+    dataSourceProfile: 'LIVE_WINDOWS', hasFreshLiveData: true,
+    activeSourceLabel: 'Windows WLAN', isScanning: false,
+    onToggleScan: () => undefined, onRefreshScan: () => undefined,
+    bridgeState: 'CONNECTED', onOpenBridgeConfig: () => undefined,
+    projectName: 'Assessment', onOpenReport: () => undefined,
+    onOpenSelfTest: () => undefined, onOpenImport: () => undefined,
+    onOpenArchitecture: () => undefined, adapters: [], selectedAdapterId: '',
+    onSelectAdapter: () => undefined, onToggleFullscreen: () => undefined
+  }));
+  if (!markup.includes('relative z-30 isolate') || !markup.includes('>Import</span>') || !markup.includes('>Start Scan</span>')) {
+    throw new Error('The action bar does not keep the scan and import controls in the elevated header layer');
   }
 });
 
