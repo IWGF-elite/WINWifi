@@ -11,7 +11,9 @@ import {
   SecurityChange,
   LocalNetworkInfo,
   LocalNetworkActivity,
-  NetworkDoctorCheck
+  NetworkDoctorCheck,
+  NetworkTimelineBounds,
+  NetworkTimelineState
 } from '../types';
 import {
   BridgeErrorKind,
@@ -432,6 +434,14 @@ export class NativeBridgeClient {
       method: 'POST',
       body: JSON.stringify({ adapterId, replaceFingerprint })
     }, 12_000);
+  }
+
+  public async getNetworkTimelineBounds(): Promise<NetworkTimelineBounds> {
+    return await this.request<NetworkTimelineBounds>('/api/network-time-machine');
+  }
+
+  public async getNetworkTimelineState(at: string): Promise<NetworkTimelineState> {
+    return await this.request<NetworkTimelineState>(`/api/network-time-machine/state?at=${encodeURIComponent(at)}`, {}, 12_000);
   }
 
   public async getLocalNetworkActivity(): Promise<LocalNetworkActivity> {

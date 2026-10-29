@@ -97,6 +97,7 @@ import { BridgeConfigModal } from './components/BridgeConfigModal';
 import { LogConsole } from './components/LogConsole';
 import { NativeDesktopPanel } from './components/NativeDesktopPanel';
 import { NetworkDoctorPanel } from './components/NetworkDoctorPanel';
+import { NetworkTimeMachinePanel } from './components/NetworkTimeMachinePanel';
 import { StartupReadinessOverlay } from './components/StartupReadinessOverlay';
 import { BridgeErrorKind, bridgeStatusView, isEmbeddedDashboard } from './services/bridgeStatus';
 
@@ -138,7 +139,8 @@ import {
   Sliders,
   Sparkles,
   Radio,
-  BellRing
+  BellRing,
+  Clock3
 } from 'lucide-react';
 
 export default function App() {
@@ -1462,6 +1464,18 @@ export default function App() {
             <span>Network Doctor</span>
           </button>
 
+          <button
+            onClick={() => handleNavigate('time-machine')}
+            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'time-machine'
+                ? 'border-cyan-500 text-cyan-300 bg-cyan-500/5'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Clock3 className="w-3.5 h-3.5" />
+            <span>Network Time Machine</span>
+          </button>
+
           {/* TAB 3: Clients */}
           <button
             onClick={() => handleNavigate('clients')}
@@ -1692,6 +1706,8 @@ export default function App() {
             isDarkMode={isDarkMode}
           />
         )}
+
+        {activeTab === 'time-machine' && <NetworkTimeMachinePanel bridgeConnected={bridgeState === 'CONNECTED'} />}
 
         {/* TAB 2: Asset Inventory / Networks / Discovery */}
         {(activeTab === 'networks' || activeTab === 'discovery' || activeTab === 'discover') && (

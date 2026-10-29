@@ -120,6 +120,61 @@ export interface NetworkDoctorCheck {
   recommendation: string;
 }
 
+export interface NetworkTimelineBounds {
+  hasData: boolean;
+  earliestAt?: string | null;
+  latestAt?: string | null;
+  changeCount: number;
+  legacyObservationCount: number;
+  message: string;
+}
+
+export interface NetworkTimelineEntityState {
+  entityType: 'AP' | 'DEVICE';
+  entityKey: string;
+  bssid?: string;
+  ssid?: string;
+  channel?: number | null;
+  band?: string;
+  frequencyMhz?: number | null;
+  rssi?: number | null;
+  signalQuality?: number | null;
+  security?: string;
+  cipher?: string;
+  vendor?: string;
+  channelWidth?: number | null;
+  ipAddress?: string;
+  macAddress?: string;
+  hostname?: string;
+  deviceType?: string;
+  isOnline: boolean;
+  isPresent: boolean;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+}
+
+export interface NetworkTimelineEvent {
+  id: string;
+  projectId: string;
+  occurredAt: string;
+  entityType: 'AP' | 'DEVICE';
+  entityKey: string;
+  eventType: string;
+  summary: string;
+  beforeStateJson: string;
+  afterStateJson: string;
+}
+
+export interface NetworkTimelineState {
+  hasData: boolean;
+  asOf: string;
+  source: string;
+  message: string;
+  accessPoints: NetworkTimelineEntityState[];
+  devices: NetworkTimelineEntityState[];
+  changes: NetworkTimelineEvent[];
+}
+
 export interface LocalConnectionRecord {
   protocol: 'TCP' | 'UDP' | string;
   localAddress: string;
@@ -528,6 +583,7 @@ export interface AuditLog {
 export type ActiveTab = 
   | 'dashboard'
   | 'doctor'
+  | 'time-machine'
   | 'discover'
   | 'discovery'
   | 'networks'

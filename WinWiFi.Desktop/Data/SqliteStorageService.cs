@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -147,6 +148,31 @@ namespace WinWiFi.Data
 
                 CREATE INDEX IF NOT EXISTS idx_obs_bssid ON scan_observations(bssid);
                 CREATE INDEX IF NOT EXISTS idx_obs_project ON scan_observations(project_id);
+                CREATE INDEX IF NOT EXISTS idx_obs_project_time ON scan_observations(project_id, observed_at);
+
+                CREATE TABLE IF NOT EXISTS network_timeline_events (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    entity_key TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    before_state_json TEXT NOT NULL DEFAULT '{}',
+                    after_state_json TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE INDEX IF NOT EXISTS idx_network_timeline_project_time ON network_timeline_events(project_id, occurred_at);
+                CREATE INDEX IF NOT EXISTS idx_network_timeline_entity ON network_timeline_events(project_id, entity_type, entity_key, occurred_at);
+                CREATE TABLE IF NOT EXISTS network_timeline_presence (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    entity_key TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    ended_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_network_timeline_presence_scope ON network_timeline_presence(project_id, entity_type, entity_key, first_seen_at);
 
                 CREATE TABLE IF NOT EXISTS handshakes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -348,6 +374,188 @@ namespace WinWiFi.Data
             }
         }
 
+        private sealed record TimelineApState(string Bssid, string Ssid, int Channel, string Band, int FrequencyMhz,
+            int Rssi, uint SignalQuality, string Security, string Cipher, int ChannelWidth, string Vendor, string FirstSeenAt, string LastSeenAt)
+        {
+            public static TimelineApState From(AccessPoint ap, string now) => new(ap.Bssid, ap.Ssid ?? string.Empty, ap.Channel,
+                ap.Band ?? "Unknown", ap.FrequencyMHz, ap.Rssi, ap.SignalQuality, ap.Security ?? "Unknown", ap.Cipher ?? "Unknown", ap.ChannelWidth,
+                ap.Vendor ?? "Unknown", string.IsNullOrWhiteSpace(ap.FirstSeen) ? now : ap.FirstSeen,
+                string.IsNullOrWhiteSpace(ap.LastSeen) ? now : ap.LastSeen);
+
+            public Dictionary<string, object?> ToDictionary() => new()
+            {
+                ["bssid"] = Bssid, ["ssid"] = Ssid, ["channel"] = Channel, ["band"] = Band,
+                ["frequencyMhz"] = FrequencyMhz, ["rssi"] = Rssi, ["signalQuality"] = SignalQuality, ["security"] = Security, ["cipher"] = Cipher,
+                ["channelWidth"] = ChannelWidth, ["vendor"] = Vendor, ["firstSeenAt"] = FirstSeenAt,
+                ["lastSeenAt"] = LastSeenAt, ["isPresent"] = true
+            };
+
+            public List<string> ChangedFields(TimelineApState current)
+            {
+                var changed = new List<string>();
+                if (!string.Equals(Ssid, current.Ssid, StringComparison.Ordinal)) changed.Add("SSID");
+                if (Channel != current.Channel) changed.Add("channel");
+                if (!string.Equals(Band, current.Band, StringComparison.OrdinalIgnoreCase)) changed.Add("band");
+                if (FrequencyMhz != current.FrequencyMhz) changed.Add("frequency");
+                if (!string.Equals(Security, current.Security, StringComparison.OrdinalIgnoreCase)) changed.Add("security");
+                if (!string.Equals(Cipher, current.Cipher, StringComparison.OrdinalIgnoreCase)) changed.Add("cipher");
+                if (ChannelWidth != current.ChannelWidth) changed.Add("channel width");
+                if (!string.Equals(Vendor, current.Vendor, StringComparison.OrdinalIgnoreCase)) changed.Add("vendor");
+                return changed;
+            }
+        }
+
+        private sealed record TimelineDeviceState(string IpAddress, string MacAddress, string Hostname, string Vendor, string DeviceType,
+            bool IsOnline, string FirstSeenAt, string LastSeenAt)
+        {
+            public static TimelineDeviceState From(LanDeviceRecord device, string now, bool isOnline) => new(device.IpAddress,
+                device.MacAddress ?? string.Empty, device.Hostname ?? string.Empty, device.Vendor ?? string.Empty,
+                device.DeviceType ?? string.Empty, isOnline,
+                string.IsNullOrWhiteSpace(device.FirstSeen) ? now : device.FirstSeen,
+                string.IsNullOrWhiteSpace(device.LastSeen) ? now : device.LastSeen);
+
+            public Dictionary<string, object?> ToDictionary() => new()
+            {
+                ["entityType"] = "DEVICE", ["entityKey"] = IpAddress, ["ipAddress"] = IpAddress,
+                ["macAddress"] = MacAddress, ["hostname"] = Hostname, ["vendor"] = Vendor,
+                ["deviceType"] = DeviceType, ["isOnline"] = IsOnline, ["isPresent"] = true,
+                ["firstSeenAt"] = FirstSeenAt, ["lastSeenAt"] = LastSeenAt
+            };
+
+            public List<string> ChangedFields(TimelineDeviceState current)
+            {
+                var changed = new List<string>();
+                if (!string.Equals(MacAddress, current.MacAddress, StringComparison.OrdinalIgnoreCase)) changed.Add("MAC address");
+                if (!string.Equals(Hostname, current.Hostname, StringComparison.OrdinalIgnoreCase)) changed.Add("hostname");
+                if (!string.Equals(Vendor, current.Vendor, StringComparison.OrdinalIgnoreCase)) changed.Add("vendor");
+                if (!string.Equals(DeviceType, current.DeviceType, StringComparison.OrdinalIgnoreCase)) changed.Add("device type");
+                return changed;
+            }
+        }
+
+        private static async Task<TimelineApState?> ReadTimelineApStateAsync(SqliteConnection connection, SqliteTransaction transaction,
+            string projectId, string bssid, CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand(@"SELECT bssid, ssid, channel, band, frequency_mhz, rssi, signal_quality, security, cipher, channel_width, vendor, first_seen, last_seen
+                FROM access_points WHERE project_id=@pid AND bssid=@bssid LIMIT 1;", connection, transaction);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@bssid", bssid);
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)) return null;
+            return new TimelineApState(reader.GetString(0), reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                reader.GetInt32(2), reader.GetString(3), reader.GetInt32(4), reader.GetInt32(5), (uint)reader.GetInt32(6),
+                reader.GetString(7), reader.GetString(8), reader.GetInt32(9), reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+                reader.IsDBNull(11) ? string.Empty : reader.GetString(11), reader.GetString(12));
+        }
+
+        private static async Task<TimelineDeviceState?> ReadTimelineDeviceStateAsync(SqliteConnection connection, SqliteTransaction transaction,
+            string projectId, string networkId, string ipAddress, CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand(@"SELECT ip_address, mac_address, hostname, vendor, device_type, is_online, first_seen, last_seen
+                FROM lan_devices WHERE project_id=@pid AND network_id=@network AND ip_address=@ip LIMIT 1;", connection, transaction);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@network", networkId);
+            cmd.Parameters.AddWithValue("@ip", ipAddress);
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)) return null;
+            return new TimelineDeviceState(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                reader.GetString(4), reader.GetInt32(5) != 0, reader.GetString(6), reader.GetString(7));
+        }
+
+        private static async Task<bool> HasOpenTimelinePresenceAsync(SqliteConnection connection, SqliteTransaction transaction,
+            string projectId, string entityType, string entityKey, CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand("SELECT EXISTS(SELECT 1 FROM network_timeline_presence WHERE project_id=@pid AND entity_type=@type AND entity_key=@key AND ended_at IS NULL);", connection, transaction);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@type", entityType);
+            cmd.Parameters.AddWithValue("@key", entityKey);
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken)) != 0;
+        }
+
+        private static async Task<bool> HasTimelineEntityAsync(SqliteConnection connection, SqliteTransaction transaction,
+            string projectId, string entityType, string entityKey, CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand("SELECT EXISTS(SELECT 1 FROM network_timeline_events WHERE project_id=@pid AND entity_type=@type AND entity_key=@key);", connection, transaction);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@type", entityType);
+            cmd.Parameters.AddWithValue("@key", entityKey);
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken)) != 0;
+        }
+
+        private static async Task<bool> WasRecentlyMarkedAbsentAsync(SqliteConnection connection, SqliteTransaction transaction,
+            string projectId, string entityType, string entityKey, string? lastSeenAt, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(lastSeenAt)) return false;
+            using var cmd = new SqliteCommand(@"SELECT EXISTS(SELECT 1 FROM network_timeline_events
+                WHERE project_id=@pid AND entity_type=@type AND entity_key=@key
+                AND event_type IN ('AP_DISAPPEARED','DEVICE_NOT_OBSERVED') AND julianday(occurred_at) > julianday(@lastSeen));", connection, transaction);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@type", entityType);
+            cmd.Parameters.AddWithValue("@key", entityKey);
+            cmd.Parameters.AddWithValue("@lastSeen", lastSeenAt);
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken)) != 0;
+        }
+
+        private static async Task InsertNetworkTimelineEventAsync(SqliteConnection connection, SqliteTransaction transaction,
+            string projectId, string occurredAt, string entityType, string entityKey, string eventType, string summary,
+            object? beforeState, object? afterState, CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand(@"INSERT INTO network_timeline_events
+                (id, project_id, occurred_at, entity_type, entity_key, event_type, summary, before_state_json, after_state_json)
+                VALUES (@id,@pid,@at,@entityType,@entityKey,@eventType,@summary,@before,@after);", connection, transaction);
+            cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString("N"));
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@at", occurredAt);
+            cmd.Parameters.AddWithValue("@entityType", entityType);
+            cmd.Parameters.AddWithValue("@entityKey", entityKey);
+            cmd.Parameters.AddWithValue("@eventType", eventType);
+            cmd.Parameters.AddWithValue("@summary", summary);
+            cmd.Parameters.AddWithValue("@before", beforeState is null ? "{}" : JsonSerializer.Serialize(beforeState));
+            cmd.Parameters.AddWithValue("@after", afterState is null ? "{}" : JsonSerializer.Serialize(afterState));
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private static async Task RecordTimelinePresenceAsync(SqliteConnection connection, SqliteTransaction transaction,
+            string projectId, string entityType, string entityKey, string now, CancellationToken cancellationToken)
+        {
+            using var open = new SqliteCommand(@"SELECT id FROM network_timeline_presence
+                WHERE project_id=@pid AND entity_type=@type AND entity_key=@key AND ended_at IS NULL LIMIT 1;", connection, transaction);
+            open.Parameters.AddWithValue("@pid", projectId);
+            open.Parameters.AddWithValue("@type", entityType);
+            open.Parameters.AddWithValue("@key", entityKey);
+            string? id = (string?)await open.ExecuteScalarAsync(cancellationToken);
+            if (id is null)
+            {
+                using var insert = new SqliteCommand(@"INSERT INTO network_timeline_presence
+                    (id, project_id, entity_type, entity_key, first_seen_at, last_seen_at, ended_at)
+                    VALUES (@id,@pid,@type,@key,@at,@at,NULL);", connection, transaction);
+                insert.Parameters.AddWithValue("@id", Guid.NewGuid().ToString("N"));
+                insert.Parameters.AddWithValue("@pid", projectId);
+                insert.Parameters.AddWithValue("@type", entityType);
+                insert.Parameters.AddWithValue("@key", entityKey);
+                insert.Parameters.AddWithValue("@at", now);
+                await insert.ExecuteNonQueryAsync(cancellationToken);
+            }
+            else
+            {
+                using var update = new SqliteCommand("UPDATE network_timeline_presence SET last_seen_at=@at WHERE id=@id;", connection, transaction);
+                update.Parameters.AddWithValue("@at", now);
+                update.Parameters.AddWithValue("@id", id);
+                await update.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
+        private static async Task CloseTimelinePresenceAsync(SqliteConnection connection, SqliteTransaction transaction,
+            string projectId, string entityType, string entityKey, CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand(@"UPDATE network_timeline_presence SET ended_at=last_seen_at
+                WHERE project_id=@pid AND entity_type=@type AND entity_key=@key AND ended_at IS NULL;", connection, transaction);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@type", entityType);
+            cmd.Parameters.AddWithValue("@key", entityKey);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
         {
             if (_isDisposed) throw new ObjectDisposedException(nameof(SqliteStorageService));
@@ -516,6 +724,8 @@ namespace WinWiFi.Data
         {
             ValidateProjectId(projectId);
             if (accessPoints == null) return;
+            var observedAccessPoints = accessPoints.Where(ap => ap is not null && !string.IsNullOrWhiteSpace(ap.Bssid))
+                .GroupBy(ap => ap.Bssid, StringComparer.OrdinalIgnoreCase).Select(group => group.Last()).ToList();
 
             await _writeLock.WaitAsync(cancellationToken);
             try
@@ -557,8 +767,34 @@ namespace WinWiFi.Data
                         last_seen = excluded.last_seen,
                         observations_count = access_points.observations_count + 1;";
 
-                foreach (var ap in accessPoints)
+                string now = DateTimeOffset.UtcNow.ToString("O");
+                foreach (var ap in observedAccessPoints)
                 {
+                    var previous = await ReadTimelineApStateAsync(conn, trans, projectId, ap.Bssid, cancellationToken);
+                    var afterState = TimelineApState.From(ap, now);
+                    bool hadTimelineState = await HasTimelineEntityAsync(conn, trans, projectId, "AP", ap.Bssid, cancellationToken);
+                    if (!hadTimelineState)
+                    {
+                        string eventType = previous is null ? "AP_FIRST_SEEN" : "AP_BASELINE";
+                        string summary = previous is null ? $"Access point {ap.Ssid} was first observed." : $"Access point {ap.Ssid} history began with its currently observed configuration.";
+                        await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "AP", ap.Bssid, eventType, summary,
+                            previous?.ToDictionary(), afterState.ToDictionary(), cancellationToken);
+                    }
+                    else if (await WasRecentlyMarkedAbsentAsync(conn, trans, projectId, "AP", ap.Bssid, previous?.LastSeenAt, cancellationToken))
+                    {
+                        await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "AP", ap.Bssid, "AP_REAPPEARED",
+                            $"Access point {ap.Ssid} was observed again.", previous?.ToDictionary(), afterState.ToDictionary(), cancellationToken);
+                    }
+                    if (previous is not null)
+                    {
+                        var changedFields = previous.ChangedFields(afterState);
+                        if (changedFields.Count > 0)
+                        {
+                            await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "AP", ap.Bssid, "AP_CONFIGURATION_CHANGED",
+                                $"Access point configuration changed: {string.Join(", ", changedFields)}.",
+                                previous.ToDictionary(), afterState.ToDictionary(), cancellationToken);
+                        }
+                    }
                     using var cmd = new SqliteCommand(sql, conn, trans);
                     cmd.Parameters.AddWithValue("@bssid", ap.Bssid);
                     cmd.Parameters.AddWithValue("@project_id", projectId);
@@ -590,6 +826,31 @@ namespace WinWiFi.Data
                     cmd.Parameters.AddWithValue("@notes", ap.Notes ?? "");
 
                     await cmd.ExecuteNonQueryAsync(cancellationToken);
+                    await RecordTimelinePresenceAsync(conn, trans, projectId, "AP", ap.Bssid, now, cancellationToken);
+                }
+
+                var seenBssids = observedAccessPoints.Select(ap => ap.Bssid).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var persistedAps = new List<TimelineApState>();
+                using (var staleQuery = new SqliteCommand(@"SELECT bssid, ssid, channel, band, frequency_mhz, rssi, signal_quality, security, cipher, channel_width, vendor, first_seen, last_seen
+                    FROM access_points WHERE project_id=@pid AND julianday(last_seen) <= julianday('now','-12 seconds');", conn, trans))
+                {
+                    staleQuery.Parameters.AddWithValue("@pid", projectId);
+                    using var reader = await staleQuery.ExecuteReaderAsync(cancellationToken);
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        persistedAps.Add(new TimelineApState(reader.GetString(0), reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                            reader.GetInt32(2), reader.GetString(3), reader.GetInt32(4), reader.GetInt32(5), (uint)reader.GetInt32(6),
+                            reader.GetString(7), reader.GetString(8), reader.GetInt32(9), reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+                            reader.IsDBNull(11) ? string.Empty : reader.GetString(11), reader.GetString(12)));
+                    }
+                }
+                foreach (var stale in persistedAps.Where(ap => !seenBssids.Contains(ap.Bssid)))
+                {
+                    if (await WasRecentlyMarkedAbsentAsync(conn, trans, projectId, "AP", stale.Bssid, stale.LastSeenAt, cancellationToken)) continue;
+                    await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "AP", stale.Bssid, "AP_DISAPPEARED",
+                        $"Access point {stale.Ssid} was no longer observed in consecutive scans.", stale.ToDictionary(),
+                        new Dictionary<string, object?> { ["bssid"] = stale.Bssid, ["ssid"] = stale.Ssid, ["isPresent"] = false, ["lastSeenAt"] = stale.LastSeenAt }, cancellationToken);
+                    await CloseTimelinePresenceAsync(conn, trans, projectId, "AP", stale.Bssid, cancellationToken);
                 }
 
                 trans.Commit();
@@ -717,6 +978,255 @@ namespace WinWiFi.Data
             var result = await cmd.ExecuteScalarAsync(cancellationToken);
             return result != null && result != DBNull.Value ? Convert.ToInt32(result) : 0;
         }
+
+        public async Task<NetworkTimelineBounds> GetNetworkTimelineBoundsAsync(string projectId, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            using var conn = await OpenConnectionAsync(cancellationToken);
+            var bounds = new NetworkTimelineBounds
+            {
+                LegacyObservationCount = await GetTotalObservationsCountAsync(projectId, cancellationToken)
+            };
+            using (var changes = new SqliteCommand("SELECT COUNT(*), MIN(occurred_at), MAX(occurred_at) FROM network_timeline_events WHERE project_id=@pid;", conn))
+            {
+                changes.Parameters.AddWithValue("@pid", projectId);
+                using var reader = await changes.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    bounds.ChangeCount = reader.GetInt32(0);
+                    if (!reader.IsDBNull(1)) bounds.EarliestAt = reader.GetString(1);
+                    if (!reader.IsDBNull(2)) bounds.LatestAt = reader.GetString(2);
+                }
+            }
+            using (var observations = new SqliteCommand("SELECT MIN(observed_at), MAX(observed_at) FROM scan_observations WHERE project_id=@pid;", conn))
+            {
+                observations.Parameters.AddWithValue("@pid", projectId);
+                using var reader = await observations.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    string? earliest = reader.IsDBNull(0) ? null : reader.GetString(0);
+                    string? latest = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    bounds.EarliestAt = MinTimestamp(bounds.EarliestAt, earliest);
+                    bounds.LatestAt = MaxTimestamp(bounds.LatestAt, latest);
+                }
+            }
+            bounds.HasData = bounds.EarliestAt is not null && bounds.LatestAt is not null;
+            bounds.Message = bounds.HasData ? string.Empty : "No saved scan observations or network changes exist for this project yet.";
+            return bounds;
+        }
+
+        public async Task<NetworkTimelineState> GetNetworkTimeMachineStateAsync(string projectId, string at, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            if (!DateTimeOffset.TryParse(at, out var parsedAt)) throw new ArgumentException("A valid point in time is required.", nameof(at));
+            string asOf = parsedAt.ToUniversalTime().ToString("O");
+            string? snapshotAt = null;
+            var accessPoints = new Dictionary<string, NetworkTimelineEntityState>(StringComparer.OrdinalIgnoreCase);
+            var devices = new Dictionary<string, NetworkTimelineEntityState>(StringComparer.OrdinalIgnoreCase);
+            var state = new NetworkTimelineState { AsOf = asOf };
+            using var conn = await OpenConnectionAsync(cancellationToken);
+
+            using (var latest = new SqliteCommand("SELECT MAX(observed_at) FROM scan_observations WHERE project_id=@pid AND observed_at<=@at;", conn))
+            {
+                latest.Parameters.AddWithValue("@pid", projectId);
+                latest.Parameters.AddWithValue("@at", asOf);
+                var value = await latest.ExecuteScalarAsync(cancellationToken);
+                snapshotAt = value is null || value == DBNull.Value ? null : Convert.ToString(value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(snapshotAt))
+            {
+                using var snapshot = new SqliteCommand(@"SELECT bssid, ssid, channel, band, frequency_mhz, rssi, signal_quality, security, cipher, phy_type, channel_width, observed_at
+                    FROM scan_observations WHERE project_id=@pid AND observed_at=@at;", conn);
+                snapshot.Parameters.AddWithValue("@pid", projectId);
+                snapshot.Parameters.AddWithValue("@at", snapshotAt);
+                using var reader = await snapshot.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var ap = new NetworkTimelineEntityState
+                    {
+                        EntityType = "AP", EntityKey = reader.GetString(0), Bssid = reader.GetString(0),
+                        Ssid = reader.IsDBNull(1) ? string.Empty : reader.GetString(1), Channel = reader.GetInt32(2),
+                        Band = reader.IsDBNull(3) ? "Unknown" : reader.GetString(3), FrequencyMhz = reader.GetInt32(4),
+                        Rssi = reader.GetInt32(5), SignalQuality = (uint)reader.GetInt32(6),
+                        Security = reader.IsDBNull(7) ? "Unknown" : reader.GetString(7), Cipher = reader.IsDBNull(8) ? "Unknown" : reader.GetString(8),
+                        Vendor = string.Empty, ChannelWidth = reader.GetInt32(10),
+                        FirstSeenAt = snapshotAt!, LastSeenAt = reader.GetString(11), IsPresent = true
+                    };
+                    if (!string.IsNullOrWhiteSpace(ap.EntityKey)) accessPoints[ap.EntityKey] = ap;
+                }
+
+                using var firstLast = new SqliteCommand(@"SELECT bssid, MIN(observed_at), MAX(observed_at) FROM scan_observations
+                    WHERE project_id=@pid AND observed_at<=@at GROUP BY bssid;", conn);
+                firstLast.Parameters.AddWithValue("@pid", projectId);
+                firstLast.Parameters.AddWithValue("@at", snapshotAt);
+                using var history = await firstLast.ExecuteReaderAsync(cancellationToken);
+                while (await history.ReadAsync(cancellationToken))
+                {
+                    if (accessPoints.TryGetValue(history.GetString(0), out var ap))
+                    {
+                        ap.FirstSeenAt = history.IsDBNull(1) ? string.Empty : history.GetString(1);
+                        ap.LastSeenAt = history.IsDBNull(2) ? string.Empty : history.GetString(2);
+                    }
+                }
+            }
+
+            var changes = await ReadTimelineEventsAsync(conn, projectId, snapshotAt, asOf, cancellationToken);
+            foreach (var change in changes)
+            {
+                if (change.EntityType.Equals("AP", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (change.EventType == "AP_DISAPPEARED")
+                    {
+                        if (accessPoints.TryGetValue(change.EntityKey, out var ap)) ap.IsPresent = false;
+                        else if (TryReadTimelineEntity(change.AfterStateJson, change.EntityType, change.EntityKey, out var disappeared))
+                        {
+                            disappeared.IsPresent = false;
+                            accessPoints[change.EntityKey] = disappeared;
+                        }
+                    }
+                    else if (TryReadTimelineEntity(change.AfterStateJson, change.EntityType, change.EntityKey, out var changedAp))
+                    {
+                        if (accessPoints.TryGetValue(change.EntityKey, out var existing))
+                        {
+                            MergeTimelineEntity(existing, changedAp);
+                            existing.IsPresent = true;
+                        }
+                        else accessPoints[change.EntityKey] = changedAp;
+                    }
+                }
+                else if (change.EntityType.Equals("DEVICE", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (change.EventType == "DEVICE_NOT_OBSERVED")
+                    {
+                        if (devices.TryGetValue(change.EntityKey, out var device)) device.IsPresent = false;
+                    }
+                    else if (TryReadTimelineEntity(change.AfterStateJson, change.EntityType, change.EntityKey, out var changedDevice))
+                    {
+                        if (devices.TryGetValue(change.EntityKey, out var existing))
+                        {
+                            MergeTimelineEntity(existing, changedDevice);
+                            existing.IsPresent = true;
+                        }
+                        else devices[change.EntityKey] = changedDevice;
+                    }
+                }
+            }
+
+            await ApplyTimelinePresenceAsync(conn, projectId, asOf, accessPoints, devices, cancellationToken);
+            state.AccessPoints = accessPoints.Values.OrderBy(entity => entity.Ssid, StringComparer.OrdinalIgnoreCase).ThenBy(entity => entity.Bssid).ToList();
+            state.Devices = devices.Values.OrderBy(entity => entity.IpAddress, StringComparer.OrdinalIgnoreCase).ToList();
+            state.Changes = changes;
+            state.HasData = state.AccessPoints.Count > 0 || state.Devices.Count > 0 || changes.Count > 0;
+            state.Source = snapshotAt is null ? "Change records" : "Saved scan observations with later change records";
+            state.Message = state.HasData ? string.Empty : "No saved network data exists at or before this time.";
+            return state;
+        }
+
+        private static async Task<List<NetworkTimelineEvent>> ReadTimelineEventsAsync(SqliteConnection conn, string projectId,
+            string? after, string through, CancellationToken cancellationToken)
+        {
+            var events = new List<NetworkTimelineEvent>();
+            using (var cmd = new SqliteCommand(@"SELECT id, project_id, occurred_at, entity_type, entity_key, event_type, summary, before_state_json, after_state_json
+                FROM network_timeline_events WHERE project_id=@pid AND (@after IS NULL OR occurred_at>@after) AND occurred_at<=@through
+                ORDER BY occurred_at, id;", conn))
+            {
+                cmd.Parameters.AddWithValue("@pid", projectId);
+                cmd.Parameters.AddWithValue("@after", (object?)after ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@through", through);
+                using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    events.Add(new NetworkTimelineEvent
+                    {
+                        Id = reader.GetString(0), ProjectId = reader.GetString(1), OccurredAt = reader.GetString(2),
+                        EntityType = reader.GetString(3), EntityKey = reader.GetString(4), EventType = reader.GetString(5),
+                        Summary = reader.GetString(6), BeforeStateJson = reader.GetString(7), AfterStateJson = reader.GetString(8)
+                    });
+                }
+            }
+            using (var cmd = new SqliteCommand(@"SELECT id, project_id, timestamp, 'AP', bssid, change_type, title, before_state, after_state
+                FROM security_changes WHERE project_id=@pid AND (@after IS NULL OR timestamp>@after) AND timestamp<=@through
+                ORDER BY timestamp, id;", conn))
+            {
+                cmd.Parameters.AddWithValue("@pid", projectId);
+                cmd.Parameters.AddWithValue("@after", (object?)after ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@through", through);
+                using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    events.Add(new NetworkTimelineEvent
+                    {
+                        Id = reader.GetString(0), ProjectId = reader.GetString(1), OccurredAt = reader.GetString(2),
+                        EntityType = reader.GetString(3), EntityKey = reader.GetString(4), EventType = reader.GetString(5),
+                        Summary = reader.GetString(6), BeforeStateJson = reader.IsDBNull(7) ? "{}" : reader.GetString(7),
+                        AfterStateJson = reader.IsDBNull(8) ? "{}" : reader.GetString(8)
+                    });
+                }
+            }
+            return events.OrderBy(e => e.OccurredAt, StringComparer.Ordinal).ThenBy(e => e.Id, StringComparer.Ordinal).ToList();
+        }
+
+        private static bool TryReadTimelineEntity(string json, string entityType, string entityKey, out NetworkTimelineEntityState entity)
+        {
+            try
+            {
+                entity = JsonSerializer.Deserialize<NetworkTimelineEntityState>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+                entity.EntityType = entityType;
+                entity.EntityKey = entityKey;
+                if (entityType == "AP" && string.IsNullOrWhiteSpace(entity.Bssid)) entity.Bssid = entityKey;
+                if (entityType == "DEVICE" && string.IsNullOrWhiteSpace(entity.IpAddress)) entity.IpAddress = entityKey.Split('|').LastOrDefault() ?? entityKey;
+                return true;
+            }
+            catch { entity = new(); return false; }
+        }
+
+        private static void MergeTimelineEntity(NetworkTimelineEntityState target, NetworkTimelineEntityState source)
+        {
+            if (!string.IsNullOrWhiteSpace(source.Ssid)) target.Ssid = source.Ssid;
+            if (source.Channel.HasValue) target.Channel = source.Channel;
+            if (!string.IsNullOrWhiteSpace(source.Band)) target.Band = source.Band;
+            if (source.FrequencyMhz.HasValue) target.FrequencyMhz = source.FrequencyMhz;
+            if (source.Rssi.HasValue) target.Rssi = source.Rssi;
+            if (source.SignalQuality.HasValue) target.SignalQuality = source.SignalQuality;
+            if (!string.IsNullOrWhiteSpace(source.Security)) target.Security = source.Security;
+            if (!string.IsNullOrWhiteSpace(source.Cipher)) target.Cipher = source.Cipher;
+            if (!string.IsNullOrWhiteSpace(source.Vendor)) target.Vendor = source.Vendor;
+            if (source.ChannelWidth.HasValue) target.ChannelWidth = source.ChannelWidth;
+            if (!string.IsNullOrWhiteSpace(source.IpAddress)) target.IpAddress = source.IpAddress;
+            if (!string.IsNullOrWhiteSpace(source.MacAddress)) target.MacAddress = source.MacAddress;
+            if (!string.IsNullOrWhiteSpace(source.Hostname)) target.Hostname = source.Hostname;
+            if (!string.IsNullOrWhiteSpace(source.DeviceType)) target.DeviceType = source.DeviceType;
+            if (!string.IsNullOrWhiteSpace(source.FirstSeenAt)) target.FirstSeenAt = source.FirstSeenAt;
+            if (!string.IsNullOrWhiteSpace(source.LastSeenAt)) target.LastSeenAt = source.LastSeenAt;
+            target.IsOnline = source.IsOnline;
+        }
+
+        private static async Task ApplyTimelinePresenceAsync(SqliteConnection conn, string projectId, string at,
+            Dictionary<string, NetworkTimelineEntityState> accessPoints, Dictionary<string, NetworkTimelineEntityState> devices,
+            CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand(@"SELECT entity_type, entity_key, first_seen_at, last_seen_at FROM network_timeline_presence
+                WHERE project_id=@pid AND first_seen_at<=@at AND (ended_at IS NULL OR ended_at>@at);", conn);
+            cmd.Parameters.AddWithValue("@pid", projectId);
+            cmd.Parameters.AddWithValue("@at", at);
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                string type = reader.GetString(0), key = reader.GetString(1);
+                var map = type == "AP" ? accessPoints : devices;
+                if (!map.TryGetValue(key, out var entity)) continue;
+                entity.IsPresent = true;
+                entity.FirstSeenAt = reader.GetString(2);
+                string lastSeen = reader.GetString(3);
+                entity.LastSeenAt = string.CompareOrdinal(lastSeen, at) > 0 ? at : lastSeen;
+            }
+        }
+
+        private static string? MinTimestamp(string? left, string? right) => left is null ? right : right is null ? left
+            : string.CompareOrdinal(left, right) <= 0 ? left : right;
+        private static string? MaxTimestamp(string? left, string? right) => left is null ? right : right is null ? left
+            : string.CompareOrdinal(left, right) >= 0 ? left : right;
 
         public async Task<List<AccessPoint>> GetAccessPointsAsync(string projectId, CancellationToken cancellationToken = default)
         {
@@ -878,6 +1388,9 @@ namespace WinWiFi.Data
         public async Task SaveLanDevicesAsync(string projectId, string networkId, IEnumerable<LanDeviceRecord> devices, CancellationToken cancellationToken = default)
         {
             ValidateProjectId(projectId);
+            if (devices is null) return;
+            var observedDevices = devices.Where(device => device is not null && !string.IsNullOrWhiteSpace(device.IpAddress))
+                .GroupBy(device => device.IpAddress, StringComparer.OrdinalIgnoreCase).Select(group => group.Last()).ToList();
             await _writeLock.WaitAsync(cancellationToken);
             try
             {
@@ -894,9 +1407,51 @@ namespace WinWiFi.Data
                     ping_ttl=excluded.ping_ttl, os_guess=excluded.os_guess,
                     first_seen=CASE WHEN lan_devices.first_seen='' THEN excluded.first_seen ELSE lan_devices.first_seen END,
                     last_seen=CASE WHEN excluded.is_online=1 THEN excluded.last_seen ELSE lan_devices.last_seen END;";
-                foreach (var device in devices)
+                string now = DateTimeOffset.UtcNow.ToString("O");
+                foreach (var device in observedDevices)
                 {
-                    if (string.IsNullOrWhiteSpace(device.IpAddress)) continue;
+                    var previous = await ReadTimelineDeviceStateAsync(conn, trans, projectId, networkId, device.IpAddress, cancellationToken);
+                    bool notObserved = device.Evidence.Any(evidence => evidence.Contains("Not observed in the latest scan", StringComparison.OrdinalIgnoreCase));
+                    var afterState = TimelineDeviceState.From(device, now, !notObserved);
+                    bool hadTimelineState = await HasTimelineEntityAsync(conn, trans, projectId, "DEVICE", networkId + "|" + device.IpAddress, cancellationToken);
+                    if (!notObserved)
+                    {
+                        if (!hadTimelineState)
+                        {
+                            string eventType = previous is null ? "DEVICE_FIRST_SEEN" : "DEVICE_BASELINE";
+                            string summary = previous is null ? $"Device {device.IpAddress} was first observed on this network." : $"Device {device.IpAddress} history began from a live network scan.";
+                            await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "DEVICE", networkId + "|" + device.IpAddress,
+                                eventType, summary, previous?.ToDictionary(), afterState.ToDictionary(), cancellationToken);
+                        }
+                        else if (await WasRecentlyMarkedAbsentAsync(conn, trans, projectId, "DEVICE", networkId + "|" + device.IpAddress,
+                            previous?.LastSeenAt, cancellationToken))
+                        {
+                            await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "DEVICE", networkId + "|" + device.IpAddress,
+                                "DEVICE_REAPPEARED", $"Device {device.IpAddress} was observed again.", previous?.ToDictionary(), afterState.ToDictionary(), cancellationToken);
+                        }
+                        if (previous is not null && previous.IsOnline != device.IsOnline)
+                        {
+                            await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "DEVICE", networkId + "|" + device.IpAddress,
+                                device.IsOnline ? "DEVICE_ONLINE" : "DEVICE_OFFLINE", $"Device {device.IpAddress} changed online state.",
+                                previous.ToDictionary(), afterState.ToDictionary(), cancellationToken);
+                        }
+                        if (previous is not null)
+                        {
+                            var changedFields = previous.ChangedFields(afterState);
+                            if (changedFields.Count > 0)
+                                await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "DEVICE", networkId + "|" + device.IpAddress,
+                                    "DEVICE_DETAILS_CHANGED", $"Device details changed: {string.Join(", ", changedFields)}.", previous.ToDictionary(), afterState.ToDictionary(), cancellationToken);
+                        }
+                        await RecordTimelinePresenceAsync(conn, trans, projectId, "DEVICE", networkId + "|" + device.IpAddress, now, cancellationToken);
+                    }
+                    else if (await HasOpenTimelinePresenceAsync(conn, trans, projectId, "DEVICE", networkId + "|" + device.IpAddress, cancellationToken))
+                    {
+                        if (!await WasRecentlyMarkedAbsentAsync(conn, trans, projectId, "DEVICE", networkId + "|" + device.IpAddress, previous?.LastSeenAt, cancellationToken))
+                            await InsertNetworkTimelineEventAsync(conn, trans, projectId, now, "DEVICE", networkId + "|" + device.IpAddress,
+                                "DEVICE_NOT_OBSERVED", $"Device {device.IpAddress} was not observed in the latest local network scan.",
+                                previous?.ToDictionary(), new Dictionary<string, object?> { ["ipAddress"] = device.IpAddress, ["isPresent"] = false }, cancellationToken);
+                        await CloseTimelinePresenceAsync(conn, trans, projectId, "DEVICE", networkId + "|" + device.IpAddress, cancellationToken);
+                    }
                     using var cmd = new SqliteCommand(sql, conn, trans);
                     cmd.Parameters.AddWithValue("@pid", projectId);
                     cmd.Parameters.AddWithValue("@network", networkId);

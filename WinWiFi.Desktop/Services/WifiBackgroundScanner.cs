@@ -126,7 +126,6 @@ public sealed class WifiBackgroundScanner : BackgroundService
                     if (_storageService is not null && !string.IsNullOrWhiteSpace(_activeProjectId))
                     {
                         await _storageService.SaveAccessPointsAsync(_activeProjectId!, networks);
-                        await _storageService.SaveScanObservationsBatchAsync(_activeProjectId!, _activeAdapterId, _scanCycle, networks);
                     }
                     var dominantChannel = networks.GroupBy(network => network.Channel).OrderByDescending(group => group.Count()).FirstOrDefault()?.Key ?? 0;
                     if (dominantChannel > 0) ChannelHopped?.Invoke(dominantChannel);

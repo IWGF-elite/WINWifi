@@ -523,6 +523,14 @@ namespace WinWiFi.Services
                         await HandleObservationsAsync(request, response);
                         break;
 
+                    case "/api/network-time-machine":
+                        await HandleNetworkTimeMachineBoundsAsync(request, response);
+                        break;
+
+                    case "/api/network-time-machine/state":
+                        await HandleNetworkTimeMachineStateAsync(request, response);
+                        break;
+
                     case "/api/projects":
                         await HandleProjectsAsync(request, response);
                         break;
@@ -995,6 +1003,41 @@ namespace WinWiFi.Services
             await WriteJsonAsync(response, new { projectId, totalObservationsCount = total, records = observations });
         }
 
+        private async Task HandleNetworkTimeMachineBoundsAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (_storage is null)
+            {
+                await WriteJsonAsync(response, new NetworkTimelineBounds { Message = "Local timeline storage is unavailable in this runtime." });
+                return;
+            }
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "Select a project to view its network history.");
+                return;
+            }
+            await WriteJsonAsync(response, await _storage.GetNetworkTimelineBoundsAsync(projectId, _cts?.Token ?? CancellationToken.None));
+        }
+
+        private async Task HandleNetworkTimeMachineStateAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (_storage is null)
+            {
+                await WriteJsonAsync(response, new NetworkTimelineState { Message = "Local timeline storage is unavailable in this runtime." });
+                return;
+            }
+            string? projectId = ResolveProjectId(request);
+            string? at = request.QueryString["at"];
+            if (projectId is null || !DateTimeOffset.TryParse(at, out _))
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_timeline_request", "A project and valid time are required.");
+                return;
+            }
+            await WriteJsonAsync(response, await _storage.GetNetworkTimeMachineStateAsync(projectId, at!, _cts?.Token ?? CancellationToken.None));
+        }
+
         private async Task HandleProjectAccessPointsAsync(HttpListenerRequest request, HttpListenerResponse response)
         {
             string? projectId = ResolveProjectId(request);
@@ -1352,7 +1395,6 @@ namespace WinWiFi.Services
                 {
                     await _storage.EnsureProjectAsync(projectId, _activeProjectName);
                     await _storage.SaveAccessPointsAsync(projectId, aps);
-                    await _storage.SaveScanObservationsBatchAsync(projectId, _activeAdapterId ?? "default", _scanCycleCount, aps);
                 }
                 catch (Exception dbEx)
                 {
