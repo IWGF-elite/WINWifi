@@ -34,10 +34,12 @@ public partial class App : Application
         services.AddSingleton<SqliteStorageService>();
         services.AddSingleton<INativeWifiService, NativeWifiService>();
         services.AddSingleton<WifiBackgroundScanner>();
+        services.AddSingleton<AppUpdateService>();
         services.AddSingleton<MainWindow>();
 
         ServiceProvider = services.BuildServiceProvider();
         await StartBridgeAsync();
+        ServiceProvider.GetRequiredService<AppUpdateService>().Start();
 
         // Application_Startup is async because bridge initialization is async.
         // With WPF's default OnLastWindowClose policy, an await here can leave
@@ -79,10 +81,17 @@ public partial class App : Application
         var reports = ServiceProvider.GetRequiredService<ReportGenerator>();
         var storage = ServiceProvider.GetRequiredService<SqliteStorageService>();
         var scanner = ServiceProvider.GetRequiredService<WifiBackgroundScanner>();
+        var appUpdateService = ServiceProvider.GetRequiredService<AppUpdateService>();
 
         foreach (int candidate in CandidatePorts())
         {
-            var server = new HttpBridgeServer(candidate, wifi, analyzer, pcap, reports, storage, scanner);
+            var server = new HttpBridgeServer(candidate, wifi, analyzer, pcap, reports, storage, scanner,
+                appUpdateService: appUpdateService,
+                shutdownAfterUpdate: () =>
+                {
+                    var app = Application.Current;
+                    if (app is not null) _ = app.Dispatcher.BeginInvoke(new Action(app.Shutdown));
+                });
             try
             {
                 await server.StartAsync();

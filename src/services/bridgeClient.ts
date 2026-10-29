@@ -27,6 +27,16 @@ import {
 
 export type BridgeEventCallback<T> = (data: T) => void;
 
+export interface AppUpdateSnapshot {
+  state: string;
+  currentVersion: string;
+  latestVersion: string | null;
+  progressPercent: number;
+  isUpdateReady: boolean;
+  error: string | null;
+  lastCheckedAt: string | null;
+}
+
 /** Rejection reasons are logged as text so a polled failure stays one readable line. */
 const messageOf = (reason: unknown): string => {
   if (reason instanceof Error) return reason.message;
@@ -422,6 +432,18 @@ export class NativeBridgeClient {
    */
   public async checkHealth(): Promise<BridgeHealthStatus> {
     return await this.request<BridgeHealthStatus>('/api/status');
+  }
+
+  public async getAppUpdateStatus(): Promise<AppUpdateSnapshot> {
+    return await this.request<AppUpdateSnapshot>('/api/updates/status');
+  }
+
+  public async applyAppUpdate(): Promise<{ started: boolean }> {
+    return await this.request('/api/updates/apply', { method: 'POST', body: '{}' });
+  }
+
+  public async deferAppUpdate(): Promise<{ deferred: boolean }> {
+    return await this.request('/api/updates/defer', { method: 'POST', body: '{}' });
   }
 
   /**

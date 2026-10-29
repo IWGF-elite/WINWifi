@@ -99,6 +99,23 @@ Live scans work without an active Wi-Fi connection. Raw monitor-mode/EAPOL
 capture is optional and requires Npcap plus an adapter and driver that support
 802.11 monitor mode. The app reports that capability honestly when unavailable.
 
+### Automatic updates
+
+The installed Windows app checks the latest published GitHub Release at startup
+and every 12 hours. It downloads the release installer in the background and
+verifies its SHA-256 checksum before offering **Restart now** or **Later**.
+Choosing **Later** applies the staged update automatically on the next launch.
+Updates run the same installer in place, may show the normal Windows elevation
+prompt for Program Files, and keep the local database and settings under
+`%LOCALAPPDATA%\WinWiFi`.
+
+Every release must be published from a version tag on `main`. Before tagging,
+bump `<Version>` in `WinWiFi.Desktop/WinWiFi.Desktop.csproj` and `AppVersion` in
+`installer/WinWiFi.iss` to the same version, for example `3.0.4`, then push the
+tag `v3.0.4`. The GitHub Actions release workflow builds the self-contained
+Windows installer, generates its SHA-256 file, and attaches both to the GitHub
+Release. Pushing to `main` without a version tag does not publish an update.
+
 ### Troubleshooting another PC
 
 - **The dashboard is blank or does not open:** run

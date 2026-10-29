@@ -135,7 +135,7 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
 
   return <div className="mx-auto w-full max-w-[1280px] space-y-4 text-slate-100">
     <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <div><h1 className="text-lg font-bold">Walk Mode &amp; Rogue Hunter</h1><p className="mt-1 text-xs text-slate-400">Track one access point’s live signal and save readings at locations you name.</p></div>
+      <div><h1 className="text-lg font-bold">Signal Survey</h1><p className="mt-1 text-xs text-slate-400">Track an access point’s live signal and save readings at named locations.</p></div>
       <div className="flex flex-wrap gap-2"><button onClick={() => void reload()} disabled={!bridgeConnected || busy} className="whitespace-nowrap rounded-lg border border-slate-700 px-3 py-2 text-xs hover:bg-slate-800 disabled:opacity-50">Refresh locations</button><button onClick={() => void toggleBeep()} disabled={!selectedAp || !bridgeConnected} className={`whitespace-nowrap rounded-lg border px-3 py-2 text-xs font-semibold ${beepEnabled ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200' : 'border-slate-700 hover:bg-slate-800'}`}>{beepEnabled ? 'Signal beep on' : 'Enable signal beep'}</button></div>
     </header>
     {!bridgeConnected && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">Connect the Windows bridge to use live signal readings.</p>}

@@ -102,7 +102,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
     ...(unknownNetworks > 0 ? [{
       id: 'att-scope-review',
       title: `${unknownNetworks} Observed Networks Await Scope Review`,
-      desc: 'Confirm ownership and authorization in Projects & Scope before using scoped audit actions.',
+      desc: 'Confirm ownership and authorization in Projects & Authorization before using scoped audit actions.',
       severity: 'MEDIUM',
       tab: 'projects' as ActiveTab,
       targetFilter: 'pending'
@@ -341,7 +341,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
         ) : attentionItems.length === 0 ? (
           <div className="text-center py-8 text-slate-400 text-sm">
             <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2 opacity-80" />
-            No command-center items are active. Review per-network risk factors and pending scope decisions in Networks and Projects &amp; Scope.
+            No command-center items are active. Review per-network risk factors and pending scope decisions in Network Inventory and Projects &amp; Authorization.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

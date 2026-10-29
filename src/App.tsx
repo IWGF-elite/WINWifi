@@ -27,7 +27,7 @@ import { WifiEngine } from './services/wifiEngine';
 import { SqliteDatabaseService } from './services/storage';
 import { PcapService, PcapParseResult } from './services/pcapParser';
 import { ThreatEngine } from './services/threatEngine';
-import { NativeBridgeClient } from './services/bridgeClient';
+import { AppUpdateSnapshot, NativeBridgeClient } from './services/bridgeClient';
 import {
   mapNativeFindingsToIncidents,
   reconcileLiveIncidents,
@@ -303,6 +303,8 @@ export default function App() {
   // Native Windows Bridge State
   const [bridgeState, setBridgeState] = useState<BridgeConnectionState>('DISCONNECTED');
   const [bridgeStatus, setBridgeStatus] = useState<BridgeHealthStatus | null>(null);
+  const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateSnapshot | null>(null);
+  const [updatePromptDismissed, setUpdatePromptDismissed] = useState(false);
   const [networkViewMode, setNetworkViewMode] = useState<'inventory' | 'discovery'>('inventory');
   const [bridgeNotice, setBridgeNotice] = useState('');
   const [bridgeErrorKind, setBridgeErrorKind] = useState<BridgeErrorKind | null>(null);
@@ -326,6 +328,39 @@ export default function App() {
   // to "OFFLINE" after 30 seconds even though the scanner was still running.
 
   const bridgeClient = NativeBridgeClient.getInstance();
+
+  useEffect(() => {
+    if (!embeddedShell || bridgeState !== 'CONNECTED') return;
+    let active = true;
+    const refreshUpdateStatus = async () => {
+      try {
+        const status = await bridgeClient.getAppUpdateStatus();
+        if (active) setAppUpdateStatus(status);
+      } catch { /* Update checks are best effort and never interrupt scanning. */ }
+    };
+    void refreshUpdateStatus();
+    const timer = window.setInterval(() => void refreshUpdateStatus(), 1_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [bridgeClient, bridgeState, embeddedShell]);
+
+  const applyAppUpdate = async () => {
+    try {
+      const result = await bridgeClient.applyAppUpdate();
+      if (!result.started) setBridgeNotice('The update could not be started. WinWiFi will keep running and retry on a later check.');
+    } catch (error) {
+      setBridgeNotice('The update could not be started. WinWiFi will continue running.');
+    }
+  };
+
+  const deferAppUpdate = async () => {
+    try {
+      const result = await bridgeClient.deferAppUpdate();
+      if (result.deferred) setUpdatePromptDismissed(true);
+      else setBridgeNotice('The update could not be scheduled. WinWiFi will keep running normally.');
+    } catch (error) {
+      setBridgeNotice('The update could not be scheduled. WinWiFi will continue running.');
+    }
+  };
 
   const commitEnterpriseAssets = useCallback((next: EnterpriseAssetRecord[], projectId: string) => {
     enterpriseAssetsRef.current = next;
@@ -1403,6 +1438,10 @@ export default function App() {
         selectedAdapterId={selectedAdapterId}
         onSelectAdapter={setSelectedAdapterId}
         onToggleFullscreen={handleToggleFullscreen}
+        updateStatus={appUpdateStatus}
+        updatePromptDismissed={updatePromptDismissed}
+        onApplyUpdate={() => void applyAppUpdate()}
+        onDeferUpdate={() => void deferAppUpdate()}
       />
 
       {bridgeNotice && (() => {
@@ -1467,7 +1506,7 @@ export default function App() {
             }`}
           >
             <Wifi className="w-3.5 h-3.5" />
-            <span>Networks</span>
+            <span>Network Inventory</span>
             <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
               {accessPoints.length}
             </span>
@@ -1482,7 +1521,7 @@ export default function App() {
             }`}
           >
             <Activity className="w-3.5 h-3.5" />
-            <span>Network Doctor</span>
+            <span>Network Diagnostics</span>
           </button>
 
           <button
@@ -1494,7 +1533,7 @@ export default function App() {
             }`}
           >
             <Clock3 className="w-3.5 h-3.5" />
-            <span>Network Time Machine</span>
+            <span>Scan History</span>
           </button>
 
           <button
@@ -1506,7 +1545,7 @@ export default function App() {
             }`}
           >
             <MapPin className="w-3.5 h-3.5" />
-            <span>Walk Mode</span>
+            <span>Signal Survey</span>
           </button>
 
           {/* TAB 3: Clients */}
@@ -1519,7 +1558,7 @@ export default function App() {
             }`}
           >
             <Laptop className="w-3.5 h-3.5" />
-            <span>Clients</span>
+            <span>Client Devices</span>
           </button>
 
           {/* TAB 4: RF Spectrum */}
@@ -1532,7 +1571,7 @@ export default function App() {
             }`}
           >
             <Activity className="w-3.5 h-3.5" />
-            <span>RF Spectrum</span>
+            <span>Spectrum Analysis</span>
           </button>
 
           {/* TAB 5: Threats & Rogues */}
@@ -1545,7 +1584,7 @@ export default function App() {
             }`}
           >
             <Flame className="w-3.5 h-3.5 text-rose-400" />
-            <span>Threats &amp; Rogues</span>
+            <span>Threat Detection</span>
             {rogueFindings.length > 0 && (
               <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/20 text-rose-400 font-bold">
                 {rogueFindings.length}
@@ -1563,7 +1602,7 @@ export default function App() {
             }`}
           >
             <BellRing className="w-3.5 h-3.5" />
-            <span>Alerts</span>
+            <span>Security Alerts</span>
             {alertSummary.active > 0 && (
               <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
                 alertSummary.critical > 0 ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
@@ -1583,7 +1622,7 @@ export default function App() {
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Investigations</span>
+            <span>Incident Management</span>
             <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
               {openIncidentCount}
             </span>
@@ -1599,7 +1638,7 @@ export default function App() {
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>Forensics &amp; PCAP</span>
+            <span>Packet Analysis</span>
             <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
               {packets.length}
             </span>
@@ -1615,7 +1654,7 @@ export default function App() {
             }`}
           >
             <KeyRound className="w-3.5 h-3.5" />
-            <span>Handshakes</span>
+            <span>Handshake Analysis</span>
             {handshakes.length > 0 && (
               <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-400 font-bold">
                 {handshakes.length}
@@ -1633,7 +1672,7 @@ export default function App() {
             }`}
           >
             <Building2 className="w-3.5 h-3.5" />
-            <span>Projects &amp; Scope</span>
+            <span>Projects &amp; Authorization</span>
           </button>
 
           {/* TAB 10: Reports */}
@@ -1659,7 +1698,7 @@ export default function App() {
             }`}
           >
             <Cpu className="w-3.5 h-3.5" />
-            <span>Hardware</span>
+            <span>Hardware &amp; Capabilities</span>
           </button>
 
           {/* TAB 12: Settings & Lab */}
@@ -1672,7 +1711,7 @@ export default function App() {
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Settings &amp; Lab</span>
+            <span>Settings &amp; Test Lab</span>
           </button>
 
           {/* TAB 13: Native .NET 8 WPF */}

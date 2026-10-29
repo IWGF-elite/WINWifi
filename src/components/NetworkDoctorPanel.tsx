@@ -65,7 +65,7 @@ export const NetworkDoctorPanel: React.FC<NetworkDoctorPanelProps> = ({ adapterI
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-300"><Activity className="h-5 w-5" /></div>
         <div className="min-w-0">
-          <h1 className="text-lg font-bold">Network Doctor</h1>
+          <h1 className="text-lg font-bold">Network Diagnostics</h1>
           <p className={`text-xs ${muted}`}>Checks the connected Wi-Fi network, its saved fingerprint, and connection performance.</p>
         </div>
       </div>

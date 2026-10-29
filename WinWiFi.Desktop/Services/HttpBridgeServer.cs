@@ -27,6 +27,8 @@ namespace WinWiFi.Services
         private readonly bool _ownsStorage;
         private readonly bool _persistAuthTokenToUserProfile;
         private readonly WifiBackgroundScanner _scanner;
+        private readonly AppUpdateService? _appUpdateService;
+        private readonly Action? _shutdownAfterUpdate;
         private readonly string? _dashboardRoot;
 
         private CancellationTokenSource? _cts;
@@ -162,7 +164,9 @@ namespace WinWiFi.Services
             WifiBackgroundScanner? scanner = null,
             IEnumerable<string>? allowedBrowserOrigins = null,
             string? dashboardRoot = null,
-            bool persistAuthTokenToUserProfile = true)
+            bool persistAuthTokenToUserProfile = true,
+            AppUpdateService? appUpdateService = null,
+            Action? shutdownAfterUpdate = null)
         {
             _port = port;
             _listener = new HttpListener();
@@ -184,6 +188,8 @@ namespace WinWiFi.Services
             _ownsStorage = storage is null;
             _storage = storage ?? new SqliteStorageService();
             _scanner = scanner ?? new WifiBackgroundScanner(_wifiService, _securityAnalyzer);
+            _appUpdateService = appUpdateService;
+            _shutdownAfterUpdate = shutdownAfterUpdate;
 
             // Hook scanner events
             _scanner.NetworksDiscovered += OnNetworksDiscovered;
@@ -502,6 +508,41 @@ namespace WinWiFi.Services
                     case "/api/status":
                     case "/api/health":
                         await HandleStatusAsync(response);
+                        break;
+
+                    case "/api/updates/status":
+                        if (_appUpdateService is null) await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "updates_unavailable", "Automatic updates are available in the installed Windows app.");
+                        else await WriteJsonAsync(response, _appUpdateService.GetStatus());
+                        break;
+
+                    case "/api/updates/check":
+                        if (_appUpdateService is null) await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "updates_unavailable", "Automatic updates are available in the installed Windows app.");
+                        else if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase)) await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to check for updates.");
+                        else await WriteJsonAsync(response, await _appUpdateService.CheckNowAsync(_cts?.Token ?? CancellationToken.None));
+                        break;
+
+                    case "/api/updates/defer":
+                        if (_appUpdateService is null) await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "updates_unavailable", "Automatic updates are available in the installed Windows app.");
+                        else if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase)) await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to defer the update.");
+                        else await WriteJsonAsync(response, new { deferred = _appUpdateService.DeferUntilNextLaunch() });
+                        break;
+
+                    case "/api/updates/apply":
+                        if (_appUpdateService is null) await WriteJsonErrorAsync(response, HttpStatusCode.NotFound, "updates_unavailable", "Automatic updates are available in the installed Windows app.");
+                        else if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase)) await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use POST to apply the update.");
+                        else
+                        {
+                            bool started = _appUpdateService.StartApplyHelper(Environment.ProcessId);
+                            await WriteJsonAsync(response, new { started });
+                            if (started && _shutdownAfterUpdate is not null)
+                            {
+                                _ = Task.Run(async () =>
+                                {
+                                    await Task.Delay(750);
+                                    _shutdownAfterUpdate();
+                                });
+                            }
+                        }
                         break;
 
                     case "/api/adapters":

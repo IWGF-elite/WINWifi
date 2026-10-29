@@ -2,7 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $projectRoot "WinWiFi.Desktop\WinWiFi.Desktop.csproj"
+$updaterProjectPath = Join-Path $projectRoot "WinWiFi.Updater\WinWiFi.Updater.csproj"
 $publishPath = Join-Path $projectRoot "publish\win-x64"
+$updaterPublishPath = Join-Path $projectRoot "publish\updater"
 
 Push-Location $projectRoot
 try {
@@ -25,6 +27,19 @@ dotnet publish $projectPath `
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
+
+dotnet publish $updaterProjectPath `
+    --configuration Release `
+    --runtime win-x64 `
+    --self-contained true `
+    -p:PublishSingleFile=true `
+    --output $updaterPublishPath
+
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+Copy-Item -LiteralPath (Join-Path $updaterPublishPath "WinWiFi.UpdateRunner.exe") -Destination $publishPath -Force
 
 $dashboardPath = Join-Path $publishPath "dashboard"
 New-Item -ItemType Directory -Force -Path $dashboardPath | Out-Null

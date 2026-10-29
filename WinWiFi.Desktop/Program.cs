@@ -192,6 +192,7 @@ namespace WinWiFi
                 SingleInstanceGuard.ActivateExistingInstance();
                 return 0;
             }
+            if (AppUpdateService.TryStartDeferredApply(Environment.ProcessPath ?? "", Environment.ProcessId)) return 0;
             try
             {
                 Trace.TraceInformation($"WinWiFi desktop starting (PID {Environment.ProcessId}).");

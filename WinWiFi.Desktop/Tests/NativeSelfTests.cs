@@ -8,6 +8,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,6 +37,51 @@ namespace WinWiFi.Tests
         public async Task<List<TestResultItem>> RunAllTestsAsync()
         {
             var results = new List<TestResultItem>();
+
+            results.Add(await RunTestAsync("T0-APP-UPDATE", "Release Update Download, Checksum, Deferral & Apply Handoff", async () =>
+            {
+                string testRoot = Path.Combine(Path.GetTempPath(), $"WinWiFi-update-test-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(testRoot);
+                try
+                {
+                    byte[] installerBytes = Encoding.UTF8.GetBytes("test-only installer payload");
+                    string hash = Convert.ToHexString(SHA256.HashData(installerBytes)).ToLowerInvariant();
+                    var handler = new StubUpdateHttpHandler(installerBytes, hash);
+                    using var http = new HttpClient(handler);
+                    string? handedOffPath = null;
+                    string? handedOffHash = null;
+                    int handedOffPid = 0;
+                    using var updater = new AppUpdateService(http, new Uri("https://updates.test/releases/latest"), testRoot, "3.0.3",
+                        (path, checksum, pid) => { handedOffPath = path; handedOffHash = checksum; handedOffPid = pid; return true; });
+
+                    var status = await updater.CheckNowAsync();
+                    if (!status.IsUpdateReady || status.LatestVersion != "3.0.4" || status.ProgressPercent != 100)
+                        throw new Exception($"Expected a staged 3.0.4 update, received {status.State}/{status.LatestVersion}/{status.ProgressPercent}%.");
+                    string stagedFile = Directory.GetFiles(testRoot, "WinWiFi-Setup.exe", SearchOption.AllDirectories).Single();
+                    if (!string.Equals(AppUpdateService.ComputeSha256(stagedFile), hash, StringComparison.OrdinalIgnoreCase))
+                        throw new Exception("The staged installer checksum differs from the release checksum.");
+                    if (!updater.DeferUntilNextLaunch() || !File.Exists(Path.Combine(testRoot, "apply-next-launch.json")))
+                        throw new Exception("The verified update was not scheduled for the next launch.");
+                    if (!updater.StartApplyHelper(4242) || handedOffPath != stagedFile || handedOffHash != hash || handedOffPid != 4242)
+                        throw new Exception("The restart/apply helper did not receive the verified package and parent process.");
+
+                    return "Simulated GitHub Release v3.0.4 download verified SHA-256, staged the installer, wrote the deferred-install marker, and handed the package to the restart helper.";
+                }
+                finally
+                {
+                    if (Directory.Exists(testRoot)) Directory.Delete(testRoot, recursive: true);
+                }
+            }));
+
+            results.Add(RunTest("T0A-APP-UPDATE-MANIFEST", "Release Version & SHA-256 Manifest Validation", () =>
+            {
+                if (AppUpdateService.NormalizeVersion("v3.0.4") != "3.0.4") throw new Exception("Release tag normalization failed.");
+                const string hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+                if (AppUpdateService.ParseSha256Manifest($"{hash}  WinWiFi-Setup.exe\n") != hash) throw new Exception("SHA-256 manifest parsing failed.");
+                try { AppUpdateService.ParseSha256Manifest("not a checksum"); throw new Exception("Malformed checksum manifest was accepted."); }
+                catch (InvalidDataException) { }
+                return "Version tags normalize and malformed or missing SHA-256 values are rejected.";
+            }));
 
             // Test 1: P/Invoke Struct Marshaling Alignment
             results.Add(RunTest("T1-STRUCT-ALIGN", "P/Invoke Struct Marshaling Alignment", () =>
@@ -1914,6 +1960,42 @@ SSID 2 : Guest-Open
                     Vendor = "Test Fixture",
                     SecurityScore = 70
                 };
+            }
+        }
+
+        private sealed class StubUpdateHttpHandler : HttpMessageHandler
+        {
+            private readonly byte[] _installer;
+            private readonly string _sha256;
+
+            public StubUpdateHttpHandler(byte[] installer, string sha256)
+            {
+                _installer = installer;
+                _sha256 = sha256;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                string path = request.RequestUri?.AbsolutePath ?? "";
+                HttpResponseMessage response = path switch
+                {
+                    "/releases/latest" => new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"tag_name\":\"v3.0.4\",\"draft\":false,\"prerelease\":false,\"assets\":[{" +
+                            "\"name\":\"WinWiFi-Setup.exe\",\"browser_download_url\":\"https://updates.test/installer\"},{" +
+                            "\"name\":\"WinWiFi-Setup.exe.sha256\",\"browser_download_url\":\"https://updates.test/checksum\"}]}")
+                    },
+                    "/checksum" => new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent($"{_sha256}  WinWiFi-Setup.exe\n")
+                    },
+                    "/installer" => new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new ByteArrayContent(_installer)
+                    },
+                    _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+                };
+                return Task.FromResult(response);
             }
         }
 

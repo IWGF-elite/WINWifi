@@ -1,0 +1,72 @@
+name: Build and publish Windows release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require a versioned commit on main
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Release tags must point to a commit already merged into main.' }
+          $releaseVersion = $env:GITHUB_REF_NAME.TrimStart('v')
+          [xml]$project = Get-Content WinWiFi.Desktop/WinWiFi.Desktop.csproj
+          $desktopVersion = $project.Project.PropertyGroup.Version | Select-Object -First 1
+          $installerVersion = (Select-String -Path installer/WinWiFi.iss -Pattern '^#define AppVersion "([^"]+)"').Matches.Groups[1].Value
+          if ($desktopVersion -ne $releaseVersion -or $installerVersion -ne $releaseVersion) {
+            throw "Release tag $releaseVersion must match the desktop version ($desktopVersion) and installer version ($installerVersion). Bump both before tagging."
+          }
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Publish self-contained Windows app and dashboard
+        shell: pwsh
+        run: ./scripts/publish-windows.ps1
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Compile installer and checksum
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
+          & $iscc installer/WinWiFi.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+          $installer = Join-Path $PWD 'publish/installer/WinWiFi-Setup.exe'
+          if (-not (Test-Path $installer)) { throw 'Installer output was not created.' }
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "$installer.sha256" -Value "$hash  WinWiFi-Setup.exe" -Encoding ascii
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WinWiFi ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            publish/installer/WinWiFi-Setup.exe
+            publish/installer/WinWiFi-Setup.exe.sha256

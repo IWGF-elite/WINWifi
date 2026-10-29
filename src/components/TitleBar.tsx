@@ -19,6 +19,7 @@ import {
   Database
 } from 'lucide-react';
 import { DataSourceProfile, BridgeConnectionState, WifiAdapter } from '../types';
+import { AppUpdateSnapshot } from '../services/bridgeClient';
 import { BridgeErrorKind, bridgeStatusView } from '../services/bridgeStatus';
 import { WinWiFiLogo } from './WinWiFiLogo';
 
@@ -45,6 +46,10 @@ interface TitleBarProps {
   selectedAdapterId: string;
   onSelectAdapter: (adapterId: string) => void;
   onToggleFullscreen: () => void;
+  updateStatus?: AppUpdateSnapshot | null;
+  updatePromptDismissed?: boolean;
+  onApplyUpdate?: () => void;
+  onDeferUpdate?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -70,6 +75,10 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   selectedAdapterId,
   onSelectAdapter,
   onToggleFullscreen,
+  updateStatus = null,
+  updatePromptDismissed = false,
+  onApplyUpdate,
+  onDeferUpdate,
 }) => {
   const [isFittedToScreen, setIsFittedToScreen] = useState(false);
   const nativeWindow = (action: 'minimize' | 'fit' | 'close') => {
@@ -168,6 +177,22 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           <button onClick={() => nativeWindow('close')} className="p-1.5 hover:bg-rose-600 hover:text-white" title="Close"><X className="w-3.5 h-3.5" /></button>
         </div>
       </div>
+
+      {updateStatus?.state === 'downloading' && (
+        <div role="status" className="flex items-center gap-2 border-t border-slate-700/50 px-3 py-1 text-[11px] text-slate-400">
+          <RefreshCw className="h-3 w-3 animate-spin text-cyan-400" />
+          <span>Downloading WinWiFi update {updateStatus.latestVersion ?? ''}</span>
+          <div className="h-1.5 w-24 overflow-hidden rounded bg-slate-800"><div className="h-full bg-cyan-500 transition-[width]" style={{ width: `${updateStatus.progressPercent}%` }} /></div>
+          <span>{updateStatus.progressPercent}%</span>
+        </div>
+      )}
+      {updateStatus?.isUpdateReady && !updatePromptDismissed && (
+        <div role="status" className="flex flex-wrap items-center justify-end gap-2 border-t border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5 text-xs">
+          <span className="mr-1 text-emerald-200">Update ready — restart now to apply</span>
+          <button onClick={onApplyUpdate} className="rounded bg-emerald-600 px-2.5 py-1 font-semibold text-white hover:bg-emerald-500">Restart now</button>
+          <button onClick={onDeferUpdate} className="rounded border border-slate-600 px-2.5 py-1 text-slate-300 hover:bg-slate-800" title="Install automatically the next time WinWiFi starts">Later</button>
+        </div>
+      )}
 
       {/* Main Action Toolbar (Ribbon) */}
       <div className={`flex flex-wrap items-center justify-between px-3 py-2 border-t text-xs gap-2 ${
