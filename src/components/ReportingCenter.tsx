@@ -12,6 +12,14 @@ import {
 import { AccessPoint, AuditProject, IncidentRecord, UIMode } from '../types';
 import { AIAdvisor } from '../services/aiAdvisor';
 
+export const escapeReportHtml = (value: unknown): string => String(value ?? '').replace(/[&<>"']/g, character => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}[character] as string));
+
 interface ReportingCenterProps {
   currentProject: AuditProject;
   accessPoints: AccessPoint[];
@@ -32,7 +40,8 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
   const total = accessPoints.length;
   const avgScore = total > 0 
     ? Math.round(accessPoints.reduce((acc, ap) => acc + ap.securityScore, 0) / total) 
-    : 100;
+    : null;
+  const scoreText = avgScore === null ? 'N/A' : `${avgScore} / 100`;
 
   const handlePrint = () => {
     window.print();
@@ -44,7 +53,7 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>WinWiFi Wireless Security Audit Report - ${currentProject.name}</title>
+  <title>WinWiFi Wireless Security Audit Report - ${escapeReportHtml(currentProject.name)}</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #1e293b; max-width: 900px; margin: 40px auto; padding: 0 20px; }
     h1, h2, h3 { color: #0f172a; margin-top: 1.5em; }
@@ -63,19 +72,19 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
 <body>
   <div class="header">
     <h1>Wireless Security Assessment Report</h1>
-    <p>Project: <strong>${currentProject.name}</strong> | Location: <strong>${currentProject.location}</strong> | Auditor: <strong>${currentProject.auditorName}</strong> | Date: <strong>${new Date().toLocaleDateString()}</strong></p>
+    <p>Project: <strong>${escapeReportHtml(currentProject.name)}</strong> | Location: <strong>${escapeReportHtml(currentProject.location)}</strong> | Auditor: <strong>${escapeReportHtml(currentProject.auditorName)}</strong> | Date: <strong>${new Date().toLocaleDateString()}</strong></p>
   </div>
   
   <h2>Executive Summary</h2>
   <div class="kpi-box">
     <div class="kpi"><div class="num">${total}</div><div>Assessed Networks</div></div>
-    <div class="kpi"><div class="num">${avgScore} / 100</div><div>NIST Security Score</div></div>
+    <div class="kpi"><div class="num">${scoreText}</div><div>NIST Security Score</div></div>
     <div class="kpi"><div class="num">${incidents.length}</div><div>Security Incidents</div></div>
   </div>
 
   <h3>Key Findings & Priorities</h3>
   <ul>
-    ${summary.urgentActions.map(a => `<li><strong>${a}</strong></li>`).join('')}
+    ${summary.urgentActions.map(a => `<li><strong>${escapeReportHtml(a)}</strong></li>`).join('')}
   </ul>
 
   <h2>Access Point Technical Inventory</h2>
@@ -84,7 +93,7 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
       <tr><th>BSSID</th><th>SSID</th><th>Channel</th><th>Security</th><th>Score</th></tr>
     </thead>
     <tbody>
-      ${accessPoints.map(ap => `<tr><td>${ap.bssid}</td><td>${ap.ssid}</td><td>Ch ${ap.channel} (${ap.band})</td><td>${ap.security}</td><td>${ap.securityScore}</td></tr>`).join('')}
+      ${accessPoints.map(ap => `<tr><td>${escapeReportHtml(ap.bssid)}</td><td>${escapeReportHtml(ap.ssid)}</td><td>Ch ${escapeReportHtml(ap.channel)} (${escapeReportHtml(ap.band)})</td><td>${escapeReportHtml(ap.security)}</td><td>${escapeReportHtml(ap.securityScore)}</td></tr>`).join('')}
     </tbody>
   </table>
 </body>
@@ -167,12 +176,18 @@ export const ReportingCenter: React.FC<ReportingCenterProps> = ({
           <div className="text-right">
             <div className="text-xs text-slate-400 font-medium">Compliance Posture</div>
             <div className={`text-3xl font-bold ${
-              avgScore >= 80 ? 'text-emerald-400' : avgScore >= 60 ? 'text-amber-400' : 'text-rose-400'
+              avgScore === null ? 'text-slate-400' : avgScore >= 80 ? 'text-emerald-400' : avgScore >= 60 ? 'text-amber-400' : 'text-rose-400'
             }`}>
-              {avgScore} / 100
+              {scoreText}
             </div>
           </div>
         </div>
+
+        {total === 0 && (
+          <p role="status" className="rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-xs text-slate-300">
+            No access-point observations are available for this report. Scores and findings will appear after a live scan or capture import.
+          </p>
+        )}
 
         {/* Executive Summary View */}
         {reportType === 'executive' ? (

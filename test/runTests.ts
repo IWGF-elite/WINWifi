@@ -9,6 +9,7 @@ import { NetworkDiscovery } from '../src/components/NetworkDiscovery';
 import { ClientObserver } from '../src/components/ClientObserver';
 import { formatScanAge } from '../src/components/LanDeviceInventory';
 import { TitleBar } from '../src/components/TitleBar';
+import { ReportingCenter, escapeReportHtml } from '../src/components/ReportingCenter';
 import { PcapService } from '../src/services/pcapParser';
 import { WifiEngine, isWebView2Host } from '../src/services/wifiEngine';
 import { CapabilityMatrixService } from '../src/services/capabilityMatrix';
@@ -2164,6 +2165,24 @@ runTest('T37: Header Actions Stay Above Floating Page Content', () => {
   }));
   if (!markup.includes('relative z-30 isolate') || !markup.includes('>Import</span>') || !markup.includes('>Start Scan</span>')) {
     throw new Error('The action bar does not keep the scan and import controls in the elevated header layer');
+  }
+});
+
+runTest('T38: Reports Do Not Invent A Passing Score Without Observations', () => {
+  const markup = renderToStaticMarkup(createElement(ReportingCenter, {
+    currentProject: { id: 'report-test', name: 'Test project', location: '', auditorName: '' } as any,
+    accessPoints: [],
+    incidents: [],
+    uiMode: 'advanced' as any,
+  }));
+  if (!markup.includes('No access-point observations are available for this report.')) {
+    throw new Error('Empty reports do not explain that no scan data is available');
+  }
+  if (!markup.includes('N/A') || markup.includes('100 / 100')) {
+    throw new Error('An empty report displays an invented passing security score');
+  }
+  if (escapeReportHtml(`<tag attr="x">&'`) !== '&lt;tag attr=&quot;x&quot;&gt;&amp;&#39;') {
+    throw new Error('Standalone report text is not escaped before HTML export');
   }
 });
 
