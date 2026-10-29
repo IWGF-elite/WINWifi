@@ -36,7 +36,7 @@ export const NativeDesktopPanel: React.FC<NativeDesktopPanelProps> = ({ isDarkMo
 
   return <section className="mx-auto max-w-5xl space-y-4 p-4">
     <header className={`rounded-xl border p-5 ${isDarkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
-      <h1 className="text-lg font-bold text-slate-100">System Capabilities <span className="ml-2 text-xs font-medium text-slate-400">3.0.3</span></h1>
+      <h1 className="text-lg font-bold text-slate-100">System Capabilities <span className="ml-2 text-xs font-medium text-slate-400">3.0.4</span></h1>
       <p className="mt-1 text-xs text-slate-400">Current status from this Windows device.</p>
       <div className="mt-3 text-xs text-slate-300">Service: <span className={health?.status === 'healthy' || health?.status === 'online' ? 'text-emerald-400' : 'text-amber-300'}>{health?.status || (error ? 'Unavailable' : 'Checking')}</span>{health?.activeAdapterName ? ` · Adapter: ${health.activeAdapterName}` : ''}</div>
       {error && <p role="status" className="mt-2 text-xs text-amber-300">{error}</p>}

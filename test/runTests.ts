@@ -783,7 +783,7 @@ runTest('T17: Runtime Label & Version Consistency', () => {
   ];
   for (const [name, content] of versions) {
     if (content.includes('3.0.1')) throw new Error(`${name} still advertises version 3.0.1`);
-    if (!content.includes('3.0.3')) throw new Error(`${name} is missing the 3.0.3 version string`);
+    if (!content.includes('3.0.4')) throw new Error(`${name} is missing the 3.0.4 version string`);
   }
 
   const clients = read('src/components/ClientObserver.tsx');

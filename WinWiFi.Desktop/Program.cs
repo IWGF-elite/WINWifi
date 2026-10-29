@@ -24,7 +24,7 @@ namespace WinWiFi
             if (args.Any(a => a.Equals("--help", StringComparison.OrdinalIgnoreCase) || a.Equals("-h", StringComparison.OrdinalIgnoreCase) || a.Equals("/?", StringComparison.OrdinalIgnoreCase)))
             {
                 Console.WriteLine("==========================================================");
-                Console.WriteLine("  WinWiFi 3.0.3 - Native 802.11 Security Auditor & Bridge ");
+                Console.WriteLine("  WinWiFi 3.0.4 - Native 802.11 Security Auditor & Bridge ");
                 Console.WriteLine("==========================================================");
                 Console.WriteLine("Usage: winwifi-cli [options]\n");
                 Console.WriteLine("Options:");
@@ -41,7 +41,7 @@ namespace WinWiFi
             if (args.Any(a => a.Equals("--adapters", StringComparison.OrdinalIgnoreCase) || a.Equals("-a", StringComparison.OrdinalIgnoreCase)))
             {
                 Console.WriteLine("==========================================================");
-                Console.WriteLine("  WinWiFi 3.0.3 - Detected Wireless Network Adapters       ");
+                Console.WriteLine("  WinWiFi 3.0.4 - Detected Wireless Network Adapters       ");
                 Console.WriteLine("==========================================================\n");
 
                 var wifiService = new NativeWifiService(new SecurityAnalyzer());
@@ -72,7 +72,7 @@ namespace WinWiFi
             if (args.Any(a => a.Equals("--scan", StringComparison.OrdinalIgnoreCase) || a.Equals("-s", StringComparison.OrdinalIgnoreCase)))
             {
                 Console.WriteLine("==========================================================");
-                Console.WriteLine("  WinWiFi 3.0.3 - One-Shot Windows WLAN Cache Observation ");
+                Console.WriteLine("  WinWiFi 3.0.4 - One-Shot Windows WLAN Cache Observation ");
                 Console.WriteLine("==========================================================\n");
 
                 var wifiService = new NativeWifiService(new SecurityAnalyzer());
@@ -107,7 +107,7 @@ namespace WinWiFi
             if (args.Any(a => a.Equals("--test", StringComparison.OrdinalIgnoreCase) || a.Equals("-t", StringComparison.OrdinalIgnoreCase)))
             {
                 Console.WriteLine("==========================================================");
-                Console.WriteLine("     WinWiFi 3.0.3 Native Security Audit & Math Tests     ");
+                Console.WriteLine("     WinWiFi 3.0.4 Native Security Audit & Math Tests     ");
                 Console.WriteLine("==========================================================\n");
 
                 var tests = new NativeSelfTests();
@@ -157,7 +157,7 @@ namespace WinWiFi
                 }
 
                 Console.WriteLine("==========================================================");
-                Console.WriteLine($"  WinWiFi 3.0.3 Local Native Bridge Daemon (: {port})    ");
+                Console.WriteLine($"  WinWiFi 3.0.4 Local Native Bridge Daemon (: {port})    ");
                 Console.WriteLine("==========================================================");
                 Console.WriteLine($"[Bridge] Starting HTTP / SSE bridge on http://127.0.0.1:{port}/");
                 Console.WriteLine("[Bridge] Exposing real-time wlanapi.dll & netsh telemetry to Web UI");

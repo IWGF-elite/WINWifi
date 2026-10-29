@@ -1,5 +1,5 @@
 #define AppName "WinWiFi Security Auditor"
-#define AppVersion "3.0.3"
+#define AppVersion "3.0.4"
 #define AppPublisher "Nexus Tech"
 #define AppExeName "WinWiFi.exe"
 

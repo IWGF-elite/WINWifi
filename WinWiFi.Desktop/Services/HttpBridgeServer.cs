@@ -739,7 +739,7 @@ namespace WinWiFi.Services
             var status = new
             {
                 status = "online",
-                version = "3.0.3",
+                version = "3.0.4",
                 authRequired = true,
                 engine = "WinWiFi Native 802.11 Core (.NET 8)",
                 platform = Environment.OSVersion.ToString(),
@@ -1903,7 +1903,7 @@ namespace WinWiFi.Services
             {
                 metadata = new
                 {
-                    generator = "WinWiFi 3.0.3",
+                    generator = "WinWiFi 3.0.4",
                     exportedAt = DateTime.UtcNow,
                     platform = Environment.OSVersion.ToString()
                 },
