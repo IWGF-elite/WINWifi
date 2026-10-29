@@ -598,7 +598,21 @@ SSID 2 : Guest-Open
                 if (bgScanner.CurrentState != ScanTelemetryState.Idle)
                     throw new Exception($"Expected Idle state when scanning enabled, got {bgScanner.CurrentState}");
 
-                return "Telemetry state transitions verified: Idle, Paused, Scanning, NoNetworksFound, AdapterUnavailable supported.";
+                var inFlightScanner = new WifiBackgroundScanner(new ShiftingChannelWifiService(), new SecurityAnalyzer());
+                inFlightScanner.SetActiveAdapter("STUB-SHIFTING-ADAPTER");
+                var completedCycle = new TaskCompletionSource<ScanCycleStats>(TaskCreationOptions.RunContinuationsAsynchronously);
+                inFlightScanner.ScanCycleCompleted += stats => completedCycle.TrySetResult(stats);
+                inFlightScanner.SetScanningState(true);
+                inFlightScanner.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+                if (!SpinWait.SpinUntil(() => inFlightScanner.CurrentState == ScanTelemetryState.Scanning, TimeSpan.FromSeconds(2)))
+                    throw new Exception("The in-flight pause test did not enter Scanning state.");
+                inFlightScanner.SetScanningState(false);
+                var pausedCycle = completedCycle.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                if (pausedCycle.State != ScanTelemetryState.Paused || inFlightScanner.CurrentState != ScanTelemetryState.Paused)
+                    throw new Exception($"Pausing during an active scan must remain Paused after the cycle, got cycle={pausedCycle.State}, scanner={inFlightScanner.CurrentState}.");
+                inFlightScanner.Dispose();
+
+                return "Telemetry transitions verified, including a pause requested during an active cycle remaining Paused after completion.";
             }));
 
             // Test 12: SQLite Scan Observations Persistence

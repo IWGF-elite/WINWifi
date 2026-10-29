@@ -117,7 +117,14 @@ public sealed class WifiBackgroundScanner : BackgroundService
                 // The bridge uses this to age out APs that have disappeared.
                 _securityAnalyzer.DetectRogueAccessPoints(networks);
                 NetworksDiscovered?.Invoke(networks);
-                if (networks.Count == 0)
+                if (!_isScanning)
+                {
+                    // A pause requested during an in-flight WLAN scan takes
+                    // effect when that read completes. Do not publish Idle or
+                    // NoNetworksFound as if continuous scanning were still on.
+                    SetState(ScanTelemetryState.Paused);
+                }
+                else if (networks.Count == 0)
                 {
                     SetState(ScanTelemetryState.NoNetworksFound);
                 }
@@ -147,7 +154,7 @@ public sealed class WifiBackgroundScanner : BackgroundService
             if (remaining > TimeSpan.Zero)
                 await Task.Delay(remaining, stoppingToken);
         }
-        SetState(ScanTelemetryState.Idle);
+        SetState(_isScanning ? ScanTelemetryState.Idle : ScanTelemetryState.Paused);
     }
 
     private void SetState(ScanTelemetryState state)
