@@ -10,6 +10,7 @@ interface NetworkTimeMachinePanelProps {
 const timeValue = (value?: string | null) => value ? new Date(value).getTime() : 0;
 const displayTime = (value?: string | null) => value ? new Date(value).toLocaleString() : 'Unknown';
 const duration = (first?: string, last?: string) => {
+  if (!first || !last || !Number.isFinite(Date.parse(first)) || !Number.isFinite(Date.parse(last))) return 'Unknown';
   const milliseconds = Math.max(0, timeValue(last) - timeValue(first));
   if (!milliseconds) return 'Under one scan interval';
   const seconds = Math.floor(milliseconds / 1000);
