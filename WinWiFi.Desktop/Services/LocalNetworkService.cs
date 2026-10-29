@@ -18,6 +18,9 @@ namespace WinWiFi.Services;
 
 public static class LocalNetworkService
 {
+    private const int FullPortProbeTimeoutMs = 500;
+    private const int MaxFullPortProbeWorkers = 128;
+
     private sealed record SsdpDiscovery(string SearchTarget, string Server, string Location, string UniqueServiceName, string Hostname);
 
     private static readonly (int Port, string Name, bool Risk, string Reason)[] ProbePorts =
@@ -34,6 +37,19 @@ public static class LocalNetworkService
         (8443, "HTTPS alternate", false, ""), (8888, "HTTP alternate", false, ""),
         (9000, "HTTP alternate", false, ""), (9100, "JetDirect", false, "")
     };
+
+    internal static int GetFullRangeProbeWorkerCount(int probesPerSecond)
+    {
+        int rate = Math.Clamp(probesPerSecond, 1, 250);
+        // Keep enough timed connects in flight to sustain the selected rate
+        // when a firewall silently drops probes (each can take 500 ms).
+        return Math.Clamp((int)Math.Ceiling(rate * FullPortProbeTimeoutMs / 1000d), 1, MaxFullPortProbeWorkers);
+    }
+
+    internal static bool MatchesAdapterId(string interfaceId, string adapterId) =>
+        Guid.TryParse(interfaceId, out var interfaceGuid)
+        && Guid.TryParse(adapterId, out var adapterGuid)
+        && interfaceGuid == adapterGuid;
 
     public static async Task<LocalNetworkInfo> ScanAsync(string? adapterId, CancellationToken cancellationToken = default, bool fullPortScan = false, int probesPerSecond = 100)
     {
@@ -78,7 +94,7 @@ public static class LocalNetworkService
         var mdnsNames = await ResolveMdnsNamesAsync(
             online.Keys.Concat(ssdp.Keys).Distinct(StringComparer.OrdinalIgnoreCase), result.LocalIp, cancellationToken).ConfigureAwait(false);
         string now = DateTimeOffset.UtcNow.ToString("O");
-        using var portGate = new SemaphoreSlim(48);
+        using var portGate = new SemaphoreSlim(fullPortScan ? MaxFullPortProbeWorkers : 48);
         var fullRangePacer = new ProbePacer(probesPerSecond);
         foreach (string ip in addresses)
         {
@@ -167,10 +183,18 @@ public static class LocalNetworkService
         if (string.IsNullOrWhiteSpace(adapterId))
             return new LocalNetworkInfo { Reason = "Select an active Wi-Fi adapter first." };
 
-        var iface = NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n =>
-            n.OperationalStatus == OperationalStatus.Up
-            && n.NetworkInterfaceType != NetworkInterfaceType.Loopback
-            && string.Equals(n.Id.Trim('{', '}'), adapterId.Trim().Trim('{', '}'), StringComparison.OrdinalIgnoreCase));
+        NetworkInterface? iface = null;
+        // Windows can briefly return a stale adapter snapshot while WLAN
+        // notifications are updating. Retry only this missing-interface case;
+        // normal scans remain synchronous and do not incur a delay.
+        for (int attempt = 0; attempt < 3 && iface is null; attempt++)
+        {
+            iface = NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n =>
+                n.OperationalStatus == OperationalStatus.Up
+                && n.NetworkInterfaceType != NetworkInterfaceType.Loopback
+                && MatchesAdapterId(n.Id, adapterId));
+            if (iface is null && attempt < 2) Thread.Sleep(100);
+        }
         if (iface is null)
             return new LocalNetworkInfo { AdapterId = adapterId, Reason = "Windows has no active IP interface for the selected Wi-Fi adapter." };
 
@@ -524,10 +548,9 @@ public static class LocalNetworkService
             return new(open.OrderBy(p => p.Port).ToList(), ProbePorts.Length);
         }
 
-        var pacer = new ProbePacer(probesPerSecond);
         int nextPort = 0;
         int scanned = 0;
-        int workerCount = Math.Min(32, probesPerSecond);
+        int workerCount = GetFullRangeProbeWorkerCount(probesPerSecond);
         var fullTasks = Enumerable.Range(0, workerCount).Select(async _ =>
         {
             while (true)
@@ -558,7 +581,7 @@ public static class LocalNetworkService
     private static async Task ProbeSinglePortAsync(string ip, int port, string service, bool risky, string riskReason, List<LanOpenPort> open, CancellationToken cancellationToken)
     {
         using var client = new TcpClient();
-        await client.ConnectAsync(ip, port).WaitAsync(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+        await client.ConnectAsync(ip, port).WaitAsync(TimeSpan.FromMilliseconds(FullPortProbeTimeoutMs), cancellationToken).ConfigureAwait(false);
         string banner = await ReadServiceBannerAsync(client, port, ip, cancellationToken).ConfigureAwait(false);
         bool adminPage = IsAdministrativePage(banner);
         lock (open)

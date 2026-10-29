@@ -1233,10 +1233,16 @@ SSID 2 : Guest-Open
                 probe.Stop();
 
                 string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_bridge_{Guid.NewGuid():N}.db");
+                string userTokenPath = HttpBridgeServer.BridgeTokenFilePath();
+                bool userTokenExisted = File.Exists(userTokenPath);
+                string? userTokenBefore = userTokenExisted ? File.ReadAllText(userTokenPath) : null;
                 using var wifi = new StubWifiService();
                 using var storage = new SqliteStorageService(tempDb);
-                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage);
+                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage, persistAuthTokenToUserProfile: false);
                 await bridge.StartAsync();
+                if (File.Exists(userTokenPath) != userTokenExisted
+                    || (userTokenExisted && !string.Equals(File.ReadAllText(userTokenPath), userTokenBefore, StringComparison.Ordinal)))
+                    throw new Exception("An isolated health test changed the active desktop process's per-launch bridge token file.");
                 try
                 {
                     using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
@@ -1383,6 +1389,28 @@ SSID 2 : Guest-Open
                 return "Diagnostics payloads keep control characters escaped so every SSE frame stays parseable.";
             }));
 
+            results.Add(RunTest("T26A-FULL-SCAN-RATE", "Full TCP Scan Worker Capacity Matches Requested Rate", () =>
+            {
+                int low = LocalNetworkService.GetFullRangeProbeWorkerCount(25);
+                int standard = LocalNetworkService.GetFullRangeProbeWorkerCount(100);
+                int maximum = LocalNetworkService.GetFullRangeProbeWorkerCount(250);
+                int clamped = LocalNetworkService.GetFullRangeProbeWorkerCount(900);
+                if (low != 13 || standard != 50 || maximum != 125 || clamped != maximum)
+                    throw new Exception($"Unexpected worker capacity: 25/s={low}, 100/s={standard}, 250/s={maximum}, clamped={clamped}.");
+                return "Timed connection concurrency scales with the selected 500 ms probe rate, capped at 250 probes/s.";
+            }));
+
+            results.Add(RunTest("T26B-ADAPTER-GUID", "Local Network Adapter Matching Uses Windows Interface GUID", () =>
+            {
+                const string guid = "c777073d-edf9-489b-8ee9-560bdcfa07e0";
+                if (!LocalNetworkService.MatchesAdapterId("{C777073D-EDF9-489B-8EE9-560BDCFA07E0}", guid)
+                    || !LocalNetworkService.MatchesAdapterId(guid, "{" + guid.ToUpperInvariant() + "}")
+                    || LocalNetworkService.MatchesAdapterId("not-a-guid", guid)
+                    || LocalNetworkService.MatchesAdapterId(guid, "c777073d-edf9-489b-8ee9-560bdcfa07e1"))
+                    throw new Exception("Adapter matching did not handle GUID braces/case or rejected a nonmatching identifier.");
+                return "Windows interface IDs match by parsed GUID, independent of braces and letter case.";
+            }));
+
             results.Add(await RunTestAsync("T27-BRIDGE-SHUTDOWN", "Bridge Shutdown Survives a Blocked UI Context", async () =>
             {
                 // The desktop shell stops its bridge from the WPF UI thread and
@@ -1398,7 +1426,7 @@ SSID 2 : Guest-Open
                 string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_stop_{Guid.NewGuid():N}.db");
                 using var wifi = new StubWifiService();
                 using var storage = new SqliteStorageService(tempDb);
-                var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage);
+                var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage, persistAuthTokenToUserProfile: false);
                 await bridge.StartAsync();
 
                 var previousContext = SynchronizationContext.Current;
@@ -1440,7 +1468,7 @@ SSID 2 : Guest-Open
                 string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_drift_{Guid.NewGuid():N}.db");
                 using var wifi = new ShiftingChannelWifiService();
                 using var storage = new SqliteStorageService(tempDb);
-                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage);
+                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage, persistAuthTokenToUserProfile: false);
                 await bridge.StartAsync();
 
                 using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -1537,7 +1565,7 @@ SSID 2 : Guest-Open
                 string projectId = $"drift-test-{Guid.NewGuid():N}";
                 using var wifi = new StubWifiService();
                 using var storage = new SqliteStorageService(tempDb);
-                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage);
+                await using var bridge = new HttpBridgeServer(port, wifi, new SecurityAnalyzer(), new PcapDissector(), new ReportGenerator(), storage, persistAuthTokenToUserProfile: false);
                 await bridge.StartAsync();
 
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };

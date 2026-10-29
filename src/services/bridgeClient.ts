@@ -50,10 +50,10 @@ export function estimateLocalNetworkScanTimeout(
   );
   if (!options.fullPortScan) return commonScanTimeout;
 
-  const probesPerSecond = Math.max(1, Math.min(250, options.probesPerSecond ?? 100));
+  const effectiveProbesPerSecond = Math.max(1, Math.min(250, options.probesPerSecond ?? 100));
   return Math.min(
     24 * 60 * 60_000,
-    commonScanTimeout + Math.ceil(expectedResponders * 65_535 * 1_000 / probesPerSecond * 1.25)
+    commonScanTimeout + Math.ceil(expectedResponders * 65_535 * 1_000 / effectiveProbesPerSecond * 1.25)
   );
 }
 

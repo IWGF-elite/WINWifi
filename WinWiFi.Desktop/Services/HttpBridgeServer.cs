@@ -25,6 +25,7 @@ namespace WinWiFi.Services
         private readonly ReportGenerator _reportGenerator;
         private readonly SqliteStorageService _storage;
         private readonly bool _ownsStorage;
+        private readonly bool _persistAuthTokenToUserProfile;
         private readonly WifiBackgroundScanner _scanner;
         private readonly string? _dashboardRoot;
 
@@ -67,6 +68,7 @@ namespace WinWiFi.Services
 
         private void PersistAuthToken()
         {
+            if (!_persistAuthTokenToUserProfile) return;
             try
             {
                 byte[] bytes = Encoding.ASCII.GetBytes(_authToken);
@@ -159,7 +161,8 @@ namespace WinWiFi.Services
             SqliteStorageService? storage = null,
             WifiBackgroundScanner? scanner = null,
             IEnumerable<string>? allowedBrowserOrigins = null,
-            string? dashboardRoot = null)
+            string? dashboardRoot = null,
+            bool persistAuthTokenToUserProfile = true)
         {
             _port = port;
             _listener = new HttpListener();
@@ -172,6 +175,7 @@ namespace WinWiFi.Services
             _allowedBrowserOrigins.Add($"http://localhost:{_port}");
             _dashboardRoot = ResolveDashboardRoot(dashboardRoot);
             _authToken = GenerateAuthToken();
+            _persistAuthTokenToUserProfile = persistAuthTokenToUserProfile;
 
             _securityAnalyzer = securityAnalyzer ?? new SecurityAnalyzer();
             _wifiService = wifiService ?? new NativeWifiService(_securityAnalyzer);

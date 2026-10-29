@@ -556,9 +556,10 @@ runTest('T12A: Local scan request allowance follows subnet size and port rate', 
   const subnet = { prefixLength: 24, devices: [] } as any;
   const common = estimateLocalNetworkScanTimeout({ fullPortScan: false }, subnet);
   const fullAt100 = estimateLocalNetworkScanTimeout({ fullPortScan: true, probesPerSecond: 100 }, subnet);
+  const fullAt250 = estimateLocalNetworkScanTimeout({ fullPortScan: true, probesPerSecond: 250 }, subnet);
   const fullAt25 = estimateLocalNetworkScanTimeout({ fullPortScan: true, probesPerSecond: 25 }, subnet);
   const largerSubnet = estimateLocalNetworkScanTimeout({ fullPortScan: false }, { prefixLength: 20, devices: [] } as any);
-  if (common <= 5_000 || fullAt100 <= common || fullAt25 <= fullAt100 || largerSubnet <= common) {
+  if (common <= 5_000 || fullAt100 <= common || fullAt25 <= fullAt100 || fullAt250 >= fullAt100 || largerSubnet <= common) {
     throw new Error('Network scan transport allowance did not adapt to actual scan cost inputs');
   }
 });
