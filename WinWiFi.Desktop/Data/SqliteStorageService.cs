@@ -174,6 +174,19 @@ namespace WinWiFi.Data
                 );
                 CREATE INDEX IF NOT EXISTS idx_network_timeline_presence_scope ON network_timeline_presence(project_id, entity_type, entity_key, first_seen_at);
 
+                CREATE TABLE IF NOT EXISTS walk_signal_readings (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    bssid TEXT NOT NULL,
+                    ssid TEXT NOT NULL,
+                    location_name TEXT NOT NULL,
+                    rssi_dbm INTEGER NOT NULL,
+                    signal_quality INTEGER NOT NULL,
+                    captured_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_walk_signal_project_time ON walk_signal_readings(project_id, captured_at);
+                CREATE INDEX IF NOT EXISTS idx_walk_signal_project_bssid ON walk_signal_readings(project_id, bssid, captured_at);
+
                 CREATE TABLE IF NOT EXISTS handshakes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id TEXT NOT NULL,
@@ -1013,6 +1026,77 @@ namespace WinWiFi.Data
             bounds.HasData = bounds.EarliestAt is not null && bounds.LatestAt is not null;
             bounds.Message = bounds.HasData ? string.Empty : "No saved scan observations or network changes exist for this project yet.";
             return bounds;
+        }
+
+        public async Task<WalkSignalReading> SaveWalkSignalReadingAsync(string projectId, WalkSignalReadingRequest request, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            string normalizedProjectId = projectId?.Trim() ?? string.Empty;
+            string bssid = request.Bssid?.Trim().ToUpperInvariant() ?? string.Empty;
+            string ssid = request.Ssid?.Trim() ?? string.Empty;
+            string location = request.LocationName?.Trim() ?? string.Empty;
+            if (normalizedProjectId.Length == 0 || bssid.Length == 0 || location.Length == 0)
+                throw new ArgumentException("Project, access point, and location are required.");
+            if (location.Length > 128 || request.RssiDbm is < -127 or > 0 || request.SignalQuality > 100)
+                throw new ArgumentOutOfRangeException(nameof(request), "Location or signal measurement is outside the allowed range.");
+
+            var reading = new WalkSignalReading
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                ProjectId = normalizedProjectId,
+                Bssid = bssid,
+                Ssid = ssid,
+                LocationName = location,
+                RssiDbm = request.RssiDbm,
+                SignalQuality = request.SignalQuality,
+                CapturedAt = DateTimeOffset.UtcNow.ToString("O")
+            };
+
+            await _writeLock.WaitAsync(cancellationToken);
+            try
+            {
+                using var conn = new SqliteConnection(_connectionString);
+                await conn.OpenAsync(cancellationToken);
+                using var transaction = conn.BeginTransaction();
+                using var cmd = new SqliteCommand(@"INSERT INTO walk_signal_readings
+                    (id, project_id, bssid, ssid, location_name, rssi_dbm, signal_quality, captured_at)
+                    VALUES (@id, @project, @bssid, @ssid, @location, @rssi, @quality, @at);", conn, transaction);
+                cmd.Parameters.AddWithValue("@id", reading.Id);
+                cmd.Parameters.AddWithValue("@project", reading.ProjectId);
+                cmd.Parameters.AddWithValue("@bssid", reading.Bssid);
+                cmd.Parameters.AddWithValue("@ssid", reading.Ssid);
+                cmd.Parameters.AddWithValue("@location", reading.LocationName);
+                cmd.Parameters.AddWithValue("@rssi", reading.RssiDbm);
+                cmd.Parameters.AddWithValue("@quality", (int)reading.SignalQuality);
+                cmd.Parameters.AddWithValue("@at", reading.CapturedAt);
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            finally { _writeLock.Release(); }
+            return reading;
+        }
+
+        public async Task<List<WalkSignalReading>> GetWalkSignalReadingsAsync(string projectId, int limit = 1000, CancellationToken cancellationToken = default)
+        {
+            ValidateProjectId(projectId);
+            var readings = new List<WalkSignalReading>();
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync(cancellationToken);
+            using var cmd = new SqliteCommand(@"SELECT id, project_id, bssid, ssid, location_name, rssi_dbm, signal_quality, captured_at
+                FROM walk_signal_readings WHERE project_id=@project ORDER BY captured_at DESC LIMIT @limit;", conn);
+            cmd.Parameters.AddWithValue("@project", projectId);
+            cmd.Parameters.AddWithValue("@limit", Math.Clamp(limit, 1, 5000));
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                readings.Add(new WalkSignalReading
+                {
+                    Id = reader.GetString(0), ProjectId = reader.GetString(1), Bssid = reader.GetString(2),
+                    Ssid = reader.GetString(3), LocationName = reader.GetString(4), RssiDbm = reader.GetInt32(5),
+                    SignalQuality = (uint)reader.GetInt32(6), CapturedAt = reader.GetString(7)
+                });
+            }
+            return readings;
         }
 
         public async Task<NetworkTimelineState> GetNetworkTimeMachineStateAsync(string projectId, string at, CancellationToken cancellationToken = default)

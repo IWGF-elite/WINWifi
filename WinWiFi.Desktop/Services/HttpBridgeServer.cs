@@ -531,6 +531,10 @@ namespace WinWiFi.Services
                         await HandleNetworkTimeMachineStateAsync(request, response);
                         break;
 
+                    case "/api/walk-mode":
+                        await HandleWalkModeAsync(request, response);
+                        break;
+
                     case "/api/projects":
                         await HandleProjectsAsync(request, response);
                         break;
@@ -1036,6 +1040,71 @@ namespace WinWiFi.Services
                 return;
             }
             await WriteJsonAsync(response, await _storage.GetNetworkTimeMachineStateAsync(projectId, at!, _cts?.Token ?? CancellationToken.None));
+        }
+
+        private async Task HandleWalkModeAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (_storage is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                await WriteJsonErrorAsync(response, HttpStatusCode.ServiceUnavailable, "storage_unavailable", "Signal measurements cannot be saved because local storage is unavailable.");
+                return;
+            }
+
+            string? projectId = ResolveProjectId(request);
+            if (projectId is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "project_required", "Select a project before recording a signal measurement.");
+                return;
+            }
+
+            if (request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonAsync(response, await _storage.GetWalkSignalReadingsAsync(projectId, 1000, _cts?.Token ?? CancellationToken.None));
+                return;
+            }
+            if (!request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                await WriteJsonErrorAsync(response, HttpStatusCode.MethodNotAllowed, "method_not_allowed", "Use GET to view saved measurements or POST to record the selected access point.");
+                return;
+            }
+
+            WalkSignalReadingRequest body;
+            try { body = await JsonSerializer.DeserializeAsync<WalkSignalReadingRequest>(request.InputStream, JsonOptions) ?? new(); }
+            catch (JsonException)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_measurement", "The signal measurement request could not be read.");
+                return;
+            }
+
+            string bssid = body.Bssid.Trim();
+            AccessPoint? observed = _latestAccessPoints.FirstOrDefault(ap => ap.Bssid.Equals(bssid, StringComparison.OrdinalIgnoreCase) && ap.IsActiveInCurrentScan);
+            if (observed is null)
+            {
+                response.StatusCode = (int)HttpStatusCode.Conflict;
+                await WriteJsonErrorAsync(response, HttpStatusCode.Conflict, "access_point_not_observed", "That access point is not present in the current live scan. Refresh the scan before recording a location.");
+                return;
+            }
+            try
+            {
+                var reading = await _storage.SaveWalkSignalReadingAsync(projectId, new WalkSignalReadingRequest
+                {
+                    Bssid = observed.Bssid,
+                    Ssid = observed.Ssid,
+                    LocationName = body.LocationName,
+                    RssiDbm = observed.Rssi,
+                    SignalQuality = observed.SignalQuality
+                }, _cts?.Token ?? CancellationToken.None);
+                await WriteJsonAsync(response, reading);
+            }
+            catch (ArgumentException ex)
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                await WriteJsonErrorAsync(response, HttpStatusCode.BadRequest, "invalid_measurement", ex.Message);
+            }
         }
 
         private async Task HandleProjectAccessPointsAsync(HttpListenerRequest request, HttpListenerResponse response)

@@ -215,6 +215,39 @@ namespace WinWiFi.Tests
             });
             results.Add(t6);
 
+            results.Add(await RunTestAsync("T6A-WALK-SIGNAL-STORAGE", "Named Walk Signal Measurements Persist In SQLite", async () =>
+            {
+                string tempDb = Path.Combine(Path.GetTempPath(), $"test_walk_signal_{Guid.NewGuid():N}.db");
+                try
+                {
+                    using var storage = new SqliteStorageService(tempDb);
+                    var saved = await storage.SaveWalkSignalReadingAsync("walk-test", new WalkSignalReadingRequest
+                    {
+                        Bssid = "00:11:22:33:44:55", Ssid = "Authorized Test Network", LocationName = "North office",
+                        RssiDbm = -61, SignalQuality = 72
+                    });
+                    var readings = await storage.GetWalkSignalReadingsAsync("walk-test");
+                    if (readings.Count != 1 || readings[0].Id != saved.Id || readings[0].LocationName != "North office" || readings[0].RssiDbm != -61)
+                        throw new Exception("The saved location or measured signal did not survive the SQLite read-back.");
+                    var otherProject = await storage.GetWalkSignalReadingsAsync("other-project");
+                    if (otherProject.Count != 0) throw new Exception("Walk measurements were visible outside their project scope.");
+                    return "Stored and reloaded one project-scoped -61 dBm reading; unrelated project returned zero records.";
+                }
+                finally
+                {
+                    SqliteStorageService.ReleaseAllPools();
+                    try
+                    {
+                        foreach (var suffix in new[] { "", "-wal", "-shm" })
+                        {
+                            string path = tempDb + suffix;
+                            if (File.Exists(path)) File.Delete(path);
+                        }
+                    }
+                    catch { }
+                }
+            }));
+
             // Test 7A: Legitimate Duplicate SSID Roaming (Campus APs - 0 False Positives)
             results.Add(RunTest("T7A-LEGIT-ROAMING", "Legitimate Duplicate SSID Roaming (Zero False Positives)", () =>
             {

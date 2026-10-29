@@ -175,6 +175,17 @@ export interface NetworkTimelineState {
   changes: NetworkTimelineEvent[];
 }
 
+export interface WalkSignalReading {
+  id: string;
+  projectId: string;
+  bssid: string;
+  ssid: string;
+  locationName: string;
+  rssiDbm: number;
+  signalQuality: number;
+  capturedAt: string;
+}
+
 export interface LocalConnectionRecord {
   protocol: 'TCP' | 'UDP' | string;
   localAddress: string;
@@ -584,6 +595,7 @@ export type ActiveTab =
   | 'dashboard'
   | 'doctor'
   | 'time-machine'
+  | 'walk-mode'
   | 'discover'
   | 'discovery'
   | 'networks'

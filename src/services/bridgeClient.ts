@@ -13,7 +13,8 @@ import {
   LocalNetworkActivity,
   NetworkDoctorCheck,
   NetworkTimelineBounds,
-  NetworkTimelineState
+  NetworkTimelineState,
+  WalkSignalReading
 } from '../types';
 import {
   BridgeErrorKind,
@@ -442,6 +443,17 @@ export class NativeBridgeClient {
 
   public async getNetworkTimelineState(at: string): Promise<NetworkTimelineState> {
     return await this.request<NetworkTimelineState>(`/api/network-time-machine/state?at=${encodeURIComponent(at)}`, {}, 12_000);
+  }
+
+  public async getWalkSignalReadings(): Promise<WalkSignalReading[]> {
+    return await this.request<WalkSignalReading[]>('/api/walk-mode', {}, 12_000);
+  }
+
+  public async recordWalkSignalReading(bssid: string, locationName: string): Promise<WalkSignalReading> {
+    return await this.request<WalkSignalReading>('/api/walk-mode', {
+      method: 'POST',
+      body: JSON.stringify({ bssid, locationName })
+    }, 12_000);
   }
 
   public async getLocalNetworkActivity(): Promise<LocalNetworkActivity> {
