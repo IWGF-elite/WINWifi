@@ -11,6 +11,9 @@ const currentDbm = (ap?: AccessPoint) => ap && Number.isFinite(ap.rssi) ? ap.rss
 const qualityLabel = (dbm: number | null) => dbm === null ? 'No live reading' : dbm >= -55 ? 'Strong' : dbm >= -67 ? 'Good' : dbm >= -78 ? 'Weak' : 'Cold';
 const qualityColor = (dbm: number) => dbm >= -55 ? 'bg-emerald-400' : dbm >= -67 ? 'bg-lime-400' : dbm >= -78 ? 'bg-amber-400' : 'bg-rose-500';
 
+export const crossedSignalThreshold = (previousDbm: number | null, currentDbm: number | null, thresholdDbm: number) =>
+  previousDbm !== null && currentDbm !== null && previousDbm < thresholdDbm && currentDbm >= thresholdDbm;
+
 export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, bridgeConnected }) => {
   const bridge = useMemo(() => NativeBridgeClient.getInstance(), []);
   const liveAccessPoints = useMemo(() => bridgeConnected
@@ -29,6 +32,30 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
   const audioRef = useRef<AudioContext | null>(null);
   const previousRef = useRef<{ bssid: string; dbm: number | null }>({ bssid: '', dbm: null });
 
+  const playSignalBeep = useCallback(async () => {
+    const context = audioRef.current;
+    if (!context) return false;
+    try {
+      if (context.state !== 'running') await context.resume();
+      if (context.state !== 'running') return false;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const start = context.currentTime;
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.08, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(start + 0.19);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const selectedAp = liveAccessPoints.find(ap => ap.bssid.toLowerCase() === selectedBssid.toLowerCase()) || liveAccessPoints[0];
   const dbm = currentDbm(selectedAp);
 
@@ -46,24 +73,20 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
 
   useEffect(() => {
     const previous = previousRef.current;
-    if (beepEnabled && dbm !== null && selectedAp && previous.bssid === selectedAp.bssid && previous.dbm !== null && previous.dbm < minimumSignal && dbm >= minimumSignal) {
-      const context = audioRef.current;
-      if (context) {
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        oscillator.type = 'sine'; oscillator.frequency.value = 880; gain.gain.value = 0.08;
-        oscillator.connect(gain); gain.connect(context.destination);
-        oscillator.start(); oscillator.stop(context.currentTime + 0.12);
-      }
+    if (beepEnabled && selectedAp && previous.bssid === selectedAp.bssid && crossedSignalThreshold(previous.dbm, dbm, minimumSignal)) {
+      void playSignalBeep().then(played => {
+        if (!played) setError('Signal beep could not play. Press the signal beep button to reactivate Windows audio.');
+      });
     }
     previousRef.current = { bssid: selectedAp?.bssid || '', dbm };
-  }, [beepEnabled, dbm, minimumSignal, selectedAp]);
+  }, [beepEnabled, dbm, minimumSignal, playSignalBeep, selectedAp]);
 
   const toggleBeep = async () => {
     if (beepEnabled) {
       setBeepEnabled(false);
       await audioRef.current?.close().catch(() => undefined);
       audioRef.current = null;
+      setMessage('Signal beep turned off.');
       return;
     }
     const AudioContextType = window.AudioContext;
@@ -71,9 +94,15 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
     try {
       audioRef.current = new AudioContextType();
       await audioRef.current.resume();
+      const played = await playSignalBeep();
+      if (!played) throw new Error('audio-playback-failed');
       previousRef.current = { bssid: selectedAp?.bssid || '', dbm };
-      setBeepEnabled(true); setError('');
-    } catch { setError('Windows did not allow an audio alert to start.'); }
+      setBeepEnabled(true); setError(''); setMessage('Signal beep is on. Test tone played; it will sound when the selected network reaches the threshold.');
+    } catch {
+      await audioRef.current?.close().catch(() => undefined);
+      audioRef.current = null;
+      setError('Windows did not allow an audio alert to start. Check the device volume, then try again.');
+    }
   };
 
   const recordLocation = async () => {
@@ -107,7 +136,7 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
   return <div className="mx-auto w-full max-w-[1280px] space-y-4 text-slate-100">
     <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
       <div><h1 className="text-lg font-bold">Walk Mode &amp; Rogue Hunter</h1><p className="mt-1 text-xs text-slate-400">Track one access point’s live signal and save readings at locations you name.</p></div>
-      <div className="flex gap-2"><button onClick={() => void reload()} disabled={!bridgeConnected || busy} className="rounded-lg border border-slate-700 px-3 py-2 text-xs hover:bg-slate-800 disabled:opacity-50">Refresh locations</button><button onClick={() => void toggleBeep()} disabled={!selectedAp || !bridgeConnected} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${beepEnabled ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200' : 'border-slate-700 hover:bg-slate-800'}`}>{beepEnabled ? 'Signal beep on' : 'Enable signal beep'}</button></div>
+      <div className="flex flex-wrap gap-2"><button onClick={() => void reload()} disabled={!bridgeConnected || busy} className="whitespace-nowrap rounded-lg border border-slate-700 px-3 py-2 text-xs hover:bg-slate-800 disabled:opacity-50">Refresh locations</button><button onClick={() => void toggleBeep()} disabled={!selectedAp || !bridgeConnected} className={`whitespace-nowrap rounded-lg border px-3 py-2 text-xs font-semibold ${beepEnabled ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200' : 'border-slate-700 hover:bg-slate-800'}`}>{beepEnabled ? 'Signal beep on' : 'Enable signal beep'}</button></div>
     </header>
     {!bridgeConnected && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">Connect the Windows bridge to use live signal readings.</p>}
     {error && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</p>}
@@ -117,7 +146,7 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
         <label className="block space-y-2 text-xs text-slate-400">Access point<select value={selectedAp?.bssid || ''} onChange={event => setSelectedBssid(event.target.value)} disabled={!liveAccessPoints.length} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"><option value="">No live access points</option>{liveAccessPoints.map(ap => <option key={ap.bssid} value={ap.bssid}>{ap.ssid || '(hidden network)'} · {ap.bssid}</option>)}</select></label>
         {selectedAp ? <><div className="flex flex-wrap items-end justify-between gap-4"><div><div className="text-[11px] uppercase tracking-wide text-slate-500">Live signal</div><div className="mt-1 text-4xl font-black tabular-nums">{dbm ?? '—'}<span className="ml-1 text-base font-medium text-slate-400">dBm</span></div><div className="mt-1 text-sm font-semibold text-cyan-300">{qualityLabel(dbm)}</div></div><div className="flex h-14 items-end gap-1.5" aria-label={`Signal ${qualityLabel(dbm)}`}>{[0, 1, 2, 3].map(index => <span key={index} className={`w-7 rounded-t ${index < bars && dbm !== null ? qualityColor(dbm) : 'bg-slate-700'}`} style={{ height: `${16 + index * 10}px` }} />)}</div></div>
           <div className="text-[11px] text-slate-500">{selectedAp.ssid || 'Hidden network'} · {selectedAp.bssid} · Ch {selectedAp.channel} · {selectedAp.band}</div>
-          <label className="block space-y-2 text-xs text-slate-400">Beep when signal reaches <span className="font-semibold text-slate-200">{minimumSignal} dBm</span><input type="range" min="-85" max="-45" value={minimumSignal} onChange={event => setMinimumSignal(Number(event.target.value))} className="w-full accent-cyan-400" /></label>
+          <label className="block min-w-0 text-xs text-slate-400"><span className="block leading-5">Beep when signal reaches <strong className="font-semibold text-slate-200">{minimumSignal} dBm</strong></span><input aria-label="Signal threshold for beep alert" type="range" min="-85" max="-45" value={minimumSignal} onChange={event => setMinimumSignal(Number(event.target.value))} className="mt-2 block w-full accent-cyan-400" /></label>
         </> : <p className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-400">No current live WLAN scan reading is available. Turn on the Wi-Fi radio and refresh the scan.</p>}
       </div>
       <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4"><h2 className="text-sm font-bold">Save a named location</h2><p className="text-xs text-slate-400">Each saved point uses the current Windows scan reading. Enter a room or place name, then record while standing there.</p><label className="block space-y-2 text-xs text-slate-400">Location name<input value={locationName} onChange={event => setLocationName(event.target.value)} maxLength={128} placeholder="e.g. Conference room" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600" /></label><button onClick={() => void recordLocation()} disabled={!bridgeConnected || !selectedAp || !locationName.trim() || busy} className="w-full rounded-lg bg-cyan-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50">{busy ? 'Saving…' : 'Record current signal'}</button></div>

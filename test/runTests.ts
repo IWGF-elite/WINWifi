@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { CommandCenterDashboard } from '../src/components/CommandCenterDashboard';
-import { WalkModePanel } from '../src/components/WalkModePanel';
+import { WalkModePanel, crossedSignalThreshold } from '../src/components/WalkModePanel';
 import { NetworkDiscovery } from '../src/components/NetworkDiscovery';
 import { ClientObserver } from '../src/components/ClientObserver';
 import { formatScanAge } from '../src/components/LanDeviceInventory';
@@ -2166,6 +2166,20 @@ runTest('T37: Header Actions Stay Above Floating Page Content', () => {
   }));
   if (!markup.includes('relative z-30 isolate') || !markup.includes('>Import</span>') || !markup.includes('>Start Scan</span>')) {
     throw new Error('The action bar does not keep the scan and import controls in the elevated header layer');
+  }
+  if (markup.includes('Scanning…') || markup.includes('Updated ') || !markup.includes('(Windows WLAN)')) {
+    throw new Error('The live header is showing a repeated scan-update message instead of a stable live-data label');
+  }
+});
+
+runTest('T39: Walk Mode Beep Threshold Crossings Are Directional And Exposed', () => {
+  if (!crossedSignalThreshold(-70, -66, -67) || crossedSignalThreshold(-66, -70, -67) || crossedSignalThreshold(null, -60, -67)) {
+    throw new Error('Signal beep does not fire only when a real reading rises through its threshold.');
+  }
+  const ap = { bssid: '00:11:22:33:44:55', ssid: 'Live AP', rssi: -70, channel: 6, band: '2.4 GHz', dataSourceOrigin: 'LIVE_WINDOWS', isActiveInCurrentScan: true } as any;
+  const markup = renderToStaticMarkup(createElement(WalkModePanel, { accessPoints: [ap], bridgeConnected: true }));
+  if (!markup.includes('Enable signal beep') || !markup.includes('Signal threshold for beep alert') || !markup.includes('Beep when signal reaches')) {
+    throw new Error('Walk Mode does not expose an operable beep toggle and labeled threshold control.');
   }
 });
 

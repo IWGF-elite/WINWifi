@@ -173,16 +173,16 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
     switch (cls) {
       case 'Corporate':
       case 'Trusted':
-        return <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Trusted Corporate</span>;
+        return <span className="inline-flex whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Trusted Corporate</span>;
       case 'Guest':
-        return <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">Guest Network</span>;
+        return <span className="inline-flex whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">Guest Network</span>;
       case 'IoT':
-        return <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">IoT Endpoint</span>;
+        return <span className="inline-flex whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">IoT Endpoint</span>;
       case 'Rogue':
       case 'Suspicious':
-        return <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">Rogue / Suspicious</span>;
+        return <span className="inline-flex whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">Rogue / Suspicious</span>;
       default:
-        return <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-700/60 text-slate-300 border border-slate-600">Unknown Asset</span>;
+        return <span className="inline-flex whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-700/60 text-slate-300 border border-slate-600">Unknown Asset</span>;
     }
   };
 
@@ -214,7 +214,7 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
     const detail = result.failedRules.length ? result.failedRules.join('\n') : 'No policy violations found.';
     return (
       <div title={detail}>
-        <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${tone}`}>{result.status}</span>
+        <span className={`inline-flex whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-semibold border ${tone}`}>{result.status}</span>
         <div className="text-[10px] text-slate-500 mt-0.5">{result.policyName}</div>
       </div>
     );
@@ -344,12 +344,12 @@ export const AssetInventory: React.FC<AssetInventoryProps> = ({
       {/* Assets Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[1120px] text-left text-xs">
             <thead className="bg-slate-800/80 text-slate-400 font-semibold uppercase tracking-wider text-[10px] border-b border-slate-700/80">
               <tr>
                 <th className="py-3 px-4">Network Identity / SSID</th>
-                <th className="py-3 px-4">Classification</th>
-                <th className="py-3 px-4">Approval Status</th>
+                <th className="whitespace-nowrap py-3 px-4">Classification</th>
+                <th className="whitespace-nowrap py-3 px-4">Approval Status</th>
                 <th className="py-3 px-4">Policy</th>
                 <th className="py-3 px-4">Location / Site</th>
                 <th className="py-3 px-4">Security Suite</th>

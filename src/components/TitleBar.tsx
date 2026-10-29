@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { 
   Radio, 
   Play, 
@@ -72,11 +72,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onToggleFullscreen,
 }) => {
   const [isFittedToScreen, setIsFittedToScreen] = useState(false);
-  const [clockNow, setClockNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
   const nativeWindow = (action: 'minimize' | 'fit' | 'close') => {
     (window as any).chrome?.webview?.postMessage?.(`window:${action}`);
   };
@@ -220,26 +215,20 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           )}
 
           {/* Prominent Data Origin Pill */}
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold tracking-wide text-[11px] ${origin.classes}`}>
+          <div title={dataSourceProfile === 'LIVE_WINDOWS' && lastScanCompletedAt !== null ? `Live Windows WLAN data · last update ${new Date(lastScanCompletedAt).toLocaleTimeString()}` : undefined} className={`flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold tracking-wide text-[11px] ${origin.classes}`}>
             {origin.icon}
             <span>{origin.label}</span>
           </div>
-          {dataSourceProfile === 'LIVE_WINDOWS' && (
-            <span role="status" aria-live="polite" className="inline-flex items-center gap-1 text-[10px] text-slate-400">
-              <span className={`h-1.5 w-1.5 rounded-full ${scannerState === 'Scanning' ? 'animate-pulse bg-amber-400' : scannerState === 'Error' || scannerState === 'AdapterUnavailable' ? 'bg-rose-400' : 'bg-emerald-400'}`} />
-              {scannerState === 'Scanning'
-                ? 'Scanning…'
-                : scannerState === 'Error' || scannerState === 'AdapterUnavailable'
-                  ? `Scan ${scannerState === 'Error' ? 'error' : 'unavailable'}`
-                  : lastScanCompletedAt === null
-                    ? 'Waiting for scan'
-                    : `${scannerState === 'Paused' ? 'Paused · ' : ''}Updated ${Math.max(0, Math.floor((clockNow - lastScanCompletedAt) / 1000))}s ago`}
+          {dataSourceProfile === 'LIVE_WINDOWS' && (scannerState === 'Error' || scannerState === 'AdapterUnavailable' || scannerState === 'Paused' || lastScanCompletedAt === null) && (
+            <span role="status" className={`inline-flex items-center gap-1 text-[10px] ${scannerState === 'Error' || scannerState === 'AdapterUnavailable' ? 'text-rose-300' : 'text-slate-400'}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${scannerState === 'Error' || scannerState === 'AdapterUnavailable' ? 'bg-rose-400' : 'bg-amber-400'}`} />
+              {scannerState === 'Error' ? 'Scan error' : scannerState === 'AdapterUnavailable' ? 'Wi-Fi unavailable' : scannerState === 'Paused' ? 'Scan paused' : 'Waiting for scan'}
             </span>
           )}
 
           {/* Active Detail Label */}
           <span className="text-[11px] text-slate-400 max-w-[150px] truncate hidden sm:inline" title={activeSourceLabel}>
-            ({activeSourceLabel})
+            ({dataSourceProfile === 'LIVE_WINDOWS' ? 'Windows WLAN' : activeSourceLabel})
           </span>
 
           {/* Native Bridge Pill */}
