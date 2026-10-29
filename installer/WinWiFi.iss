@@ -33,4 +33,7 @@ Name: "{autodesktop}\WinWiFi Security Auditor"; Filename: "{app}\{#AppExeName}";
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 
 [Run]
+; The publish script bundles Microsoft's signed WebView2 bootstrapper. This
+; installs the runtime when required before the WPF dashboard is launched.
+Filename: "{app}\Install-WebView2Runtime.exe"; Parameters: "/silent /install"; StatusMsg: "Preparing the Windows dashboard runtime..."; Flags: waituntilterminated
 Filename: "{app}\{#AppExeName}"; Description: "Launch WinWiFi Security Auditor"; Flags: nowait postinstall skipifsilent

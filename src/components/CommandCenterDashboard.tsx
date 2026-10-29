@@ -99,6 +99,14 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
 
   // Attention Items
   const attentionItems = [
+    ...(unknownNetworks > 0 ? [{
+      id: 'att-scope-review',
+      title: `${unknownNetworks} Observed Networks Await Scope Review`,
+      desc: 'Confirm ownership and authorization in Projects & Scope before using scoped audit actions.',
+      severity: 'MEDIUM',
+      tab: 'projects' as ActiveTab,
+      targetFilter: 'pending'
+    }] : []),
     ...(rogueNetworks > 0 ? [{
       id: 'att-rogue',
       title: `${rogueNetworks} Suspected Rogue / Evil Twin APs Active`,

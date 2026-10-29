@@ -13,9 +13,11 @@ const qualityColor = (dbm: number) => dbm >= -55 ? 'bg-emerald-400' : dbm >= -67
 
 export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, bridgeConnected }) => {
   const bridge = useMemo(() => NativeBridgeClient.getInstance(), []);
-  const liveAccessPoints = useMemo(() => accessPoints
-    .filter(ap => ap.dataSourceOrigin === 'LIVE_WINDOWS' && ap.isActiveInCurrentScan !== false && ap.bssid)
-    .sort((a, b) => a.ssid.localeCompare(b.ssid) || a.bssid.localeCompare(b.bssid)), [accessPoints]);
+  const liveAccessPoints = useMemo(() => bridgeConnected
+    ? accessPoints
+      .filter(ap => ap.dataSourceOrigin === 'LIVE_WINDOWS' && ap.isActiveInCurrentScan !== false && ap.bssid)
+      .sort((a, b) => a.ssid.localeCompare(b.ssid) || a.bssid.localeCompare(b.bssid))
+    : [], [accessPoints, bridgeConnected]);
   const [selectedBssid, setSelectedBssid] = useState('');
   const [locationName, setLocationName] = useState('');
   const [minimumSignal, setMinimumSignal] = useState(-67);

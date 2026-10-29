@@ -67,6 +67,8 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   // Presentation-only pagination (Dataset is never truncated)
   const [pageSize, setPageSize] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const hasCaptureData = dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED' || accessPoints.some(ap =>
+    ap.dataSourceOrigin === 'IMPORTED' || !!ap.handshake || (ap.dataPacketCount || 0) > 0 || (ap.clients?.length || 0) > 0);
 
   // Filter logic over 100% of discovered access points
   const filtered = useMemo(() => {
@@ -419,7 +421,9 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
               <th className="py-2.5 px-3">
                 <button 
                   onClick={() => toggleSort('clients')} 
-                  className="flex items-center gap-1 hover:text-slate-200"
+                  disabled={!hasCaptureData}
+                  title={hasCaptureData ? 'Sort by clients observed in the imported capture' : 'Client counts require imported packet capture data'}
+                  className="flex items-center gap-1 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Clients
                   <ArrowUpDown className="w-3 h-3 opacity-60" />
@@ -428,7 +432,9 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
               <th className="py-2.5 px-3">
                 <button 
                   onClick={() => toggleSort('dataPacketCount')} 
-                  className="flex items-center gap-1 hover:text-slate-200"
+                  disabled={!hasCaptureData}
+                  title={hasCaptureData ? 'Sort by packets observed in the imported capture' : 'Packet counts require imported packet capture data'}
+                  className="flex items-center gap-1 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Packets
                   <ArrowUpDown className="w-3 h-3 opacity-60" />
@@ -493,11 +499,11 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
             ) : (
               paginatedApList.map((ap) => {
                 const isSelected = ap.bssid === selectedBssid;
-                const originType = ap.dataSourceOrigin || (
-                  dataSourceProfile === 'LIVE_WINDOWS' ? 'LIVE_WINDOWS' :
-                  dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'IMPORTED' ? 'IMPORTED' :
-                  dataSourceProfile === 'OFFLINE' ? 'OFFLINE' : 'TRAINING'
-                );
+                const originType = dataSourceProfile === 'LIVE_WINDOWS'
+                  ? 'LIVE_WINDOWS'
+                  : dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'IMPORTED'
+                    ? 'IMPORTED'
+                    : 'OFFLINE';
 
                 return (
                   <tr
@@ -594,13 +600,13 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-1.5 text-slate-300">
                         <Users className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="font-mono">{dataSourceProfile === 'LIVE_WINDOWS' ? 'N/A (needs capture)' : (ap.clients?.length || 0)}</span>
+                        <span className="font-mono">{hasCaptureData ? (ap.clients?.length || 0) : 'N/A (needs capture)'}</span>
                       </div>
                     </td>
 
                     {/* Packets */}
                     <td className="py-3 px-3">
-                      <span className="font-mono text-slate-400">{dataSourceProfile === 'LIVE_WINDOWS' ? 'N/A (needs capture)' : ap.dataPacketCount.toLocaleString()}</span>
+                      <span className="font-mono text-slate-400">{hasCaptureData ? ap.dataPacketCount.toLocaleString() : 'N/A (needs capture)'}</span>
                     </td>
 
                     {/* Score */}
@@ -646,10 +652,10 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
             Matching Filters: <strong className="text-slate-200 font-mono">{sorted.length}</strong>
           </span>
           <span>
-            Associated Clients: <strong className="text-slate-200 font-mono">{accessPoints.reduce((acc, a) => acc + (a.clients?.length || 0), 0)}</strong>
+            Associated Clients: <strong className="text-slate-200 font-mono">{hasCaptureData ? accessPoints.reduce((acc, a) => acc + (a.clients?.length || 0), 0) : 'N/A (needs capture)'}</strong>
           </span>
           <span>
-            Captured Handshakes: <strong className="text-emerald-400 font-mono">{accessPoints.filter(a => !!a.handshake).length}</strong>
+            Captured Handshakes: <strong className="text-emerald-400 font-mono">{hasCaptureData ? accessPoints.filter(a => !!a.handshake).length : 'N/A (needs capture)'}</strong>
           </span>
         </div>
 

@@ -38,6 +38,8 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
   const isLiveMode = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
   const isPcap = dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED';
   const hasObservationSource = isLiveMode || isPcap;
+  const hasClientCaptureData = isPcap || stationClients.length > 0 || accessPoints.some(ap =>
+    ap.dataSourceOrigin === 'IMPORTED' || !!ap.handshake || (ap.dataPacketCount || 0) > 0 || (ap.clients?.length || 0) > 0);
 
   // Flatten all clients from all APs
   const allClients: (ClientDevice & { apSsid: string; apChannel: number; apSecurity: string })[] = [];
@@ -142,9 +144,9 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
             <span>Observed Stations</span>
             <Laptop className="w-4 h-4 text-blue-400" />
           </div>
-          <div className="text-2xl font-bold text-slate-100 mt-1">{allClients.length}</div>
+          <div className="text-2xl font-bold text-slate-100 mt-1">{hasClientCaptureData ? allClients.length : 'N/A (needs capture)'}</div>
           <div className="text-[11px] text-slate-500 mt-1">
-            {hasObservationSource ? 'From current scan or imported capture' : 'No current scan or capture data'}
+            {hasClientCaptureData ? 'From captured 802.11 station frames' : isLiveMode ? 'A standard WLAN scan cannot report client stations' : 'Import a Wi-Fi packet capture to report client stations'}
           </div>
         </div>
 
@@ -154,7 +156,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
             <Wifi className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-bold text-emerald-300 mt-1">
-            {allClients.filter(c => c.isAssociated).length}
+            {hasClientCaptureData ? allClients.filter(c => c.isAssociated).length : 'N/A (needs capture)'}
           </div>
           <div className="text-[11px] text-slate-500 mt-1">Active data/QoS sessions</div>
         </div>
@@ -165,7 +167,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
             <Lock className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-2xl font-bold text-amber-300 mt-1">
-            {allClients.filter(c => (c.eapolPacketsObserved || 0) > 0).length}
+            {hasClientCaptureData ? allClients.filter(c => (c.eapolPacketsObserved || 0) > 0).length : 'N/A (needs capture)'}
           </div>
           <div className="text-[11px] text-slate-500 mt-1">Handshake exchanges logged</div>
         </div>
@@ -219,7 +221,13 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-200">
-              {filtered.length === 0 ? (
+              {!hasClientCaptureData ? (
+                <tr><td colSpan={7} className="text-center py-16 text-slate-500">
+                  <Info className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                  <p className="text-sm font-medium text-slate-400">Client stations need packet capture data</p>
+                  <p className="text-xs mt-1">A standard Windows WLAN scan cannot report nearby client devices. Import a Wi-Fi capture to populate this view.</p>
+                </td></tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400 space-y-3">
                     <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-slate-500">

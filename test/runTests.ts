@@ -1,6 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { CommandCenterDashboard } from '../src/components/CommandCenterDashboard';
+import { WalkModePanel } from '../src/components/WalkModePanel';
+import { NetworkDiscovery } from '../src/components/NetworkDiscovery';
+import { ClientObserver } from '../src/components/ClientObserver';
 import { PcapService } from '../src/services/pcapParser';
 import { WifiEngine, isWebView2Host } from '../src/services/wifiEngine';
 import { CapabilityMatrixService } from '../src/services/capabilityMatrix';
@@ -2023,6 +2029,84 @@ runTest('T31: Station Client Records Map Without Inventing An Association', () =
   const appSource = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf8');
   if (!/bridgeClient\.onClients\(/.test(appSource)) {
     throw new Error('App.tsx never subscribes to the native station client stream');
+  }
+});
+
+runTest('T32: Command Center Surfaces Networks Awaiting Scope Review', () => {
+  const ap = {
+    bssid: '00:11:22:33:44:55', ssid: 'Observed network', rssi: -55,
+    channel: 6, band: '2.4 GHz', security: 'WPA2-PSK', cipher: 'CCMP',
+    wpsEnabled: false, wpsLocked: false, pmfRequired: false, vendor: 'Unknown',
+    beaconCount: 1, dataPacketCount: 0, firstSeen: '2026-10-29T00:00:00Z',
+    lastSeen: '2026-10-29T00:00:00Z', standard: '802.11n (Wi-Fi 4)', clients: [],
+    securityScore: 70, issues: [], approvedStatus: 'Pending Review'
+  } as any;
+  const markup = renderToStaticMarkup(createElement(CommandCenterDashboard, {
+    accessPoints: [ap], incidents: [], securityChanges: [], uiMode: 'beginner',
+    isScanning: true, onNavigate: () => undefined, onSelectAP: () => undefined
+  }));
+  if (!markup.includes('1 Observed Networks Await Scope Review')) {
+    throw new Error('Pending live networks do not appear in the Command Center attention list');
+  }
+});
+
+runTest('T33: Walk Mode Never Presents Cached RSSI As Live When Bridge Is Offline', () => {
+  const cachedAp = {
+    bssid: '00:11:22:33:44:55', ssid: 'Previously observed', rssi: -83,
+    channel: 6, band: '2.4 GHz', dataSourceOrigin: 'LIVE_WINDOWS', isActiveInCurrentScan: true
+  } as any;
+  const markup = renderToStaticMarkup(createElement(WalkModePanel, {
+    accessPoints: [cachedAp], bridgeConnected: false
+  }));
+  if (markup.includes('Live signal') || markup.includes('-83')) {
+    throw new Error('Walk Mode displays an old cached RSSI as a live reading while the bridge is offline');
+  }
+  if (!markup.includes('Connect the Windows bridge to use live signal readings.')) {
+    throw new Error('Walk Mode does not explain why live readings are unavailable');
+  }
+});
+
+runTest('T34: Network Grid Preserves Offline Provenance And Hides Uncaptured Counts', () => {
+  const ap = {
+    bssid: '00:11:22:33:44:55', ssid: 'Cached observation', rssi: -60,
+    channel: 6, band: '2.4 GHz', channelWidthMhz: 20, security: 'WPA2-PSK',
+    cipher: 'CCMP', wpsEnabled: false, wpsLocked: false, pmfRequired: false,
+    vendor: 'Unknown', beaconCount: 12, dataPacketCount: 0,
+    firstSeen: '2026-10-29T00:00:00Z', lastSeen: '2026-10-29T00:00:00Z',
+    standard: '802.11n (Wi-Fi 4)', clients: [], securityScore: 90, riskScore: 10,
+    issues: [], dataSourceOrigin: 'LIVE_WINDOWS'
+  } as any;
+  const markup = renderToStaticMarkup(createElement(NetworkDiscovery, {
+    accessPoints: [ap], selectedBssid: null, onSelectAp: () => undefined,
+    onCaptureHandshake: () => undefined, dataSourceProfile: 'OFFLINE',
+    activeSourceLabel: 'Offline data', isDarkMode: true
+  }));
+  if (!markup.includes('OFFLINE') || markup.includes('>LIVE<')) {
+    throw new Error('A cached WLAN observation is still labeled as live in offline mode');
+  }
+  if ((markup.match(/N\/A \(needs capture\)/g) || []).length < 4) {
+    throw new Error('Offline WLAN-only data still displays zero client, packet, or handshake counts');
+  }
+  if (!markup.includes('Client counts require imported packet capture data') || !markup.includes('Packet counts require imported packet capture data')) {
+    throw new Error('Unsupported client/packet sort buttons are not disabled with an explanation');
+  }
+});
+
+runTest('T35: Client View Does Not Report Zero When WLAN Scan Cannot See Stations', () => {
+  const ap = {
+    bssid: '00:11:22:33:44:55', ssid: 'Observed network', rssi: -55,
+    channel: 6, band: '2.4 GHz', security: 'WPA2-PSK', clients: [],
+    dataPacketCount: 0, dataSourceOrigin: 'LIVE_WINDOWS'
+  } as any;
+  const markup = renderToStaticMarkup(createElement(ClientObserver, {
+    accessPoints: [ap], stationClients: [], uiMode: 'beginner',
+    dataSourceProfile: 'LIVE_WINDOWS', onSelectAP: () => undefined
+  }));
+  if ((markup.match(/N\/A \(needs capture\)/g) || []).length < 3) {
+    throw new Error('The client view reports zero stations, associations, or EAPOL activity without capture evidence');
+  }
+  if (!markup.includes('A standard Windows WLAN scan cannot report nearby client devices')) {
+    throw new Error('The client view does not explain why a packet capture is needed');
   }
 });
 
