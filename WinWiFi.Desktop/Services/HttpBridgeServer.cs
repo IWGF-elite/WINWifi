@@ -144,6 +144,7 @@ namespace WinWiFi.Services
         private string? _activeProjectId;
         private string? _activeProjectName;
         private int _scanCycleCount = 0;
+        private string? _lastScanCompletedAtUtc;
         private DateTime _lastRefreshUtc = DateTime.MinValue;
         private static readonly TimeSpan MinimumRefreshInterval = TimeSpan.FromSeconds(10);
         private const int MissingScanLimit = 3;
@@ -192,7 +193,13 @@ namespace WinWiFi.Services
             BroadcastSseEvent("state_change", new
             {
                 state = state.ToString(),
-                timestamp = DateTime.UtcNow
+                timestamp = DateTime.UtcNow,
+                isScanning = _scanner.IsScanning,
+                lastError = _scanner.LastError,
+                activeAdapterId = _activeAdapterId,
+                scanCyclesCompleted = _scanCycleCount,
+                lastDiscoveredCount = _latestAccessPoints.Count,
+                lastScanCompletedAt = _lastScanCompletedAtUtc
             });
         }
 
@@ -280,7 +287,18 @@ namespace WinWiFi.Services
         private void OnScanCycleCompleted(ScanCycleStats stats)
         {
             _scanCycleCount = stats.CycleNumber;
-            BroadcastSseEvent("cycle_completed", stats);
+            _lastScanCompletedAtUtc = stats.Timestamp.ToUniversalTime().ToString("O");
+            BroadcastSseEvent("cycle_completed", new
+            {
+                state = stats.State.ToString(),
+                timestamp = stats.Timestamp,
+                isScanning = _scanner.IsScanning,
+                lastError = _scanner.LastError,
+                activeAdapterId = _activeAdapterId,
+                scanCyclesCompleted = _scanCycleCount,
+                lastDiscoveredCount = stats.NetworksDiscoveredCount,
+                lastScanCompletedAt = _lastScanCompletedAtUtc
+            });
         }
 
         public async Task StartAsync()
@@ -707,6 +725,7 @@ namespace WinWiFi.Services
                 scanCyclesCompleted = _scanCycleCount,
                 accessPointsCount = _latestAccessPoints.Count,
                 incidentsCount = _latestIncidents.Count,
+                lastScanCompletedAt = _lastScanCompletedAtUtc,
                 timestampUtc = DateTime.UtcNow
             };
             await WriteJsonAsync(response, status);
@@ -1453,6 +1472,7 @@ namespace WinWiFi.Services
             _latestIncidents = threats.Findings;
             _latestDrifts = threats.DetectedDrifts;
             _scanCycleCount++;
+            _lastScanCompletedAtUtc = DateTime.UtcNow.ToString("O");
 
             // Persist into the selected project only. Without an active project
             // the bridge still serves live telemetry but must not invent a
@@ -1472,6 +1492,17 @@ namespace WinWiFi.Services
             }
 
             BroadcastScanResult();
+            BroadcastSseEvent("cycle_completed", new
+            {
+                state = _scanner.CurrentState.ToString(),
+                timestamp = _lastScanCompletedAtUtc,
+                isScanning = _scanner.IsScanning,
+                lastError = _scanner.LastError,
+                activeAdapterId = _activeAdapterId,
+                scanCyclesCompleted = _scanCycleCount,
+                lastDiscoveredCount = _latestAccessPoints.Count,
+                lastScanCompletedAt = _lastScanCompletedAtUtc
+            });
 
             await WriteJsonAsync(response, new
             {
@@ -1531,6 +1562,7 @@ namespace WinWiFi.Services
                 activeAdapterId = _activeAdapterId,
                 scanCyclesCompleted = _scanCycleCount,
                 lastDiscoveredCount = _latestAccessPoints.Count,
+                lastScanCompletedAt = _lastScanCompletedAtUtc,
                 diagnostics = diag
             });
         }

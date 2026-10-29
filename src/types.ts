@@ -666,6 +666,8 @@ export interface BridgeHealthStatus {
 export interface BridgeScanStatus {
   isScanning: boolean;
   state: string;
+  lastError?: string | null;
+  lastScanCompletedAt?: string | null;
   activeAdapterId?: string;
   scanCyclesCompleted: number;
   lastDiscoveredCount: number;

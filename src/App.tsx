@@ -12,6 +12,7 @@ import {
   DataOrigin,
   BridgeConnectionState,
   BridgeHealthStatus,
+  BridgeScanStatus,
   UIMode,
   IncidentRecord,
   EvidenceItem,
@@ -177,6 +178,7 @@ export default function App() {
   const [selectedAdapterId, setSelectedAdapterId] = useState<string>('');
   const [connectedBssid, setConnectedBssid] = useState<string>('');
   const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [scannerState, setScannerState] = useState<string>('Idle');
 
   // Network Data & Packets
   const [accessPoints, setAccessPoints] = useState<AccessPoint[]>(() => {
@@ -392,6 +394,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const applyScanStatus = (status: BridgeScanStatus) => {
+      setIsScanning(Boolean(status.isScanning));
+      if (status.state) setScannerState(status.state);
+      const completedAt = status.lastScanCompletedAt ? Date.parse(status.lastScanCompletedAt) : NaN;
+      if (Number.isFinite(completedAt)) {
+        setLastLiveDataAt(current => current === null || completedAt > current ? completedAt : current);
+      }
+    };
+
     const unsubStatus = bridgeClient.onStateChange(async (state) => {
       setBridgeState(state);
       if (state === 'CONNECTED') {
@@ -402,6 +413,8 @@ export default function App() {
           const health = await bridgeClient.checkHealth();
           setBridgeStatus(health);
           setIsScanning(health.isScanning ?? false);
+          const scanStatus = await bridgeClient.getScanStatus().catch(() => null);
+          if (scanStatus) applyScanStatus(scanStatus);
           setActiveSourceLabel(`Native Bridge (${health?.activeAdapterName || 'Hardware Adapter'})`);
           const detectedAdapters = await bridgeClient.getAdapters();
           setAdapters(detectedAdapters);
@@ -415,6 +428,8 @@ export default function App() {
         }
       } else if (state === 'DISCONNECTED' || state === 'ERROR') {
         setLastLiveDataAt(null);
+        setIsScanning(false);
+        setScannerState(state === 'ERROR' ? 'Error' : 'Offline');
         if (dataSourceProfileRef.current === 'LIVE_WINDOWS') {
           setAccessPoints([]);
           setDataSourceProfile('OFFLINE');
@@ -441,7 +456,6 @@ export default function App() {
         accessPointsRef.current = resolvedAps;
         db.saveAccessPoints(projectId, resolvedAps);
         setDataSourceProfile('LIVE_WINDOWS');
-        setLastLiveDataAt(Date.now());
         setActiveSourceLabel(`Windows WLAN bridge (${resolvedAps.length} access points)`);
         const count = resolvedAps.length;
         const log = db.appendLog({
@@ -481,6 +495,7 @@ export default function App() {
     const unsubClients = bridgeClient.onClients((clients) => {
       setStationClients(mapStationClients(clients));
     });
+    const unsubScanStatus = bridgeClient.onScanStatus(applyScanStatus);
 
     // Establish the connection and start event/polling updates on mount.
     bridgeClient.setProject(currentProjectIdRef.current, projects.find(project => project.id === currentProjectIdRef.current)?.name);
@@ -492,6 +507,7 @@ export default function App() {
       unsubIncidents();
       unsubDrifts();
       unsubClients();
+      unsubScanStatus();
       bridgeClient.disconnect();
     };
   }, [bridgeClient, db, threatEngine, hydrateAssetsFromBridge]);
@@ -608,8 +624,9 @@ export default function App() {
         applyAnalystOverrides(result.accessPoints, db.getAnalystOverrides(currentProjectId)),
         enterpriseAssetsRef.current);
       setAccessPoints(resolvedAps);
-      setDataSourceProfile(resolvedAps.length ? 'LIVE_WINDOWS' : 'OFFLINE');
-      setLastLiveDataAt(result.accessPoints.length ? Date.now() : null);
+      setDataSourceProfile('LIVE_WINDOWS');
+      setLastLiveDataAt(Date.now());
+      setScannerState('Idle');
       setActiveSourceLabel(resolvedAps.length ? `Windows WLAN bridge (${resolvedAps.length} access points)` : 'Windows bridge connected; no WLAN observations returned');
       if (resolvedAps.length) db.saveAccessPoints(currentProjectId, resolvedAps);
       const log = db.appendLog({
@@ -1368,6 +1385,8 @@ export default function App() {
         onToggleDarkMode={handleToggleDarkMode}
         dataSourceProfile={dataSourceProfile}
         hasFreshLiveData={bridgeState === 'CONNECTED' && dataSourceProfile === 'LIVE_WINDOWS' && lastLiveDataAt !== null}
+        scannerState={scannerState}
+        lastScanCompletedAt={lastLiveDataAt}
         activeSourceLabel={activeSourceLabel}
         isScanning={isScanning}
         onToggleScan={handleToggleScan}

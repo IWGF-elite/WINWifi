@@ -807,11 +807,18 @@ runTest('T18: Per-Launch Bridge Token Wiring', () => {
   class FakeEventSource {
     onopen: (() => void) | null = null;
     onerror: ((event: Event) => void) | null = null;
-    constructor(url: string) { capturedUrl = url; }
-    addEventListener(_event: string, _listener: EventListenerOrEventListenerObject) {}
+    private listeners = new Map<string, EventListenerOrEventListenerObject>();
+    constructor(url: string) { capturedUrl = url; fakeSource = this; }
+    addEventListener(event: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(event, listener); }
+    emit(event: string, data: unknown) {
+      const listener = this.listeners.get(event);
+      if (typeof listener === 'function') listener({ data: JSON.stringify(data) } as MessageEvent);
+      else listener?.handleEvent({ data: JSON.stringify(data) } as MessageEvent);
+    }
     close() {}
   }
 
+  let fakeSource: any = null;
   const client = new (NativeBridgeClient as any)();
   try {
     (globalThis as any).EventSource = FakeEventSource;
@@ -825,9 +832,26 @@ runTest('T18: Per-Launch Bridge Token Wiring', () => {
       throw new Error('SSE stream omitted the project scope');
     }
     if (client.getToken() !== 'unit-test-token') throw new Error('Bridge client did not retain the token');
+    let receivedScanStatus: any = null;
+    const unsubscribeScanStatus = client.onScanStatus((status: any) => { receivedScanStatus = status; });
+    fakeSource?.emit('state_change', { isScanning: true, state: 'Scanning', scanCyclesCompleted: 4 });
+    if (receivedScanStatus?.state !== 'Scanning' || receivedScanStatus?.isScanning !== true) {
+      throw new Error('The scanner state event did not reach live status listeners');
+    }
+    fakeSource?.emit('cycle_completed', {
+      isScanning: true, state: 'Idle', scanCyclesCompleted: 5,
+      lastDiscoveredCount: 12, lastScanCompletedAt: '2026-10-29T12:00:00.000Z'
+    });
+    if (receivedScanStatus?.scanCyclesCompleted !== 5 || !receivedScanStatus.lastScanCompletedAt) {
+      throw new Error('A completed scan cycle did not publish its real completion timestamp');
+    }
+    unsubscribeScanStatus();
 
     const source = fs.readFileSync(path.join(__dirname, '../src/services/bridgeClient.ts'), 'utf8');
     if (!source.includes("'X-WinWiFi-Token'")) throw new Error('REST requests do not send the bridge token header');
+    if (!source.includes('this.getScanStatus()') || !source.includes("addEventListener('cycle_completed'")) {
+      throw new Error('Scanner status is not refreshed through both SSE and fallback polling');
+    }
     const explained = (client as any).formatBridgeError(new Error('HTTP 401 Unauthorized'));
     if (!/token/i.test(explained)) throw new Error('Bridge client does not explain token rejection');
   } finally {
@@ -2129,6 +2153,7 @@ runTest('T37: Header Actions Stay Above Floating Page Content', () => {
   const markup = renderToStaticMarkup(createElement(TitleBar, {
     isDarkMode: true, onToggleDarkMode: () => undefined,
     dataSourceProfile: 'LIVE_WINDOWS', hasFreshLiveData: true,
+    scannerState: 'Scanning', lastScanCompletedAt: Date.now(),
     activeSourceLabel: 'Windows WLAN', isScanning: false,
     onToggleScan: () => undefined, onRefreshScan: () => undefined,
     bridgeState: 'CONNECTED', onOpenBridgeConfig: () => undefined,

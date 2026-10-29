@@ -89,6 +89,7 @@ export class NativeBridgeClient {
   private driftListeners: Set<BridgeEventCallback<any[]>> = new Set();
   private clientListeners: Set<BridgeEventCallback<any[]>> = new Set();
   private diagnosticListeners: Set<BridgeEventCallback<BridgeDiagnostics>> = new Set();
+  private scanStatusListeners: Set<BridgeEventCallback<BridgeScanStatus>> = new Set();
   private errorListeners: Set<BridgeEventCallback<string>> = new Set();
 
   private constructor() {
@@ -339,6 +340,11 @@ export class NativeBridgeClient {
   public onDiagnostics(cb: BridgeEventCallback<BridgeDiagnostics>): () => void {
     this.diagnosticListeners.add(cb);
     return () => this.diagnosticListeners.delete(cb);
+  }
+
+  public onScanStatus(cb: BridgeEventCallback<BridgeScanStatus>): () => void {
+    this.scanStatusListeners.add(cb);
+    return () => this.scanStatusListeners.delete(cb);
   }
 
   public onError(cb: BridgeEventCallback<string>): () => void {
@@ -743,10 +749,19 @@ export class NativeBridgeClient {
 
       this.eventSource.addEventListener('state_change', (event: MessageEvent) => {
         try {
-          const stateData = JSON.parse(event.data);
-          console.log('[BridgeClient] Native scanner state changed:', stateData.state);
+          const stateData = JSON.parse(event.data) as BridgeScanStatus;
+          this.scanStatusListeners.forEach(cb => cb(stateData));
         } catch (e) {
           console.error('[BridgeClient] Failed to parse SSE state_change payload', e);
+        }
+      });
+
+      this.eventSource.addEventListener('cycle_completed', (event: MessageEvent) => {
+        try {
+          const scanStatus = JSON.parse(event.data) as BridgeScanStatus;
+          this.scanStatusListeners.forEach(cb => cb(scanStatus));
+        } catch (e) {
+          console.error('[BridgeClient] Failed to parse SSE cycle_completed payload', e);
         }
       });
 
@@ -792,8 +807,8 @@ export class NativeBridgeClient {
       // Networks alone used to be re-fetched here while SSE was down, so each
       // tick reconciled incidents against nothing and erased every native
       // incident from the store.
-      void Promise.allSettled([this.getNetworks(), this.getIncidents(), this.getDrifts()])
-        .then(([networks, incidents, drifts]) => {
+      void Promise.allSettled([this.getNetworks(), this.getIncidents(), this.getDrifts(), this.getScanStatus()])
+        .then(([networks, incidents, drifts, scanStatus]) => {
           if (networks.status === 'fulfilled') {
             this.networkListeners.forEach(cb => cb(networks.value));
           } else {
@@ -814,6 +829,12 @@ export class NativeBridgeClient {
             if (Array.isArray(changes)) this.driftListeners.forEach(cb => cb(changes));
           } else {
             console.warn('[BridgeClient] Polling configuration drift failed:', messageOf(drifts.reason));
+          }
+
+          if (scanStatus.status === 'fulfilled') {
+            this.scanStatusListeners.forEach(cb => cb(scanStatus.value));
+          } else {
+            console.warn('[BridgeClient] Polling scanner status failed:', messageOf(scanStatus.reason));
           }
         });
     }, this.config.pollIntervalMs);
