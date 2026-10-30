@@ -251,29 +251,59 @@
 :root[data-theme="dark"] button.bg-emerald-600:hover:not(:disabled) {
   background-color: var(--app-accent);
 }
+:root[data-theme="dark"] .winwifi-nav {
+  min-height: 3.1rem;
+  margin: 0.35rem 0.75rem 0.25rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid rgb(255 255 255 / 6%) !important;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #151519 0%, #101014 100%) !important;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 22%), inset 0 1px 0 rgb(255 255 255 / 3%);
+}
+:root[data-theme="dark"] .winwifi-nav > div:first-child {
+  gap: 0.25rem;
+  padding: 0.1rem;
+}
+:root[data-theme="dark"] .winwifi-nav > div:first-child > button {
+  min-height: 2.35rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid transparent !important;
+  border-radius: 0.7rem;
+  color: #92929c;
+  background: transparent;
+}
+:root[data-theme="dark"] .winwifi-nav > div:first-child > button:not([class*="border-blue-500"]):not([class*="border-cyan-500"]):not([class*="border-rose-500"]):not([class*="border-amber-500"]):not([class*="border-purple-500"]) svg {
+  color: #777781 !important;
+  transition: color 140ms ease, transform 140ms ease;
+}
+:root[data-theme="dark"] .winwifi-nav > div:first-child > button:not([class*="border-blue-500"]):not([class*="border-cyan-500"]):not([class*="border-rose-500"]):not([class*="border-amber-500"]):not([class*="border-purple-500"]):hover svg {
+  color: #c5c5cc !important;
+  transform: translateY(-1px);
+}
 :root[data-theme="dark"] .winwifi-nav button[class*="border-blue-500"],
 :root[data-theme="dark"] .winwifi-nav button[class*="border-cyan-500"],
 :root[data-theme="dark"] .winwifi-nav button[class*="border-rose-500"],
 :root[data-theme="dark"] .winwifi-nav button[class*="border-amber-500"],
 :root[data-theme="dark"] .winwifi-nav button[class*="border-purple-500"] {
   position: relative;
-  border-bottom-color: transparent !important;
+  border-color: rgb(87 190 224 / 18%) !important;
+  color: #77e2e8 !important;
+  background: linear-gradient(120deg, rgb(48 213 212 / 13%), rgb(55 112 232 / 11%) 62%, rgb(157 78 220 / 10%)) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%), 0 4px 16px rgb(36 139 190 / 10%);
+}
+:root[data-theme="dark"] .winwifi-nav button[class*="border-blue-500"] svg,
+:root[data-theme="dark"] .winwifi-nav button[class*="border-cyan-500"] svg,
+:root[data-theme="dark"] .winwifi-nav button[class*="border-rose-500"] svg,
+:root[data-theme="dark"] .winwifi-nav button[class*="border-amber-500"] svg,
+:root[data-theme="dark"] .winwifi-nav button[class*="border-purple-500"] svg {
   color: var(--app-accent) !important;
-  background-color: rgb(255 255 255 / 3%) !important;
 }
 :root[data-theme="dark"] .winwifi-nav button[class*="border-blue-500"]::after,
 :root[data-theme="dark"] .winwifi-nav button[class*="border-cyan-500"]::after,
 :root[data-theme="dark"] .winwifi-nav button[class*="border-rose-500"]::after,
 :root[data-theme="dark"] .winwifi-nav button[class*="border-amber-500"]::after,
 :root[data-theme="dark"] .winwifi-nav button[class*="border-purple-500"]::after {
-  content: "";
-  position: absolute;
-  right: 0.65rem;
-  bottom: -1px;
-  left: 0.65rem;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--app-accent-gradient);
+  content: none;
 }
 :root[data-theme="dark"] .winwifi-gradient-value {
   background: var(--app-accent-gradient);
