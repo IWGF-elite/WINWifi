@@ -299,6 +299,12 @@ export default function App() {
   // Shown until live data is flowing (then it dismisses itself) or until the
   // operator continues past it while the bridge is still reporting a problem.
   const [showStartupReadiness, setShowStartupReadiness] = useState<boolean>(true);
+  const [startupHealthLoaded, setStartupHealthLoaded] = useState(false);
+  const [startupAdaptersLoaded, setStartupAdaptersLoaded] = useState(false);
+  const [startupScanStatusLoaded, setStartupScanStatusLoaded] = useState(false);
+  const [startupNetworksLoaded, setStartupNetworksLoaded] = useState(false);
+  const [startupSnapshotsLoaded, setStartupSnapshotsLoaded] = useState(false);
+  const [startupLoadError, setStartupLoadError] = useState('');
 
   // Native Windows Bridge State
   const [bridgeState, setBridgeState] = useState<BridgeConnectionState>('DISCONNECTED');
@@ -312,15 +318,19 @@ export default function App() {
   // bridge settings dialog — address, port, token — has nothing for a user to do.
   const embeddedShell = isEmbeddedDashboard();
 
-  // The readiness checklist is a status screen, not a permission gate: once the
-  // bridge is connected and live Windows data is flowing, it dismisses itself so
-  // a double-click lands the operator directly on the Command Center.
+  // Hide the readiness screen only after the real startup requests have
+  // returned. An empty WLAN list is still a completed response, distinct from
+  // a network request that has not completed yet.
   useEffect(() => {
     if (!showStartupReadiness) return;
-    if (bridgeState !== 'CONNECTED' || dataSourceProfile !== 'LIVE_WINDOWS') return;
-    const timer = setTimeout(() => setShowStartupReadiness(false), 900);
-    return () => clearTimeout(timer);
-  }, [showStartupReadiness, bridgeState, dataSourceProfile]);
+    const startupDataReady = bridgeState === 'CONNECTED'
+      && startupHealthLoaded
+      && startupAdaptersLoaded
+      && startupScanStatusLoaded
+      && startupNetworksLoaded
+      && startupSnapshotsLoaded;
+    if (startupDataReady) setShowStartupReadiness(false);
+  }, [showStartupReadiness, bridgeState, startupHealthLoaded, startupAdaptersLoaded, startupScanStatusLoaded, startupNetworksLoaded, startupSnapshotsLoaded]);
 
   // A Windows WLAN scan is periodic, not a continuous frame stream. Keep the
   // source labelled as live while the local bridge is connected; freshness is
@@ -432,6 +442,8 @@ export default function App() {
     const applyScanStatus = (status: BridgeScanStatus) => {
       setIsScanning(Boolean(status.isScanning));
       if (status.state) setScannerState(status.state);
+      setStartupScanStatusLoaded(true);
+      setStartupLoadError('');
       const completedAt = status.lastScanCompletedAt ? Date.parse(status.lastScanCompletedAt) : NaN;
       if (Number.isFinite(completedAt)) {
         setLastLiveDataAt(current => current === null || completedAt > current ? completedAt : current);
@@ -447,18 +459,24 @@ export default function App() {
         try {
           const health = await bridgeClient.checkHealth();
           setBridgeStatus(health);
+          setStartupHealthLoaded(true);
           setIsScanning(health.isScanning ?? false);
-          const scanStatus = await bridgeClient.getScanStatus().catch(() => null);
+          const scanStatus = await bridgeClient.getScanStatus().catch((error) => {
+            setStartupLoadError(`Could not load scan status: ${error?.message || 'request failed'}`);
+            return null;
+          });
           if (scanStatus) applyScanStatus(scanStatus);
           setActiveSourceLabel(`Native Bridge (${health?.activeAdapterName || 'Hardware Adapter'})`);
           const detectedAdapters = await bridgeClient.getAdapters();
           setAdapters(detectedAdapters);
+          setStartupAdaptersLoaded(true);
           const adapterId = detectedAdapters[0]?.id || '';
           setSelectedAdapterId(current => current || adapterId);
           const connection = await bridgeClient.getConnectionStatus(adapterId);
           setConnectedBssid(connection.state === 'Connected' ? connection.bssid : '');
           void hydrateAssetsFromBridge(currentProjectIdRef.current);
-        } catch {
+        } catch (error: any) {
+          setStartupLoadError(`Could not finish loading Windows data: ${error?.message || 'request failed'}`);
           setActiveSourceLabel('Native Windows Bridge');
         }
       } else if (state === 'DISCONNECTED' || state === 'ERROR') {
@@ -478,6 +496,7 @@ export default function App() {
 
     const unsubNetworks = bridgeClient.onNetworks((liveAps) => {
       if (Array.isArray(liveAps)) {
+        setStartupNetworksLoaded(true);
         const projectId = currentProjectIdRef.current;
         const resolvedAps = applyAssetsToAccessPoints(
           applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId)),
@@ -534,7 +553,13 @@ export default function App() {
 
     // Establish the connection and start event/polling updates on mount.
     bridgeClient.setProject(currentProjectIdRef.current, projects.find(project => project.id === currentProjectIdRef.current)?.name);
-    void bridgeClient.connect();
+    void bridgeClient.connect().then((connected) => {
+      if (connected) {
+        setStartupSnapshotsLoaded(true);
+      } else {
+        setStartupLoadError(bridgeClient.getLastError() || 'Could not load the initial dashboard data.');
+      }
+    });
 
     return () => {
       unsubStatus();
@@ -1407,9 +1432,14 @@ export default function App() {
     }`}>      {showStartupReadiness && <StartupReadinessOverlay
         bridgeState={bridgeState}
         adapters={adapters}
+        healthLoaded={startupHealthLoaded}
+        adaptersLoaded={startupAdaptersLoaded}
+        scanStatusLoaded={startupScanStatusLoaded}
+        networksLoaded={startupNetworksLoaded}
+        snapshotsLoaded={startupSnapshotsLoaded}
         dataSourceProfile={dataSourceProfile}
         accessPointCount={accessPoints.length}
-        error={bridgeNotice}
+        error={startupLoadError || bridgeNotice}
         errorKind={bridgeErrorKind}
         onRetry={() => void bridgeClient.retryNow()}
         onContinue={() => setShowStartupReadiness(false)}

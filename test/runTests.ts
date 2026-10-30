@@ -9,6 +9,7 @@ import { NetworkDiscovery } from '../src/components/NetworkDiscovery';
 import { ClientObserver } from '../src/components/ClientObserver';
 import { formatScanAge } from '../src/components/LanDeviceInventory';
 import { TitleBar } from '../src/components/TitleBar';
+import { StartupReadinessOverlay } from '../src/components/StartupReadinessOverlay';
 import { ReportingCenter, escapeReportHtml } from '../src/components/ReportingCenter';
 import { PcapService } from '../src/services/pcapParser';
 import { WifiEngine, isWebView2Host } from '../src/services/wifiEngine';
@@ -2198,6 +2199,37 @@ runTest('T38: Reports Do Not Invent A Passing Score Without Observations', () =>
   }
   if (escapeReportHtml(`<tag attr="x">&'`) !== '&lt;tag attr=&quot;x&quot;&gt;&amp;&#39;') {
     throw new Error('Standalone report text is not escaped before HTML export');
+  }
+});
+
+runTest('T40: Startup Readiness Waits For Real Initial Responses', () => {
+  const appSource = fs.readFileSync(path.resolve(__dirname, '../src/App.tsx'), 'utf8');
+  if (/setTimeout\s*\(\s*\(\)\s*=>\s*setShowStartupReadiness/.test(appSource)) {
+    throw new Error('Startup readiness still dismisses on a fixed timer');
+  }
+  const baseProps = {
+    bridgeState: 'CONNECTED' as any,
+    adapters: [{ id: 'adapter-1', name: 'Wi-Fi' }] as any,
+    healthLoaded: true,
+    adaptersLoaded: true,
+    scanStatusLoaded: false,
+    networksLoaded: false,
+    snapshotsLoaded: true,
+    dataSourceProfile: 'LIVE_WINDOWS' as any,
+    accessPointCount: 0,
+    onContinue: () => undefined,
+  };
+  const delayed = renderToStaticMarkup(createElement(StartupReadinessOverlay, baseProps));
+  if (delayed.includes('Open Command Center') || !delayed.includes('Waiting for scan status')) {
+    throw new Error('Startup readiness dismissed before the delayed scan-status/network responses arrived');
+  }
+  const loaded = renderToStaticMarkup(createElement(StartupReadinessOverlay, {
+    ...baseProps,
+    scanStatusLoaded: true,
+    networksLoaded: true,
+  }));
+  if (!loaded.includes('Open Command Center')) {
+    throw new Error('A completed live response, including a valid empty network list, was not marked ready');
   }
 });
 

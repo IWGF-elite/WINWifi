@@ -7,6 +7,11 @@ import { WinWiFiLogo } from './WinWiFiLogo';
 interface StartupReadinessOverlayProps {
   bridgeState: BridgeConnectionState;
   adapters: WifiAdapter[];
+  healthLoaded: boolean;
+  adaptersLoaded: boolean;
+  scanStatusLoaded: boolean;
+  networksLoaded: boolean;
+  snapshotsLoaded: boolean;
   dataSourceProfile: DataSourceProfile;
   accessPointCount: number;
   error?: string;
@@ -16,21 +21,22 @@ interface StartupReadinessOverlayProps {
 }
 
 export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = ({
-  bridgeState, adapters, dataSourceProfile, accessPointCount, error, errorKind, onRetry, onContinue
+  bridgeState, adapters, healthLoaded, adaptersLoaded, scanStatusLoaded, networksLoaded, snapshotsLoaded,
+  dataSourceProfile, accessPointCount, error, errorKind, onRetry, onContinue
 }) => {
   const bridgeReady = bridgeState === 'CONNECTED';
-  const scanReady = dataSourceProfile === 'LIVE_WINDOWS' && accessPointCount >= 0;
-  const failed = bridgeState === 'ERROR';
+  const scanReady = scanStatusLoaded && networksLoaded;
+  const failed = bridgeState === 'ERROR' || Boolean(error);
   const shell = isEmbeddedDashboard();
   const view = bridgeStatusView(bridgeState, errorKind ?? null, shell);
   const steps = [
-    { label: 'Checking Windows WLAN bridge', detail: bridgeReady ? 'Local bridge connected' : failed ? view.label : 'Starting the live data connection', done: bridgeReady, failed },
-    { label: 'Detecting Wi-Fi adapters', detail: adapters.length ? `${adapters.length} adapter${adapters.length === 1 ? '' : 's'} available` : bridgeReady ? 'No adapter reported by Windows' : 'Waiting for bridge', done: bridgeReady && adapters.length > 0, failed: bridgeReady && adapters.length === 0 },
-    { label: 'Loading authorized audit history', detail: 'Local project data is ready', done: true, failed: false },
-    { label: 'Starting live telemetry', detail: scanReady ? `${accessPointCount} current BSSID${accessPointCount === 1 ? '' : 's'} observed` : bridgeReady ? 'Waiting for first WLAN observation' : 'Requires local bridge', done: scanReady, failed: false }
+    { label: 'Checking Windows WLAN bridge', detail: healthLoaded ? 'Local bridge connected' : bridgeReady ? 'Loading bridge status' : failed ? view.label : 'Starting the live data connection', done: bridgeReady && healthLoaded, failed: bridgeState === 'ERROR' },
+    { label: 'Detecting Wi-Fi adapters', detail: adaptersLoaded ? adapters.length ? `${adapters.length} adapter${adapters.length === 1 ? '' : 's'} available` : 'Windows reports no Wi-Fi adapters' : 'Waiting for the adapter list', done: adaptersLoaded, failed: false },
+    { label: 'Loading authorized audit history', detail: snapshotsLoaded ? 'Project and dashboard records loaded' : 'Loading project and dashboard records', done: snapshotsLoaded, failed: false },
+    { label: 'Starting live telemetry', detail: scanReady ? dataSourceProfile === 'LIVE_WINDOWS' ? `${accessPointCount} current BSSID${accessPointCount === 1 ? '' : 's'} observed` : 'Windows scan status and network response loaded' : !scanStatusLoaded ? 'Waiting for scan status' : 'Waiting for the Windows network list', done: scanReady, failed: false }
   ];
 
-  const ready = bridgeReady && scanReady;
+  const ready = bridgeReady && healthLoaded && adaptersLoaded && scanReady && snapshotsLoaded;
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050912]/95 px-5 text-slate-100 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="WinWiFi readiness checks">
       <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-sky-400/25 bg-[#0a1425] shadow-2xl shadow-sky-950/50">
@@ -53,7 +59,7 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
                 {errorKind === 'token' ? <KeyRound className="h-3.5 w-3.5 text-amber-400" /> : <TriangleAlert className="h-3.5 w-3.5 text-amber-400" />}
                 <span>{view.title}.</span>
               </div>
-              <p className="mt-1 leading-relaxed">{view.description}</p>
+              <p className="mt-1 leading-relaxed">{error || view.description}</p>
               {!shell && error && <p className="mt-1 text-[11px] opacity-70">{error}</p>}
               <div className="mt-2.5 flex items-center gap-2">
                 {onRetry && (
