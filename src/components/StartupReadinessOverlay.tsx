@@ -38,8 +38,8 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050912]/95 px-5 text-slate-100 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="WinWiFi readiness checks">
-      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-sky-400/25 bg-[#0a1425] shadow-2xl shadow-sky-950/50">
-        <div className="absolute inset-x-0 top-0 h-1 bg-sky-400" />
+      <div className="startup-readiness-card relative w-full max-w-2xl overflow-hidden rounded-2xl border border-sky-400/25 bg-[#0a1425] shadow-2xl shadow-sky-950/50">
+        <div className="startup-readiness-accent absolute inset-x-0 top-0 h-1" />
         <div className="p-8 sm:p-10">
           <div className="flex items-center gap-4">
             <WinWiFiLogo className="h-12 w-12 shrink-0 rounded-xl shadow-lg shadow-sky-500/20" />
@@ -47,7 +47,7 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
           </div>
           <p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">Readiness checks are verified against this Windows device, its configured adapter, and the local audit workspace.</p>
           <div className="mt-8 space-y-3">
-            {steps.map((step) => <div key={step.label} className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/45 px-4 py-3.5">
+            {steps.map((step) => <div key={step.label} className="startup-readiness-step flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/45 px-4 py-3.5">
               {step.done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : step.failed ? <TriangleAlert className="h-5 w-5 shrink-0 text-amber-400" /> : <CircleDashed className="h-5 w-5 shrink-0 animate-spin text-sky-400" />}
               <div className="min-w-0"><p className="text-sm font-semibold text-slate-200">{step.label}</p><p className="mt-0.5 text-xs text-slate-500">{step.detail}</p></div>
             </div>)}

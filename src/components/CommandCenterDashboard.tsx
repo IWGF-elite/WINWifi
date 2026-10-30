@@ -303,7 +303,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
         <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-sky-300"><Activity className="h-4 w-4" /> Wireless change radar</div>
-            <div className="mt-2 flex items-end gap-3"><span className="text-4xl font-black tracking-tight text-slate-50">{avgSecurityScore ?? '—'}</span><span className="mb-1 text-sm font-semibold text-sky-200">{postureLabel}</span></div>
+            <div className="mt-2 flex items-end gap-3"><span className="winwifi-gradient-value text-4xl font-black tracking-tight text-slate-50">{avgSecurityScore ?? '—'}</span><span className="mb-1 text-sm font-semibold text-sky-200">{postureLabel}</span></div>
             <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">Posture is calculated from the latest access point observations in this project. Changes appear after a completed scan or imported evidence records them.</p>
           </div>
           <div className="grid min-w-[360px] grid-cols-2 gap-2 sm:grid-cols-4">
@@ -393,7 +393,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
               </div>
               <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div 
-                  className="h-full bg-amber-500 rounded-full transition-all" 
+                  className="winwifi-chart-bar h-full rounded-full transition-all"
                   style={{ width: `${totalNetworks ? (band24Count / totalNetworks)*100 : 0}%` }}
                 />
               </div>
@@ -406,7 +406,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
               </div>
               <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div 
-                  className="h-full bg-blue-500 rounded-full transition-all" 
+                  className="winwifi-chart-bar h-full rounded-full transition-all"
                   style={{ width: `${totalNetworks ? (band5Count / totalNetworks)*100 : 0}%` }}
                 />
               </div>
@@ -419,7 +419,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
               </div>
               <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div 
-                  className="h-full bg-emerald-500 rounded-full transition-all" 
+                  className="winwifi-chart-bar h-full rounded-full transition-all"
                   style={{ width: `${totalNetworks ? (band6Count / totalNetworks)*100 : 0}%` }}
                 />
               </div>
