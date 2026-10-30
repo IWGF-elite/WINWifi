@@ -25,6 +25,7 @@ import {
 import { countOpenIncidents } from '../services/incidentMapper';
 import { countSuspiciousAccessPoints } from '../services/threatMetrics';
 import { useScanActive } from '../contexts/ScanActivityContext';
+import { ProcessingOrb } from './ProcessingOrb';
 
 interface CommandCenterDashboardProps {
   accessPoints: AccessPoint[];
@@ -206,10 +207,9 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
                 Windows Bridge
               </div>
               <div className="font-bold mt-0.5 flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${
-                  bridgeState === 'CONNECTED' ? 'bg-emerald-400 animate-pulse' :
-                  bridgeState === 'CONNECTING' ? 'bg-blue-400 animate-ping' : 'bg-slate-500'
-                }`} />
+                {bridgeState === 'CONNECTING' ? <ProcessingOrb state="connecting" size={20} label="Connecting to the Windows bridge" /> : <span className={`w-2 h-2 rounded-full ${
+                  bridgeState === 'CONNECTED' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                }`} />}
                 <span>{bridgeState}</span>
               </div>
             </button>

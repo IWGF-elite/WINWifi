@@ -3,6 +3,7 @@ import { Activity, Download, RefreshCw, Search, Router, ShieldAlert, Wifi, WifiO
 import { LanDeviceRecord, LocalNetworkActivity, LocalNetworkInfo } from '../types';
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { downloadBlob } from '../services/download';
+import { ProcessingOrb } from './ProcessingOrb';
 
 interface Props { adapterId: string; }
 type Filter = 'all' | 'online' | 'new' | 'known' | 'unknown';
@@ -213,7 +214,7 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
         <button type="button" onClick={() => downloadBlob(new Blob([JSON.stringify(visible, null, 2)], { type: 'application/json' }), 'winwifi-local-device-inventory.json')} disabled={!visible.length} className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-40">JSON</button>
         {!busy && <label className="flex items-center gap-1 text-[10px] text-slate-400"><input type="checkbox" checked={fullPortScan} onChange={e => setFullPortScan(e.target.checked)} />Full TCP range</label>}
         {fullPortScan && !busy && <label className="text-[10px] text-slate-400">Rate <select value={probesPerSecond} onChange={e => setProbesPerSecond(Number(e.target.value))} className="rounded border border-slate-700 bg-slate-950 px-1.5 py-1 text-slate-200"><option value={25}>25/s</option><option value={50}>50/s</option><option value={100}>100/s</option><option value={250}>250/s</option></select></label>}
-        {!busy ? <button type="button" onClick={() => void scan()} disabled={!adapterId || loading} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-wait disabled:opacity-40"><RefreshCw className="mr-1 inline h-3.5 w-3.5" />{loading ? 'Loading devices…' : fullPortScan ? 'Scan all TCP ports' : 'Scan local network'}</button> : <button type="button" onClick={() => void NativeBridgeClient.getInstance().cancelLocalNetworkScan()} className="rounded-md bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white">Cancel scan</button>}
+        {!busy ? <button type="button" onClick={() => void scan()} disabled={!adapterId || loading} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-wait disabled:opacity-40">{loading ? <ProcessingOrb state="working" size={20} label="Loading network devices" className="mr-1 inline-block align-middle" /> : <RefreshCw className="mr-1 inline h-3.5 w-3.5" />}{loading ? 'Loading devices…' : fullPortScan ? 'Scan all TCP ports' : 'Scan local network'}</button> : <button type="button" onClick={() => void NativeBridgeClient.getInstance().cancelLocalNetworkScan()} className="rounded-md bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white">Cancel scan</button>}
       </div>
     </div>
     {network?.status === 'Available' && <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
@@ -263,7 +264,7 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
         </select>
       </label>
       <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-400" role="status" aria-live="polite">
-        {busy ? <><Activity className="h-3 w-3 animate-pulse text-amber-300" /> Scanning…</> : loading ? <><Activity className="h-3 w-3 animate-pulse text-cyan-300" /> Loading inventory…</> : <>
+        {busy ? <><ProcessingOrb state="searching" size={20} label="Scanning the local network" /> Scanning…</> : loading ? <><ProcessingOrb state="working" size={20} label="Loading the device inventory" /> Loading inventory…</> : <>
           <Activity className="h-3 w-3 text-cyan-400" />
           <ScanAge scannedAt={network?.scannedAt} now={now} />
         </>}
@@ -271,7 +272,7 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
     </div>
     {error && <div className="mt-2 rounded border border-rose-800 bg-rose-950/40 p-2 text-xs text-rose-300">{error}</div>}
     {busy && <div className="mt-2 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-[11px] text-amber-200" role="status" aria-live="polite">{fullPortScan ? `Probing ports 1–65535 on discovered hosts at ${probesPerSecond} attempts per second. The duration depends on responding devices; the scan can be cancelled at any time.` : 'Discovering devices and checking common services on the selected network. This can take several seconds; the scan can be cancelled at any time.'}</div>}
-    {!busy && (checkingInventory || network?.checkingDevices) && <div className="mt-2 flex items-center gap-2 text-[10px] text-cyan-300" role="status" aria-live="polite"><Activity className="h-3 w-3 animate-pulse" />Checking known devices and discovering new hosts in the background…</div>}
+    {!busy && (checkingInventory || network?.checkingDevices) && <div className="mt-2 flex items-center gap-2 text-[10px] text-cyan-300" role="status" aria-live="polite"><ProcessingOrb state="searching" size={20} label="Checking known devices and discovering new hosts" />Checking known devices and discovering new hosts in the background…</div>}
     {network?.scannedAt && <p className="mt-2 text-[10px] text-slate-500">{network.portScanMode || 'Common ports'} · {network.portsScanned ?? 0} port attempts{network.cancelled ? ' · cancelled' : ''}</p>}
     <div className="mt-3 overflow-auto rounded border border-slate-800">
       <table className="min-w-full text-left text-[11px]">

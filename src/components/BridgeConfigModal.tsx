@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { useScanActive } from '../contexts/ScanActivityContext';
+import { ProcessingOrb } from './ProcessingOrb';
 import { 
   BridgeConnectionState, 
   BridgeConfig, 
@@ -268,7 +269,7 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
                   : 'bg-blue-600 hover:bg-blue-500 text-white'
               }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isTesting ? 'animate-spin' : ''}`} />
+              {isTesting ? <ProcessingOrb state="connecting" size={20} label="Testing Windows bridge connection" /> : <RefreshCw className="w-3.5 h-3.5" />}
               <span>{isTesting ? 'Connecting...' : 'Connect Now'}</span>
             </button>
           </div>
@@ -435,7 +436,7 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
                   disabled={refreshPending}
                   className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-1.5 transition-colors"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  {refreshPending ? <ProcessingOrb state="searching" size={20} label="Refreshing Wi-Fi hardware" /> : <RefreshCw className="w-3.5 h-3.5" />}
                   <span>{refreshPending ? 'Refreshing…' : 'Immediate Hardware Refresh'}</span>
                 </button>
               </div>

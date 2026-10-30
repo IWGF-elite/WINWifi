@@ -24,6 +24,7 @@ import {
   FlaskConical
 } from 'lucide-react';
 import { useScanActive } from '../contexts/ScanActivityContext';
+import { ProcessingOrb } from './ProcessingOrb';
 
 interface NetworkDiscoveryProps {
   accessPoints: AccessPoint[];
@@ -138,7 +139,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
       case 'LIVE_WINDOWS':
         return (
           <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wide flex items-center gap-1 ${scanActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'}`}>
-            <Radio className={`w-2.5 h-2.5 ${scanActive ? 'animate-pulse' : ''}`} />
+            {scanActive ? <ProcessingOrb state="searching" size={20} label="Live scan is updating this network" /> : <Radio className="w-2.5 h-2.5" />}
             {scanActive ? 'LIVE' : 'LAST SCAN'}
           </span>
         );
@@ -239,7 +240,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
               : isDarkMode ? 'bg-purple-950/30 border-purple-900/50 text-purple-300' : 'bg-purple-50 border-purple-200 text-purple-800'
       }`}>
         <div className="flex flex-wrap items-center gap-2.5">
-          {dataSourceProfile === 'LIVE_WINDOWS' && <Radio className={`w-4 h-4 shrink-0 ${scanActive ? 'text-emerald-400 animate-pulse' : 'text-amber-300'}`} />}
+          {dataSourceProfile === 'LIVE_WINDOWS' && (scanActive ? <ProcessingOrb state="searching" size={20} label="Scanning for nearby Wi-Fi networks" /> : <Radio className="h-4 w-4 shrink-0 text-amber-300" />)}
           {(dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED') && <HardDrive className="w-4 h-4 text-cyan-400 shrink-0" />}
           {dataSourceProfile === 'REAL_NETSH' && <Terminal className="w-4 h-4 text-cyan-400 shrink-0" />}
           {dataSourceProfile === 'OFFLINE' && <Database className="w-4 h-4 text-amber-400 shrink-0" />}
@@ -277,7 +278,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
               }`}
               title="Trigger immediate hardware scan refresh"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              {refreshPending ? <ProcessingOrb state="searching" size={20} label="Refreshing the Wi-Fi scan" /> : <RefreshCw className="w-3.5 h-3.5" />}
               <span>{refreshPending ? 'Refreshing…' : 'Refresh Hardware Scan'}</span>
             </button>
           )}

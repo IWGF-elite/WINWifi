@@ -1,8 +1,9 @@
 import React from 'react';
-import { CheckCircle2, CircleDashed, KeyRound, RefreshCw, ShieldCheck, TriangleAlert, Wifi } from 'lucide-react';
+import { CheckCircle2, KeyRound, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { BridgeConnectionState, DataSourceProfile, WifiAdapter } from '../types';
 import { BridgeErrorKind, BRIDGE_RETRY_NOTE, bridgeStatusView, isEmbeddedDashboard } from '../services/bridgeStatus';
 import { WinWiFiLogo } from './WinWiFiLogo';
+import { ProcessingOrb } from './ProcessingOrb';
 
 interface StartupReadinessOverlayProps {
   bridgeState: BridgeConnectionState;
@@ -35,6 +36,9 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
     { label: 'Loading authorized audit history', detail: snapshotsLoaded ? 'Project and dashboard records loaded' : 'Loading project and dashboard records', done: snapshotsLoaded, failed: false },
     { label: 'Starting live telemetry', detail: scanReady ? dataSourceProfile === 'LIVE_WINDOWS' ? `${accessPointCount} current BSSID${accessPointCount === 1 ? '' : 's'} observed` : 'Windows scan status and network response loaded' : !scanStatusLoaded ? 'Waiting for scan status' : 'Waiting for the Windows network list', done: scanReady, failed: false }
   ];
+  const checksRunning = steps.some(step => !step.done && !step.failed);
+  const pendingState = (label: string): 'working' | 'searching' | 'connecting' =>
+    label.startsWith('Checking') ? 'connecting' : label.startsWith('Detecting') || label.startsWith('Starting') ? 'searching' : 'working';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050912]/95 px-5 text-slate-100 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="WinWiFi readiness checks">
@@ -44,11 +48,12 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
           <div className="flex items-center gap-4">
             <WinWiFiLogo className="h-12 w-12 shrink-0 rounded-xl shadow-lg shadow-sky-500/20" />
             <div><p className="text-xs font-bold tracking-[0.22em] text-sky-300">WINWIFI SECURITY AUDITOR</p><h1 className="mt-1 text-2xl font-bold tracking-tight">Preparing your local audit workspace</h1></div>
+            {checksRunning && <ProcessingOrb state={bridgeReady ? 'working' : 'connecting'} size={64} label="Preparing the WinWiFi audit workspace" className="ml-auto shrink-0" />}
           </div>
           <p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">Readiness checks are verified against this Windows device, its configured adapter, and the local audit workspace.</p>
           <div className="mt-8 space-y-3">
             {steps.map((step) => <div key={step.label} className="startup-readiness-step flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/45 px-4 py-3.5">
-              {step.done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : step.failed ? <TriangleAlert className="h-5 w-5 shrink-0 text-amber-400" /> : <CircleDashed className="h-5 w-5 shrink-0 animate-spin text-sky-400" />}
+              {step.done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : step.failed ? <TriangleAlert className="h-5 w-5 shrink-0 text-amber-400" /> : <ProcessingOrb state={pendingState(step.label)} size={20} label={`${step.label} in progress`} />}
               <div className="min-w-0"><p className="text-sm font-semibold text-slate-200">{step.label}</p><p className="mt-0.5 text-xs text-slate-500">{step.detail}</p></div>
             </div>)}
           </div>
@@ -75,7 +80,7 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
           )}
           <div className="mt-7 flex items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-xs text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-400" /> Passive, defensive, authorized-scope workflow</div>
-            {!failed && <div className="flex items-center gap-2 text-xs font-medium text-sky-300"><Wifi className="h-4 w-4 animate-pulse" /> Verifying local services</div>}
+            {!failed && <div className="flex items-center gap-2 text-xs font-medium text-sky-300"><ProcessingOrb state="connecting" size={20} label="Verifying local services" /> Verifying local services</div>}
             <button onClick={onContinue} className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-sky-400">Open Command Center</button>
           </div>
         </div>

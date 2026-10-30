@@ -17,6 +17,7 @@ import { NativeBridgeClient } from '../services/bridgeClient';
 import { NATIVE_TABLES, MAX_VIEW_ROWS, NativeTableView, toNativeTableView } from '../services/nativeDatabaseView';
 import { SiteDirectory } from './SiteDirectory';
 import { StorageMigrationPreview } from './StorageMigrationPreview';
+import { ProcessingOrb } from './ProcessingOrb';
 
 interface EnterpriseProjectManagerProps {
   currentProject: AuditProject;
@@ -270,7 +271,7 @@ export const EnterpriseProjectManager: React.FC<EnterpriseProjectManagerProps> =
                   disabled={tableStatus === 'LOADING'}
                   className="px-2 py-1 rounded text-[11px] bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1"
                 >
-                  <RefreshCw className={`w-3 h-3 ${tableStatus === 'LOADING' ? 'animate-spin' : ''}`} /> Reload
+                  {tableStatus === 'LOADING' ? <ProcessingOrb state="working" size={20} label={`Loading ${NATIVE_TABLES.find(item => item.key === tableKey)?.label ?? 'database table'}`} /> : <RefreshCw className="w-3 h-3" />} Reload
                 </button>
               </div>
             </div>

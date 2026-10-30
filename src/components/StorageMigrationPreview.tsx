@@ -3,6 +3,7 @@ import { Archive, Download, RefreshCw, ShieldCheck } from 'lucide-react';
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { NATIVE_TABLES } from '../services/nativeDatabaseView';
 import { downloadBlob } from '../services/download';
+import { ProcessingOrb } from './ProcessingOrb';
 
 interface SnapshotEntry { storageKey: string; payloadJson: string; recordCount: number; bytes: number; }
 interface NativeCount { table: string; rows: number; }
@@ -82,7 +83,7 @@ export const StorageMigrationPreview: React.FC = () => {
   return <section className="mb-4 rounded-xl border border-amber-700/40 bg-slate-950/60 p-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="flex items-center gap-2 text-sm font-semibold text-slate-100"><Archive className="h-4 w-4 text-amber-300" />Browser data preview and backup</h3><p className="mt-1 text-[11px] text-slate-400">Preview counts first. Import creates a transactional archive copy in native SQLite; it does not delete or modify browser records.</p></div>
-      <button type="button" onClick={() => void buildPreview()} disabled={busy} className="flex items-center gap-1 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} />Preview counts</button>
+      <button type="button" onClick={() => void buildPreview()} disabled={busy} className="flex items-center gap-1 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-50">{busy ? <ProcessingOrb state="working" size={20} label="Reading browser data counts" /> : <RefreshCw className="h-3.5 w-3.5" />}Preview counts</button>
     </div>
     {preview && <>
       <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">

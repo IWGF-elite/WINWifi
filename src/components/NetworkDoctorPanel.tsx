@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Activity, AlertTriangle, Check, CircleHelp, LoaderCircle, RefreshCw, Router, ShieldAlert, ShieldCheck, Wifi } from 'lucide-react';
+import { Activity, AlertTriangle, Check, CircleHelp, RefreshCw, Router, ShieldAlert, ShieldCheck, Wifi } from 'lucide-react';
+import { ProcessingOrb } from './ProcessingOrb';
 import { NetworkDoctorCheck } from '../types';
 import { NativeBridgeClient } from '../services/bridgeClient';
 
@@ -71,7 +72,7 @@ export const NetworkDoctorPanel: React.FC<NetworkDoctorPanelProps> = ({ adapterI
       </div>
       <button type="button" onClick={() => void runCheck()} disabled={!bridgeConnected || !adapterId || busy}
         className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50">
-        {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : check ? <RefreshCw className="h-4 w-4" /> : <Wifi className="h-4 w-4" />}
+        {busy ? <ProcessingOrb state="solving" size={20} label="Checking the current network connection" /> : check ? <RefreshCw className="h-4 w-4" /> : <Wifi className="h-4 w-4" />}
         {busy ? 'Checking connection…' : 'Check Network'}
       </button>
     </header>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FlaskConical, CheckCircle2, XCircle, RotateCw, X } from 'lucide-react';
+import { ProcessingOrb } from './ProcessingOrb';
 import { NativeBridgeClient } from '../services/bridgeClient';
 import { NATIVE_TABLES, toNativeTableView } from '../services/nativeDatabaseView';
 import { PcapService } from '../services/pcapParser';
@@ -390,7 +391,7 @@ SSID 2 : Open_Public
                 <div className="flex items-center gap-2.5">
                   {t.status === 'PASSED' && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
                   {t.status === 'FAILED' && <XCircle className="w-4 h-4 text-red-400 shrink-0" />}
-                  {t.status === 'RUNNING' && <RotateCw className="w-4 h-4 text-blue-400 animate-spin shrink-0" />}
+                  {t.status === 'RUNNING' && <ProcessingOrb state="solving" size={20} label={`${t.name} is running`} />}
                   {t.status === 'PENDING' && <div className="w-4 h-4 rounded-full border border-slate-600 shrink-0" />}
                   
                   <span className="font-semibold">{t.name}</span>
@@ -427,7 +428,7 @@ SSID 2 : Open_Public
               </span>
             ) : isRunning ? (
               <span className="flex items-center gap-1.5 text-blue-400">
-                <RotateCw className="w-4 h-4 animate-spin" />
+                <ProcessingOrb state="solving" size={20} label="Automated verification is running" />
                 Executing Automated Verification...
               </span>
             ) : (
@@ -443,7 +444,7 @@ SSID 2 : Open_Public
               disabled={isRunning}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold hover:bg-slate-700/30 transition-colors disabled:opacity-50"
             >
-              <RotateCw className={`w-3.5 h-3.5 ${isRunning ? 'animate-spin' : ''}`} />
+              {isRunning ? <ProcessingOrb state="working" size={20} label="Preparing verification rerun" /> : <RotateCw className="w-3.5 h-3.5" />}
               <span>Rerun Tests</span>
             </button>
             <button

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock3, LoaderCircle, Pause, Play, RefreshCw } from 'lucide-react';
+import { Clock3, Pause, Play, RefreshCw } from 'lucide-react';
+import { ProcessingOrb } from './ProcessingOrb';
 import { NetworkTimelineBounds, NetworkTimelineEntityState, NetworkTimelineState } from '../types';
 import { NativeBridgeClient } from '../services/bridgeClient';
 
@@ -111,7 +112,7 @@ export const NetworkTimeMachinePanel: React.FC<NetworkTimeMachinePanelProps> = (
   return <div className="mx-auto w-full max-w-[1280px] space-y-4 text-slate-100">
     <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
       <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-300"><Clock3 className="h-5 w-5" /></div><div><h1 className="text-lg font-bold">Scan History</h1><p className="text-xs text-slate-400">Review saved network observations and compare two points in time.</p></div></div>
-      <button onClick={() => void reload()} disabled={!bridgeConnected || busy} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold hover:bg-slate-800 disabled:opacity-50">{busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Reload history</button>
+      <button onClick={() => void reload()} disabled={!bridgeConnected || busy} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold hover:bg-slate-800 disabled:opacity-50">{busy ? <ProcessingOrb state="working" size={20} label="Loading scan history" /> : <RefreshCw className="h-4 w-4" />}Reload history</button>
     </header>
     {!bridgeConnected && <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">Connect the Windows bridge to read local history.</div>}
     {error && <div role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</div>}

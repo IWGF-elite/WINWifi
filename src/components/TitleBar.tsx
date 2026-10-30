@@ -23,6 +23,7 @@ import { AppUpdateSnapshot } from '../services/bridgeClient';
 import { BridgeErrorKind, bridgeStatusView } from '../services/bridgeStatus';
 import { WinWiFiLogo } from './WinWiFiLogo';
 import { useScanActive } from '../contexts/ScanActivityContext';
+import { ProcessingOrb } from './ProcessingOrb';
 
 interface TitleBarProps {
   isDarkMode: boolean;
@@ -105,7 +106,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         return isScanning ? {
           label: hasFreshLiveData ? 'LIVE WINDOWS DATA' : 'WAITING FOR SCAN',
           classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-          icon: <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
+          icon: <ProcessingOrb state="searching" size={20} label="Live Wi-Fi scan in progress" />
         } : {
           label: 'SCAN STOPPED · LAST WINDOWS DATA',
           classes: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
@@ -188,7 +189,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
       {updateStatus?.state === 'downloading' && (
         <div role="status" className="flex items-center gap-2 border-t border-slate-700/50 px-3 py-1 text-[11px] text-slate-400">
-          <RefreshCw className="h-3 w-3 animate-spin text-cyan-400" />
+          <ProcessingOrb state="connecting" size={20} label="Downloading WinWiFi update" />
           <span>Downloading WinWiFi update {updateStatus.latestVersion ?? ''}</span>
           <div className="h-1.5 w-24 overflow-hidden rounded bg-slate-800"><div className="h-full bg-cyan-500 transition-[width]" style={{ width: `${updateStatus.progressPercent}%` }} /></div>
           <span>{updateStatus.progressPercent}%</span>
@@ -221,12 +222,12 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           >
             {isScanning ? (
               <>
-                <Square className="w-3.5 h-3.5 fill-current" />
+                {scanCommandPending ? <ProcessingOrb state="working" size={20} label="Updating scan state" /> : <Square className="w-3.5 h-3.5 fill-current" />}
                 <span>{scanCommandPending ? 'Starting…' : 'Stop Scan'}</span>
               </>
             ) : (
               <>
-                <Play className="w-3.5 h-3.5 fill-current" />
+                {scanCommandPending ? <ProcessingOrb state="working" size={20} label="Updating scan state" /> : <Play className="w-3.5 h-3.5 fill-current" />}
                 <span>{scanCommandPending ? 'Stopping…' : 'Start Scan'}</span>
               </>
             )}
@@ -244,7 +245,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               }`}
               title="Trigger immediate hardware scan cycle and refresh network table"
             >
-              <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+              {refreshPending ? <ProcessingOrb state="searching" size={20} label="Refreshing live scan" /> : <RefreshCw className="w-3.5 h-3.5 text-blue-400" />}
               <span>{refreshPending ? 'Refreshing…' : 'Refresh'}</span>
             </button>
           )}
@@ -283,7 +284,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 }`}
                 title={`Windows Bridge Daemon (${view.label}) — click to configure`}
               >
-                <Server className="w-3 h-3" />
+                {view.tone === 'busy' ? <ProcessingOrb state="connecting" size={20} label="Connecting to the Windows bridge" /> : <Server className="w-3 h-3" />}
                 <span>Bridge: {view.label}</span>
               </button>
             );
