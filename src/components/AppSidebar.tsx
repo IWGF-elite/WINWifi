@@ -14,6 +14,8 @@ import {
   Layers,
   MapPin,
   Sliders,
+  GraduationCap,
+  SlidersHorizontal,
   Wifi,
   type LucideIcon,
 } from 'lucide-react';
@@ -32,7 +34,7 @@ interface AppSidebarProps {
   packetCount: number;
   handshakeCount: number;
   onNavigate: (tab: ActiveTab) => void;
-  onToggleUIMode: () => void;
+  onSelectUIMode: (mode: UIMode) => void;
 }
 
 interface SidebarItem {
@@ -56,7 +58,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   packetCount,
   handshakeCount,
   onNavigate,
-  onToggleUIMode,
+  onSelectUIMode,
 }) => {
   const groups: { label: string; items: SidebarItem[] }[] = [
     {
@@ -143,11 +145,37 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             <small>{bridgeConnected ? (isScanning ? 'Live scan active' : 'Scan paused') : 'Waiting for connection'}</small>
           </span>
         </div>
-        <button className="winwifi-sidebar-mode" type="button" onClick={onToggleUIMode} title="Switch presentation depth">
-          <span className="winwifi-sidebar-mode-icon">{uiMode === 'expert' ? 'EX' : 'BE'}</span>
-          <span className="winwifi-sidebar-mode-copy"><small>DISPLAY MODE</small><strong>{uiMode}</strong></span>
-          <span className="winwifi-sidebar-mode-switch">↔</span>
-        </button>
+        <div className="winwifi-sidebar-mode" role="group" aria-label="Display mode">
+          <div className="winwifi-sidebar-mode-heading">
+            <span>DISPLAY MODE</span>
+            <small>{uiMode === 'beginner' ? 'GUIDED' : 'FULL DETAIL'}</small>
+          </div>
+          <div className="winwifi-mode-segments">
+            <button
+              type="button"
+              className={`winwifi-mode-option${uiMode === 'beginner' ? ' is-selected' : ''}`}
+              aria-pressed={uiMode === 'beginner'}
+              title="Beginner: plain-language summaries and a simpler view"
+              onClick={() => onSelectUIMode('beginner')}
+            >
+              <GraduationCap aria-hidden="true" />
+              <span>Beginner</span>
+            </button>
+            <button
+              type="button"
+              className={`winwifi-mode-option${uiMode === 'expert' ? ' is-selected' : ''}`}
+              aria-pressed={uiMode === 'expert'}
+              title="Expert: full technical fields, evidence, and live diagnostics"
+              onClick={() => onSelectUIMode('expert')}
+            >
+              <SlidersHorizontal aria-hidden="true" />
+              <span>Expert</span>
+            </button>
+          </div>
+          <p className="winwifi-sidebar-mode-note">
+            {uiMode === 'beginner' ? 'Plain language · guided actions' : 'Technical detail · full evidence'}
+          </p>
+        </div>
       </div>
     </aside>
   );

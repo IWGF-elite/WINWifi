@@ -21,7 +21,6 @@ import {
 import { DataSourceProfile, BridgeConnectionState, WifiAdapter } from '../types';
 import { AppUpdateSnapshot } from '../services/bridgeClient';
 import { BridgeErrorKind, bridgeStatusView } from '../services/bridgeStatus';
-import { WinWiFiLogo } from './WinWiFiLogo';
 import { useScanActive } from '../contexts/ScanActivityContext';
 import { ProcessingOrb } from './ProcessingOrb';
 
@@ -40,7 +39,8 @@ interface TitleBarProps {
   bridgeState?: BridgeConnectionState;
   bridgeErrorKind?: BridgeErrorKind | null;
   onOpenBridgeConfig?: () => void;
-  projectName: string;
+  /** Accepted for existing callers; project identity is shown in its workspace, not the app chrome. */
+  projectName?: string;
   onOpenReport: () => void;
   onOpenSelfTest: () => void;
   onOpenImport: () => void;
@@ -70,7 +70,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   bridgeState = 'DISCONNECTED',
   bridgeErrorKind = null,
   onOpenBridgeConfig,
-  projectName,
   onOpenReport,
   onOpenSelfTest,
   onOpenImport,
@@ -147,13 +146,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       <div className="winwifi-window-chrome flex items-center justify-between gap-2 overflow-hidden px-3 py-1.5 text-xs" onDoubleClick={toggleWorkAreaFit} onMouseDown={(event) => {
         if (event.button === 0 && !(event.target as HTMLElement).closest('button,select,input')) beginNativeDrag();
       }}>
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-          <WinWiFiLogo className="h-6 w-6 shrink-0 rounded-md shadow-sm" />
-          <span className="truncate font-semibold tracking-wide text-xs">WinWiFi Security Auditor</span>
-          <span className="winwifi-edition text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-mono">Enterprise v3.0</span>
-          <span className="winwifi-project-separator text-slate-500">|</span>
-          <span className="winwifi-project-name text-slate-400 font-medium truncate max-w-[200px]">{projectName}</span>
-        </div>
+        <div className="min-w-0 flex-1" aria-hidden="true" />
 
         {/* Windows Window Controls */}
         <div className="winwifi-window-controls flex shrink-0 items-center gap-1">

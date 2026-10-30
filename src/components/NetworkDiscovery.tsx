@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { 
   AccessPoint, 
   DataSourceProfile,
-  DataOrigin 
+  DataOrigin,
+  UIMode
 } from '../types';
 import { 
   Wifi, 
@@ -28,6 +29,7 @@ import { ProcessingOrb } from './ProcessingOrb';
 
 interface NetworkDiscoveryProps {
   accessPoints: AccessPoint[];
+  uiMode?: UIMode;
   selectedBssid: string | null;
   onSelectAp: (bssid: string) => void;
   onCaptureHandshake: (ap: AccessPoint) => void;
@@ -49,6 +51,7 @@ const securityLabel = (security: string) => security === 'OWE (Enhanced Open)' ?
 
 export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   accessPoints,
+  uiMode = 'beginner',
   selectedBssid,
   onSelectAp,
   onCaptureHandshake,
@@ -61,6 +64,8 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   isDarkMode,
   connectedBssid,
 }) => {
+  const expertMode = uiMode === 'expert';
+  const visibleColumnCount = expertMode ? 10 : 5;
   const scanActive = useScanActive();
   const [searchTerm, setSearchTerm] = useState('');
   const [bandFilter, setBandFilter] = useState<string>('ALL');
@@ -392,6 +397,10 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
       </div>
 
       {/* Access Points Table */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[10px] text-slate-500" role="status">
+        <span className="font-semibold uppercase tracking-wider text-slate-400">{expertMode ? 'Expert network detail' : 'Guided network view'}</span>
+        <span>{expertMode ? 'Identifiers, radio settings, capture fields, and risk evidence are visible.' : 'Start with security and risk. Select Inspect for the full technical record.'}</span>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
@@ -407,8 +416,8 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                   <ArrowUpDown className="w-3 h-3 opacity-60" />
                 </button>
               </th>
-              <th className="py-2.5 px-3">Origin</th>
-              <th className="py-2.5 px-3">BSSID / MAC</th>
+              {expertMode && <th className="py-2.5 px-3">Origin</th>}
+              {expertMode && <th className="py-2.5 px-3">BSSID / MAC</th>}
               <th className="py-2.5 px-3">
                 <button 
                   onClick={() => toggleSort('rssi')} 
@@ -418,7 +427,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                   <ArrowUpDown className="w-3 h-3 opacity-60" />
                 </button>
               </th>
-              <th className="py-2.5 px-3">
+              {expertMode && <th className="py-2.5 px-3">
                 <button 
                   onClick={() => toggleSort('channel')} 
                   className="flex items-center gap-1 hover:text-slate-200"
@@ -426,9 +435,9 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                   CH / Band
                   <ArrowUpDown className="w-3 h-3 opacity-60" />
                 </button>
-              </th>
+              </th>}
               <th className="py-2.5 px-3">Security & Cipher</th>
-              <th className="py-2.5 px-3">
+              {expertMode && <th className="py-2.5 px-3">
                 <button 
                   onClick={() => toggleSort('clients')} 
                   disabled={!hasCaptureData}
@@ -438,8 +447,8 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                   Clients
                   <ArrowUpDown className="w-3 h-3 opacity-60" />
                 </button>
-              </th>
-              <th className="py-2.5 px-3">
+              </th>}
+              {expertMode && <th className="py-2.5 px-3">
                 <button 
                   onClick={() => toggleSort('dataPacketCount')} 
                   disabled={!hasCaptureData}
@@ -449,13 +458,13 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                   Packets
                   <ArrowUpDown className="w-3 h-3 opacity-60" />
                 </button>
-              </th>
+              </th>}
               <th className="py-2.5 px-3">
                 <button 
                   onClick={() => toggleSort('securityScore')} 
                   className="flex items-center gap-1 hover:text-slate-200"
                 >
-                  Risk Score
+                  {expertMode ? 'Risk Score' : 'Risk'}
                   <ArrowUpDown className="w-3 h-3 opacity-60" />
                 </button>
               </th>
@@ -465,7 +474,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
           <tbody className={`divide-y ${isDarkMode ? 'divide-[#242835]' : 'divide-slate-200'}`}>
             {paginatedApList.length === 0 ? (
               <tr>
-                <td colSpan={10} className="py-12 px-4 text-center">
+                <td colSpan={visibleColumnCount} className="py-12 px-4 text-center">
                   <div className="flex flex-col items-center justify-center max-w-md mx-auto space-y-3">
                     <div className="p-3 rounded-full bg-blue-500/10 text-blue-400">
                       <Radio className="w-8 h-8" />
@@ -552,41 +561,41 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                             )}
                           </div>
                           <div className="text-[10px] text-slate-400">
-                            {ap.vendor} • {ap.standard}
+                            {expertMode ? `${ap.vendor} • ${ap.standard}` : ap.vendor}
                           </div>
                         </div>
                       </div>
                     </td>
 
                     {/* Origin Badge */}
-                    <td className="py-3 px-3">
+                    {expertMode && <td className="py-3 px-3">
                       {getOriginBadge(originType)}
-                    </td>
+                    </td>}
 
                     {/* BSSID */}
-                    <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
+                    {expertMode && <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
                       <div>{ap.bssid}</div>
                       <div className={`mt-0.5 font-sans text-[10px] ${ap.isActiveInCurrentScan === false ? 'text-amber-400' : 'text-slate-500'}`}>
                         {lastSeenLabel(ap)}
                         {ap.isActiveInCurrentScan === false ? ` · missed ${ap.disappearedScanCycles || 1}/${3}` : ''}
                       </div>
-                    </td>
+                    </td>}
 
                     {/* RSSI */}
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
                         {renderSignalBars(ap.rssi)}
-                        <span className="font-mono text-xs">{ap.rssi} dBm</span>
+                        <span className="font-mono text-xs">{expertMode ? `${ap.rssi} dBm` : ap.rssi > -55 ? 'Strong' : ap.rssi > -68 ? 'Good' : ap.rssi > -80 ? 'Fair' : 'Weak'}</span>
                       </div>
                     </td>
 
                     {/* Channel & Band */}
-                    <td className="py-3 px-3">
+                    {expertMode && <td className="py-3 px-3">
                       <div className="font-medium text-slate-200">
                         CH {ap.channel} ({ap.channelWidthMhz}MHz)
                       </div>
                       <div className="text-[10px] text-slate-400">{ap.band}</div>
-                    </td>
+                    </td>}
 
                     {/* Security & Cipher */}
                     <td className="py-3 px-3">
@@ -599,7 +608,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                         <span className="font-medium text-slate-200">{securityLabel(ap.security)}</span>
                       </div>
                       <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
-                        <span>Cipher: {ap.cipher}</span>
+                        {expertMode && <span>Cipher: {ap.cipher}</span>}
                         {ap.wpsEnabled && (
                           <span className="text-amber-400 font-medium">WPS ON</span>
                         )}
@@ -607,17 +616,17 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
                     </td>
 
                     {/* Clients */}
-                    <td className="py-3 px-3">
+                    {expertMode && <td className="py-3 px-3">
                       <div className="flex items-center gap-1.5 text-slate-300">
                         <Users className="w-3.5 h-3.5 text-slate-400" />
                         <span className="font-mono">{hasCaptureData ? (ap.clients?.length || 0) : 'N/A (needs capture)'}</span>
                       </div>
-                    </td>
+                    </td>}
 
                     {/* Packets */}
-                    <td className="py-3 px-3">
+                    {expertMode && <td className="py-3 px-3">
                       <span className="font-mono text-slate-400">{hasCaptureData ? ap.dataPacketCount.toLocaleString() : 'N/A (needs capture)'}</span>
-                    </td>
+                    </td>}
 
                     {/* Score */}
                     <td className="py-3 px-3">
@@ -661,12 +670,12 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
           <span>
             Matching Filters: <strong className="text-slate-200 font-mono">{sorted.length}</strong>
           </span>
-          <span>
+          {expertMode && <span>
             Associated Clients: <strong className="text-slate-200 font-mono">{hasCaptureData ? accessPoints.reduce((acc, a) => acc + (a.clients?.length || 0), 0) : 'N/A (needs capture)'}</strong>
-          </span>
-          <span>
+          </span>}
+          {expertMode && <span>
             Captured Handshakes: <strong className="text-emerald-400 font-mono">{hasCaptureData ? accessPoints.filter(a => !!a.handshake).length : 'N/A (needs capture)'}</strong>
-          </span>
+          </span>}
         </div>
 
         {/* Presentation-only pagination controls */}

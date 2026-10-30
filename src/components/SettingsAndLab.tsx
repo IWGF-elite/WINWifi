@@ -4,8 +4,8 @@ import {
   ShieldCheck,
   Check,
   Sparkles,
-  ToggleLeft,
-  ToggleRight,
+  GraduationCap,
+  SlidersHorizontal,
   Code
 } from 'lucide-react';
 import { UIMode, AccessPoint, MaintenanceApprovalRecord } from '../types';
@@ -83,30 +83,30 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
           <div>
             <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
-              Presentation Experience: Beginner vs Expert Mode
+              Display Mode
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Switches between plain-English guided summaries and deep 802.11 RSN/PMF/hexadecimal forensic inspection.
+              Choose a guided, low-clutter view or show the full technical detail across the workspace.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className={`text-xs font-semibold ${uiMode === 'beginner' ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>
-              Beginner Friendly
-            </span>
+          <div role="group" aria-label="Select display mode" className="grid grid-cols-2 gap-1 rounded-xl border border-slate-700 bg-slate-950/70 p-1">
             <button
-              onClick={() => onToggleUIMode(uiMode === 'beginner' ? 'expert' : 'beginner')}
-              className="text-blue-400 hover:text-blue-300 transition-colors"
+              type="button"
+              onClick={() => onToggleUIMode('beginner')}
+              aria-pressed={uiMode === 'beginner'}
+              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${uiMode === 'beginner' ? 'bg-blue-600 text-white shadow-md shadow-blue-950/40' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
             >
-              {uiMode === 'expert' ? (
-                <ToggleRight className="w-8 h-8 fill-current" />
-              ) : (
-                <ToggleLeft className="w-8 h-8 text-slate-600" />
-              )}
+              <GraduationCap className="h-4 w-4" /> Beginner
             </button>
-            <span className={`text-xs font-semibold ${uiMode === 'expert' ? 'text-purple-400 font-bold' : 'text-slate-400'}`}>
-              Expert Auditor
-            </span>
+            <button
+              type="button"
+              onClick={() => onToggleUIMode('expert')}
+              aria-pressed={uiMode === 'expert'}
+              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${uiMode === 'expert' ? 'bg-blue-600 text-white shadow-md shadow-blue-950/40' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+            >
+              <SlidersHorizontal className="h-4 w-4" /> Expert
+            </button>
           </div>
         </div>
 
@@ -116,10 +116,10 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
           }`}>
             <div className="font-bold text-slate-100 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-400" />
-              Beginner Mode (Simple on the Surface)
+              Beginner Mode · Guided view
             </div>
             <p className="mt-1.5 text-xs text-slate-300 leading-relaxed">
-              Focuses on plain-English status indicators ("Safe", "Warning", "Danger"), what each risk means, and clear instructions on what router settings to change. Perfect for non-auditors or initial triage.
+              Uses plain-language signal and security summaries, fewer table columns, and guided next steps. Full records remain available from Inspect.
             </p>
           </div>
 
@@ -128,10 +128,10 @@ export const SettingsAndLab: React.FC<SettingsAndLabProps> = ({
           }`}>
             <div className="font-bold text-slate-100 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-purple-400" />
-              Expert Mode (Power Under the Hood)
+              Expert Mode · Full detail
             </div>
             <p className="mt-1.5 text-xs text-slate-300 leading-relaxed">
-              Unlocks full 802.11 RSN Tag 48 parsing, AKM cipher suites, Protected Management Frame bitflags, Radiotap antenna measurements, and the raw hexadecimal packet inspector. Hashcat Mode 22000 export is not implemented.
+              Shows network identifiers, radio measurements, cipher details, capture fields, and diagnostic event logs for deeper review.
             </p>
           </div>
         </div>

@@ -1491,7 +1491,7 @@ export default function App() {
 
   return (
     <ScanActivityProvider active={isScanning}>
-    <div className={`h-screen min-h-0 overflow-hidden flex flex-col font-sans transition-colors duration-200 ${
+    <div data-display-mode={uiMode} className={`h-screen min-h-0 overflow-hidden flex flex-col font-sans transition-colors duration-200 ${
       isDarkMode ? 'bg-[#0b0d11] text-slate-100' : 'bg-[#eef0f6] text-slate-900'
     }`}>      {showStartupReadiness && <StartupReadinessOverlay
         bridgeState={bridgeState}
@@ -1521,7 +1521,7 @@ export default function App() {
         packetCount={packets.length}
         handshakeCount={handshakes.length}
         onNavigate={handleNavigate}
-        onToggleUIMode={() => handleToggleUIMode(uiMode === 'beginner' ? 'expert' : 'beginner')}
+        onSelectUIMode={handleToggleUIMode}
       />
       <div className="winwifi-main-column">
       <div className={`sticky top-0 z-50 flex-none ${isDarkMode ? 'bg-[#0b0d11]' : 'bg-[#eef0f6]'}`}>
@@ -1541,7 +1541,6 @@ export default function App() {
         bridgeState={bridgeState}
         bridgeErrorKind={bridgeErrorKind}
         onOpenBridgeConfig={embeddedShell ? undefined : () => setShowBridgeModal(true)}
-        projectName={currentProject.name}
         onOpenReport={() => setShowReportModal(true)}
         onOpenSelfTest={() => setShowSelfTestModal(true)}
         onOpenImport={() => setShowImportModal(true)}
@@ -1697,6 +1696,7 @@ export default function App() {
             ) : (
               <NetworkDiscovery
                 accessPoints={accessPoints}
+                uiMode={uiMode}
                 selectedBssid={selectedBssid}
                 onSelectAp={(bssid) => {
                   // This callback is invoked only by NetworkDiscovery's Inspect button.
@@ -1908,8 +1908,9 @@ export default function App() {
         )}
         </div>
 
-        {/* Real-time Diagnostics & Auditing Logs Console */}
-        <LogConsole
+        {/* Technical event details are shown in Expert mode; Guided mode keeps
+            the workspace focused on summaries and next actions. */}
+        {uiMode === 'expert' ? <LogConsole
           logs={logs}
           canClearLogs={can(operatorRole, 'clear_logs')}
           onClearLogs={() => {
@@ -1922,7 +1923,9 @@ export default function App() {
             setLogs([]);
           }}
           isDarkMode={isDarkMode}
-        />
+        /> : <div className="winwifi-guided-footer" role="status">
+          Guided view is focused on plain-language summaries. Switch to Expert for the live technical event log.
+        </div>}
       </main>
       </div>
       </div>

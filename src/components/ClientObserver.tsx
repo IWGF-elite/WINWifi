@@ -35,6 +35,8 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
   onOpenImport
 }) => {
   const scanActive = useScanActive();
+  const expertMode = uiMode === 'expert';
+  const visibleClientColumns = expertMode ? 7 : 3;
   const [search, setSearch] = useState('');
   const [selectedBssid, setSelectedBssid] = useState<string>('all');
   const isLiveMode = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
@@ -214,25 +216,27 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-800/80 text-slate-400 font-semibold uppercase tracking-wider text-[10px] border-b border-slate-700/80">
               <tr>
-                <th className="py-3 px-4">Station MAC / Hardware</th>
-                <th className="py-3 px-4">Associated Access Point</th>
-                <th className="py-3 px-4">Signal RSSI</th>
-                <th className="py-3 px-4">Data Rate</th>
-                <th className="py-3 px-4">Transmitted Frames</th>
-                <th className="py-3 px-4">Probed SSIDs</th>
-                <th className="py-3 px-4 text-right">Association</th>
+                <th className="py-3 px-4">{expertMode ? 'Station MAC / Hardware' : 'Device'}</th>
+                <th className="py-3 px-4">{expertMode ? 'Associated Access Point' : 'Network'}</th>
+                {expertMode && <>
+                  <th className="py-3 px-4">Signal RSSI</th>
+                  <th className="py-3 px-4">Data Rate</th>
+                  <th className="py-3 px-4">Transmitted Frames</th>
+                  <th className="py-3 px-4">Probed SSIDs</th>
+                </>}
+                <th className="py-3 px-4 text-right">{expertMode ? 'Association' : 'Status'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-200">
               {!hasClientCaptureData ? (
-                <tr><td colSpan={7} className="text-center py-16 text-slate-500">
+                <tr><td colSpan={visibleClientColumns} className="text-center py-16 text-slate-500">
                   <Info className="w-10 h-10 mx-auto mb-3 opacity-40" />
                   <p className="text-sm font-medium text-slate-400">Client stations need packet capture data</p>
                   <p className="text-xs mt-1">A standard Windows WLAN scan cannot report nearby client devices. Import a Wi-Fi capture to populate this view.</p>
                 </td></tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400 space-y-3">
+                  <td colSpan={visibleClientColumns} className="py-12 text-center text-slate-400 space-y-3">
                     <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-slate-500">
                       <Laptop className="w-5 h-5" />
                     </div>
@@ -267,13 +271,13 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
                     {/* Associated AP */}
                     <td className="py-3 px-4">
                       <div className="font-medium text-slate-200">{cl.apSsid || '[Hidden]'}</div>
-                      <div className="text-[11px] font-mono text-slate-400">
+                      {expertMode && <div className="text-[11px] font-mono text-slate-400">
                         {cl.apBssid} (Ch {cl.apChannel})
-                      </div>
+                      </div>}
                     </td>
 
                     {/* RSSI */}
-                    <td className="py-3 px-4">
+                    {expertMode && <td className="py-3 px-4">
                       <div className="flex items-center gap-1.5 font-mono">
                         <span className={`font-semibold ${
                           cl.rssi > -60 ? 'text-emerald-400' : cl.rssi > -75 ? 'text-amber-400' : 'text-slate-400'
@@ -281,25 +285,25 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
                           {cl.rssi} dBm
                         </span>
                       </div>
-                    </td>
+                    </td>}
 
                     {/* Rate */}
-                    <td className="py-3 px-4 font-mono text-slate-300">
+                    {expertMode && <td className="py-3 px-4 font-mono text-slate-300">
                       {cl.dataRateMbps > 0 ? `${cl.dataRateMbps} Mbps` : '—'}
-                    </td>
+                    </td>}
 
                     {/* Packets */}
-                    <td className="py-3 px-4 font-mono text-slate-300">
+                    {expertMode && <td className="py-3 px-4 font-mono text-slate-300">
                       <div>{cl.packetsSent.toLocaleString()} frames</div>
                       {(cl.eapolPacketsObserved || 0) > 0 && (
                         <div className="text-[10px] text-amber-400 font-semibold">
                           {cl.eapolPacketsObserved} EAPOL nonces
                         </div>
                       )}
-                    </td>
+                    </td>}
 
                     {/* Probes */}
-                    <td className="py-3 px-4">
+                    {expertMode && <td className="py-3 px-4">
                       <div className="flex flex-wrap gap-1 max-w-[200px]">
                         {cl.probes && cl.probes.length > 0 ? (
                           cl.probes.map(p => (
@@ -311,7 +315,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
                           <span className="text-slate-600 italic text-[11px]">Passive</span>
                         )}
                       </div>
-                    </td>
+                    </td>}
 
                     {/* Status */}
                     <td className="py-3 px-4 text-right">

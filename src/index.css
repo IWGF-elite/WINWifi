@@ -449,15 +449,13 @@
 .winwifi-sidebar-status-dot.is-offline {
   background: #c29c63;
 }
-.winwifi-sidebar-status-copy,
-.winwifi-sidebar-mode-copy {
+.winwifi-sidebar-status-copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 0.12rem;
 }
-.winwifi-sidebar-status-copy strong,
-.winwifi-sidebar-mode-copy strong {
+.winwifi-sidebar-status-copy strong {
   overflow: hidden;
   color: #c9c9d1;
   font-size: 0.68rem;
@@ -465,51 +463,96 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.winwifi-sidebar-status-copy small,
-.winwifi-sidebar-mode-copy small {
+.winwifi-sidebar-status-copy small {
   color: #71717b;
   font-size: 0.6rem;
 }
 .winwifi-sidebar-mode {
   display: flex;
   width: 100%;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.55rem 0.6rem;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.65rem;
   border: 1px solid rgb(255 255 255 / 7%);
-  border-radius: 0.75rem;
+  border-radius: 0.9rem;
   color: #b7b7c1;
-  background: linear-gradient(120deg, #1a1b21, #17181d);
-  text-align: left;
+  background: linear-gradient(145deg, #191a20, #121318);
 }
-.winwifi-sidebar-mode:hover:not(:disabled) {
-  border-color: rgb(255 255 255 / 12%);
-  background: #202127;
+.winwifi-sidebar-mode-heading {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  color: #777781;
+  font-size: 0.55rem;
+  font-weight: 750;
+  letter-spacing: 0.11em;
 }
-.winwifi-sidebar-mode-icon {
+.winwifi-sidebar-mode-heading small {
+  color: #a4ddeb;
+  font-size: 0.5rem;
+  letter-spacing: 0.08em;
+}
+.winwifi-mode-segments {
   display: grid;
-  width: 1.65rem;
-  height: 1.65rem;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border: 1px solid rgb(255 255 255 / 5%);
+  border-radius: 0.68rem;
+  background: #0b0c10;
+}
+.winwifi-mode-option {
+  display: flex;
+  min-width: 0;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  color: #858590;
+  background: transparent;
+  font-size: 0.62rem;
+  font-weight: 650;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.winwifi-mode-option svg {
+  width: 0.8rem;
+  height: 0.8rem;
   flex: 0 0 auto;
-  place-items: center;
-  border-radius: 0.55rem;
-  color: #c9d5e2;
-  background: linear-gradient(135deg, #273b54, #292c3a);
-  font-size: 0.56rem;
-  font-weight: 800;
 }
-.winwifi-sidebar-mode-copy {
-  flex: 1 1 auto;
+.winwifi-mode-option:hover:not(:disabled) {
+  color: #d6d6de;
+  background: rgb(255 255 255 / 5%);
 }
-.winwifi-sidebar-mode-copy strong {
-  text-transform: capitalize;
+.winwifi-mode-option.is-selected {
+  color: #f5fbff;
+  border-color: rgb(90 169 232 / 28%);
+  background: linear-gradient(110deg, rgb(39 105 174 / 50%), rgb(74 81 141 / 42%));
+  box-shadow: 0 3px 10px rgb(10 35 70 / 25%), inset 0 1px 0 rgb(255 255 255 / 8%);
 }
-.winwifi-sidebar-mode-switch {
-  color: #72737c;
-  font-size: 1rem;
+.winwifi-guided-footer {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--app-border);
+  border-radius: 0.75rem;
+  color: #858590;
+  background: var(--app-surface-1);
+  font-size: 0.65rem;
+}
+.winwifi-sidebar-mode-note {
+  width: 100%;
+  margin: 0;
+  color: #74747f;
+  font-size: 0.57rem;
+  line-height: 1.35;
 }
 :root[data-theme="dark"] .winwifi-sidebar .winwifi-sidebar-link:not(:disabled):hover,
-:root[data-theme="dark"] .winwifi-sidebar .winwifi-sidebar-mode:not(:disabled):hover {
+:root[data-theme="dark"] .winwifi-sidebar .winwifi-mode-option:not(:disabled):hover {
   transform: none;
   box-shadow: none;
   filter: none;
@@ -533,12 +576,15 @@
 :root[data-theme="light"] .winwifi-sidebar-link.is-active .winwifi-sidebar-icon { color: #2879bf; }
 :root[data-theme="light"] .winwifi-sidebar-count { border-color: #e1e5ec; color: #5d6878; background: #e9edf3; }
 :root[data-theme="light"] .winwifi-sidebar-status-copy strong,
-:root[data-theme="light"] .winwifi-sidebar-mode-copy strong { color: #414a58; }
+:root[data-theme="light"] .winwifi-sidebar-mode-heading { color: #8992a2; }
+:root[data-theme="light"] .winwifi-sidebar-mode-heading small { color: #2879bf; }
 :root[data-theme="light"] .winwifi-sidebar-status-copy small,
-:root[data-theme="light"] .winwifi-sidebar-mode-copy small { color: #8992a2; }
+:root[data-theme="light"] .winwifi-sidebar-mode-note { color: #8992a2; }
 :root[data-theme="light"] .winwifi-sidebar-mode { border-color: #e2e6ed; color: #596475; background: #f8f9fb; }
-:root[data-theme="light"] .winwifi-sidebar-mode:hover:not(:disabled) { background: #edf0f5; }
-:root[data-theme="light"] .winwifi-sidebar-mode-icon { color: #426183; background: #e6edf5; }
+:root[data-theme="light"] .winwifi-mode-segments { border-color: #e2e6ed; background: #edf0f5; }
+:root[data-theme="light"] .winwifi-mode-option { color: #677284; }
+:root[data-theme="light"] .winwifi-mode-option:hover:not(:disabled) { color: #283747; background: rgb(30 65 110 / 6%); }
+:root[data-theme="light"] .winwifi-mode-option.is-selected { color: #fff; }
 .winwifi-sidebar .winwifi-sidebar-link:not(:disabled):hover {
   transform: none;
   box-shadow: none;
@@ -643,8 +689,9 @@
   .winwifi-sidebar-label,
   .winwifi-sidebar-count,
   .winwifi-sidebar-status-copy,
-  .winwifi-sidebar-mode-copy,
-  .winwifi-sidebar-mode-switch {
+  .winwifi-sidebar-mode-heading,
+  .winwifi-sidebar-mode-note,
+  .winwifi-mode-option span {
     display: none;
   }
   .winwifi-sidebar-scroll { padding-inline: 0.45rem; }
@@ -657,7 +704,9 @@
   .winwifi-sidebar-icon { width: 1.1rem; height: 1.1rem; }
   .winwifi-sidebar-footer { padding: 0.5rem; }
   .winwifi-sidebar-status { justify-content: center; padding-inline: 0; }
-  .winwifi-sidebar-mode { justify-content: center; padding: 0.45rem; }
+  .winwifi-sidebar-mode { align-items: center; padding: 0.4rem; }
+  .winwifi-mode-segments { grid-template-columns: 1fr; gap: 0.1rem; padding: 0.15rem; }
+  .winwifi-mode-option { min-height: 1.75rem; padding: 0.3rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
