@@ -36,7 +36,6 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
     { label: 'Starting live telemetry', detail: scanReady ? dataSourceProfile === 'LIVE_WINDOWS' ? `${accessPointCount} current BSSID${accessPointCount === 1 ? '' : 's'} observed` : 'Windows scan status and network response loaded' : !scanStatusLoaded ? 'Waiting for scan status' : 'Waiting for the Windows network list', done: scanReady, failed: false }
   ];
 
-  const ready = bridgeReady && healthLoaded && adaptersLoaded && scanReady && snapshotsLoaded;
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050912]/95 px-5 text-slate-100 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="WinWiFi readiness checks">
       <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-sky-400/25 bg-[#0a1425] shadow-2xl shadow-sky-950/50">
@@ -76,8 +75,8 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
           )}
           <div className="mt-7 flex items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-xs text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-400" /> Passive, defensive, authorized-scope workflow</div>
-            {(ready || failed) && <button onClick={onContinue} className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-sky-400">{ready ? 'Open Command Center' : 'Continue to desktop'}</button>}
-            {!ready && !failed && <div className="flex items-center gap-2 text-xs font-medium text-sky-300"><Wifi className="h-4 w-4 animate-pulse" /> Verifying local services</div>}
+            {!failed && <div className="flex items-center gap-2 text-xs font-medium text-sky-300"><Wifi className="h-4 w-4 animate-pulse" /> Verifying local services</div>}
+            <button onClick={onContinue} className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-sky-400">Open Command Center</button>
           </div>
         </div>
       </div>

@@ -2202,10 +2202,16 @@ runTest('T38: Reports Do Not Invent A Passing Score Without Observations', () =>
   }
 });
 
-runTest('T40: Startup Readiness Waits For Real Initial Responses', () => {
+runTest('T40: Startup Splash Remains Until Open Command Center Is Clicked', () => {
   const appSource = fs.readFileSync(path.resolve(__dirname, '../src/App.tsx'), 'utf8');
-  if (/setTimeout\s*\(\s*\(\)\s*=>\s*setShowStartupReadiness/.test(appSource)) {
-    throw new Error('Startup readiness still dismisses on a fixed timer');
+  const dismissCalls = appSource.match(/setShowStartupReadiness\(false\)/g) || [];
+  if (dismissCalls.length !== 1 || !/onContinue=\{\(\) => setShowStartupReadiness\(false\)\}/.test(appSource)) {
+    throw new Error('The splash can be dismissed somewhere other than the explicit Open Command Center button');
+  }
+  const startupStateStart = appSource.indexOf('const [showStartupReadiness');
+  const startupStateEnd = appSource.indexOf('const bridgeClient');
+  if (/setTimeout|requestAnimationFrame|onAnimationEnd/.test(appSource.slice(startupStateStart, startupStateEnd))) {
+    throw new Error('Startup readiness contains timer- or animation-based auto-dismiss logic');
   }
   const baseProps = {
     bridgeState: 'CONNECTED' as any,
@@ -2220,8 +2226,8 @@ runTest('T40: Startup Readiness Waits For Real Initial Responses', () => {
     onContinue: () => undefined,
   };
   const delayed = renderToStaticMarkup(createElement(StartupReadinessOverlay, baseProps));
-  if (delayed.includes('Open Command Center') || !delayed.includes('Waiting for scan status')) {
-    throw new Error('Startup readiness dismissed before the delayed scan-status/network responses arrived');
+  if (!delayed.includes('Open Command Center') || !delayed.includes('Waiting for scan status')) {
+    throw new Error('The splash does not remain visible with an explicit button while startup responses are pending');
   }
   const loaded = renderToStaticMarkup(createElement(StartupReadinessOverlay, {
     ...baseProps,

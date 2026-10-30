@@ -156,6 +156,9 @@ export default function App() {
     const saved = localStorage.getItem('winwifi_theme');
     return saved ? saved === 'dark' : true;
   });
+  useEffect(() => {
+    document.documentElement.dataset.theme = isDarkMode ? 'dark' : 'light';
+  }, [isDarkMode]);
 
   // Presentation Mode: Beginner vs Expert
   const [uiMode, setUIMode] = useState<UIMode>(() => {
@@ -317,20 +320,6 @@ export default function App() {
   // The desktop shell serves this page and owns its own data connection, so the
   // bridge settings dialog — address, port, token — has nothing for a user to do.
   const embeddedShell = isEmbeddedDashboard();
-
-  // Hide the readiness screen only after the real startup requests have
-  // returned. An empty WLAN list is still a completed response, distinct from
-  // a network request that has not completed yet.
-  useEffect(() => {
-    if (!showStartupReadiness) return;
-    const startupDataReady = bridgeState === 'CONNECTED'
-      && startupHealthLoaded
-      && startupAdaptersLoaded
-      && startupScanStatusLoaded
-      && startupNetworksLoaded
-      && startupSnapshotsLoaded;
-    if (startupDataReady) setShowStartupReadiness(false);
-  }, [showStartupReadiness, bridgeState, startupHealthLoaded, startupAdaptersLoaded, startupScanStatusLoaded, startupNetworksLoaded, startupSnapshotsLoaded]);
 
   // A Windows WLAN scan is periodic, not a continuous frame stream. Keep the
   // source labelled as live while the local bridge is connected; freshness is

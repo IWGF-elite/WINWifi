@@ -1,39 +1,46 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: dark;
+  --app-scrollbar-track: #0b0d11;
+  --app-scrollbar-thumb: #334155;
+  --app-scrollbar-hover: #0ea5e9;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --app-scrollbar-track: #e8edf5;
+  --app-scrollbar-thumb: #8999ae;
+  --app-scrollbar-hover: #0284c7;
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: #475569 transparent;
+  scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
 }
 
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 
 *::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--app-scrollbar-track);
+  border-radius: 999px;
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #475569;
-  border: 2px solid transparent;
+  background: var(--app-scrollbar-thumb);
+  border: 2px solid var(--app-scrollbar-track);
   border-radius: 999px;
-  background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
-  background-clip: padding-box;
+  background: var(--app-scrollbar-hover);
 }
 
-/* The desktop app keeps every navigation destination reachable without
-   showing a browser-style horizontal scrollbar below the ribbon. */
-.winwifi-nav {
-  scrollbar-width: none;
-}
-
-.winwifi-nav::-webkit-scrollbar {
-  display: none;
+*::-webkit-scrollbar-corner {
+  background: var(--app-scrollbar-track);
 }
 
 /* The native window uses 90% of the usable monitor area. These rules keep the
