@@ -1588,6 +1588,7 @@ export default function App() {
 
       {/* Main Content View */}
       <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 lg:p-4 max-w-[1440px] w-full mx-auto space-y-4">
+        <div key={activeTab} className="winwifi-tab-transition">
         {/* TAB 1: Command Center Dashboard */}
         {activeTab === 'dashboard' && (
           <CommandCenterDashboard
@@ -1898,6 +1899,7 @@ export default function App() {
         {activeTab === 'native-desktop' && (
           <NativeDesktopPanel isDarkMode={isDarkMode} />
         )}
+        </div>
 
         {/* Real-time Diagnostics & Auditing Logs Console */}
         <LogConsole
