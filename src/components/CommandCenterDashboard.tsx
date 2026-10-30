@@ -197,18 +197,18 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
               onClick={onOpenBridgeConfig}
               className={`px-3 py-2 rounded-lg border text-xs text-left transition-colors cursor-pointer ${
                 bridgeState === 'CONNECTED'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                  ? 'bg-slate-800/80 border-slate-600/70 text-slate-200 hover:bg-slate-700/80'
                   : 'bg-slate-800/80 border-slate-700/60 text-slate-300 hover:bg-slate-700/50'
               }`}
               title="Click to configure Windows Native Bridge"
             >
               <div className="text-slate-400 flex items-center gap-1.5 font-medium">
-                <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+                <Cpu className="w-3.5 h-3.5 text-slate-300" />
                 Windows Bridge
               </div>
               <div className="font-bold mt-0.5 flex items-center gap-1.5">
                 {bridgeState === 'CONNECTING' ? <ProcessingOrb state="connecting" size={20} label="Connecting to the Windows bridge" /> : <span className={`w-2 h-2 rounded-full ${
-                  bridgeState === 'CONNECTED' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                  bridgeState === 'CONNECTED' ? 'bg-slate-300' : 'bg-slate-500'
                 }`} />}
                 <span>{bridgeState}</span>
               </div>

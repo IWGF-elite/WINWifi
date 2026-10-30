@@ -105,7 +105,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       case 'LIVE_WINDOWS':
         return isScanning ? {
           label: hasFreshLiveData ? 'LIVE WINDOWS DATA' : 'WAITING FOR SCAN',
-          classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+          classes: 'bg-slate-700/55 text-slate-200 border-slate-600/55',
           icon: <ProcessingOrb state="searching" size={20} label="Live Wi-Fi scan in progress" />
         } : {
           label: 'SCAN STOPPED · LAST WINDOWS DATA',
@@ -275,7 +275,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 onClick={onOpenBridgeConfig}
                 className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] font-mono transition-colors ${
                   view.tone === 'ok'
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                    ? 'bg-slate-800/80 border-slate-600/70 text-slate-200 hover:bg-slate-700/80'
                     : view.tone === 'busy'
                       ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
                       : view.tone === 'bad'
@@ -332,7 +332,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             onClick={onOpenReport}
             className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium border text-xs transition-colors shadow-xs ${
               isDarkMode 
-                ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30' 
+                ? 'winwifi-primary-action border-slate-500/30 text-white'
                 : 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
             }`}
           >

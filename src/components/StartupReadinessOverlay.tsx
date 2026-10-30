@@ -42,18 +42,23 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050912]/95 px-5 text-slate-100 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="WinWiFi readiness checks">
-      <div className="startup-readiness-card relative w-full max-w-2xl overflow-hidden rounded-2xl border border-sky-400/25 bg-[#0a1425] shadow-2xl shadow-sky-950/50">
+      <div className="startup-readiness-card relative w-full max-w-5xl overflow-hidden rounded-[1.75rem] border border-sky-400/25 bg-[#0a1425] shadow-2xl shadow-sky-950/50">
         <div className="startup-readiness-accent absolute inset-x-0 top-0 h-1" />
-        <div className="p-8 sm:p-10">
-          <div className="flex items-center gap-4">
+        <div className="p-7 sm:p-10 lg:p-12">
+          <div className="flex min-h-24 items-center gap-5 sm:gap-7">
             <WinWiFiLogo className="h-12 w-12 shrink-0 rounded-xl shadow-lg shadow-sky-500/20" />
             <div><p className="text-xs font-bold tracking-[0.22em] text-sky-300">WINWIFI SECURITY AUDITOR</p><h1 className="mt-1 text-2xl font-bold tracking-tight">Preparing your local audit workspace</h1></div>
-            {checksRunning && <ProcessingOrb state={bridgeReady ? 'working' : 'connecting'} size={64} label="Preparing the WinWiFi audit workspace" className="ml-auto shrink-0" />}
+            <ProcessingOrb
+              state={checksRunning ? (bridgeReady ? 'working' : 'connecting') : 'breathing'}
+              size={64}
+              label={checksRunning ? 'Preparing the WinWiFi audit workspace' : 'WinWiFi workspace ready'}
+              className="startup-readiness-orb ml-auto shrink-0"
+            />
           </div>
           <p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">Readiness checks are verified against this Windows device, its configured adapter, and the local audit workspace.</p>
           <div className="mt-8 space-y-3">
             {steps.map((step) => <div key={step.label} className="startup-readiness-step flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/45 px-4 py-3.5">
-              {step.done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : step.failed ? <TriangleAlert className="h-5 w-5 shrink-0 text-amber-400" /> : <ProcessingOrb state={pendingState(step.label)} size={20} label={`${step.label} in progress`} />}
+              {step.done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-slate-300" /> : step.failed ? <TriangleAlert className="h-5 w-5 shrink-0 text-amber-400" /> : <ProcessingOrb state={pendingState(step.label)} size={20} label={`${step.label} in progress`} />}
               <div className="min-w-0"><p className="text-sm font-semibold text-slate-200">{step.label}</p><p className="mt-0.5 text-xs text-slate-500">{step.detail}</p></div>
             </div>)}
           </div>
@@ -79,9 +84,10 @@ export const StartupReadinessOverlay: React.FC<StartupReadinessOverlayProps> = (
             </div>
           )}
           <div className="mt-7 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-xs text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-400" /> Passive, defensive, authorized-scope workflow</div>
-            {!failed && <div className="flex items-center gap-2 text-xs font-medium text-sky-300"><ProcessingOrb state="connecting" size={20} label="Verifying local services" /> Verifying local services</div>}
-            <button onClick={onContinue} className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-sky-400">Open Command Center</button>
+            <div className="flex items-center gap-2 text-xs text-slate-500"><ShieldCheck className="h-4 w-4 text-slate-400" /> Passive, defensive, authorized-scope workflow</div>
+            {!failed && checksRunning && <div className="flex items-center gap-2 text-xs font-medium text-slate-300"><ProcessingOrb state="connecting" size={20} label="Verifying local services" /> Verifying local services</div>}
+            {!failed && !checksRunning && <div className="text-xs font-medium text-slate-400">Workspace ready</div>}
+            <button onClick={onContinue} className="winwifi-primary-action rounded-xl px-5 py-3 text-sm font-bold text-white">Open Command Center</button>
           </div>
         </div>
       </div>

@@ -52,6 +52,16 @@
   background: var(--app-scrollbar-track);
 }
 
+.winwifi-primary-action {
+  color: #f6f8ff;
+  border: 1px solid rgb(153 178 255 / 25%);
+  background: linear-gradient(112deg, #286db5 0%, #3b67c9 54%, #6552a5 100%);
+  box-shadow: 0 7px 20px rgb(38 75 146 / 20%), inset 0 1px 0 rgb(255 255 255 / 12%);
+}
+.winwifi-primary-action:hover:not(:disabled) {
+  background: linear-gradient(112deg, #327fc8 0%, #4a75d8 54%, #755fb7 100%);
+}
+
 /* Shared dark visual system: near-black canvas, floating charcoal surfaces,
    one cyan-to-blue-violet action accent, and muted but legible typography.
    Semantic green/amber/red status colors stay distinct. */
@@ -231,10 +241,16 @@
   background-color: var(--app-surface-2);
 }
 :root[data-theme="dark"] button {
-  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, filter 140ms ease;
+  border-radius: 0.7rem;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, filter 160ms ease, transform 160ms ease;
 }
 :root[data-theme="dark"] button:not(:disabled):hover {
   filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgb(0 0 0 / 22%), 0 0 0 1px rgb(255 255 255 / 3%);
+}
+:root[data-theme="dark"] button:not(:disabled):active {
+  transform: translateY(0) scale(0.985);
 }
 :root[data-theme="dark"] button:focus-visible,
 :root[data-theme="dark"] a:focus-visible {
@@ -244,12 +260,22 @@
 :root[data-theme="dark"] button:disabled {
   cursor: not-allowed;
 }
-:root[data-theme="dark"] button.bg-emerald-600 {
-  color: #effcff;
-  background-color: var(--app-accent-strong);
+:root[data-theme="dark"] .winwifi-primary-action,
+:root[data-theme="dark"] button[class~="bg-blue-600"],
+:root[data-theme="dark"] button[class~="bg-cyan-600"],
+:root[data-theme="dark"] button[class~="bg-sky-500"],
+:root[data-theme="dark"] button[class~="bg-emerald-600"] {
+  color: #f6f8ff !important;
+  border: 1px solid rgb(153 178 255 / 22%);
+  background: linear-gradient(112deg, #286db5 0%, #3b67c9 54%, #6552a5 100%) !important;
+  box-shadow: 0 7px 20px rgb(38 75 146 / 22%), inset 0 1px 0 rgb(255 255 255 / 12%);
 }
-:root[data-theme="dark"] button.bg-emerald-600:hover:not(:disabled) {
-  background-color: var(--app-accent);
+:root[data-theme="dark"] .winwifi-primary-action:hover:not(:disabled),
+:root[data-theme="dark"] button[class~="bg-blue-600"]:hover:not(:disabled),
+:root[data-theme="dark"] button[class~="bg-cyan-600"]:hover:not(:disabled),
+:root[data-theme="dark"] button[class~="bg-sky-500"]:hover:not(:disabled),
+:root[data-theme="dark"] button[class~="bg-emerald-600"]:hover:not(:disabled) {
+  background: linear-gradient(112deg, #327fc8 0%, #4a75d8 54%, #755fb7 100%) !important;
 }
 :root[data-theme="dark"] .winwifi-nav {
   min-height: 3.1rem;
@@ -319,6 +345,14 @@
   background: #16161a !important;
   border-color: rgb(255 255 255 / 7%) !important;
   box-shadow: 0 28px 90px rgb(0 0 0 / 62%), 0 0 48px rgb(55 104 170 / 9%);
+  width: min(92vw, 64rem);
+  max-width: 64rem;
+  border-radius: 1.75rem;
+}
+.startup-readiness-orb {
+  width: 88px !important;
+  height: 88px !important;
+  filter: drop-shadow(0 0 18px rgb(70 126 210 / 24%));
 }
 :root[data-theme="dark"] .startup-readiness-step {
   background: #1d1d23 !important;
@@ -364,5 +398,10 @@
 
   .winwifi-adapter-select {
     max-width: 7rem;
+  }
+
+  .startup-readiness-orb {
+    width: 64px !important;
+    height: 64px !important;
   }
 }
