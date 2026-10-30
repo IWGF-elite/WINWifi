@@ -143,12 +143,41 @@ namespace WinWiFi.Data
                     cipher TEXT,
                     phy_type TEXT,
                     channel_width INTEGER,
-                    observed_at TEXT NOT NULL
+                    observed_at TEXT NOT NULL,
+                    event_type TEXT NOT NULL DEFAULT 'OBSERVATION',
+                    last_seen_at TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_obs_bssid ON scan_observations(bssid);
                 CREATE INDEX IF NOT EXISTS idx_obs_project ON scan_observations(project_id);
                 CREATE INDEX IF NOT EXISTS idx_obs_project_time ON scan_observations(project_id, observed_at);
+                CREATE INDEX IF NOT EXISTS idx_obs_project_bssid_id ON scan_observations(project_id, bssid, id DESC);
+
+                CREATE TABLE IF NOT EXISTS scan_observation_state (
+                    project_id TEXT NOT NULL,
+                    bssid TEXT NOT NULL,
+                    adapter_id TEXT NOT NULL DEFAULT '',
+                    scan_cycle INTEGER NOT NULL DEFAULT 0,
+                    ssid TEXT NOT NULL DEFAULT '',
+                    channel INTEGER NOT NULL DEFAULT 0,
+                    band TEXT NOT NULL DEFAULT 'Unknown',
+                    frequency_mhz INTEGER NOT NULL DEFAULT 0,
+                    rssi INTEGER NOT NULL DEFAULT 0,
+                    signal_quality INTEGER NOT NULL DEFAULT 0,
+                    security TEXT NOT NULL DEFAULT 'Unknown',
+                    cipher TEXT NOT NULL DEFAULT 'Unknown',
+                    phy_type TEXT NOT NULL DEFAULT 'Unknown',
+                    channel_width INTEGER NOT NULL DEFAULT 20,
+                    last_seen_at TEXT NOT NULL,
+                    last_observation_at TEXT NOT NULL,
+                    missed_scans INTEGER NOT NULL DEFAULT 0,
+                    is_present INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY(project_id, bssid)
+                );
+                CREATE TABLE IF NOT EXISTS scan_observation_migrations (
+                    project_id TEXT PRIMARY KEY,
+                    initialized_at TEXT NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS network_timeline_events (
                     id TEXT PRIMARY KEY,
@@ -318,6 +347,8 @@ namespace WinWiFi.Data
 
             using var cmd = new SqliteCommand(ddl, conn);
             cmd.ExecuteNonQuery();
+            EnsureColumnExists(conn, "scan_observations", "event_type", "TEXT NOT NULL DEFAULT 'OBSERVATION'");
+            EnsureColumnExists(conn, "scan_observations", "last_seen_at", "TEXT");
             EnsureColumnExists(conn, "lan_devices", "ping_ttl", "INTEGER");
             EnsureColumnExists(conn, "lan_devices", "os_guess", "TEXT NOT NULL DEFAULT 'Unknown'");
 
@@ -416,6 +447,16 @@ namespace WinWiFi.Data
                 if (!string.Equals(Vendor, current.Vendor, StringComparison.OrdinalIgnoreCase)) changed.Add("vendor");
                 return changed;
             }
+        }
+
+        private sealed record ScanObservationState(string Bssid, string AdapterId, int ScanCycle, string Ssid, int Channel,
+            string Band, int FrequencyMHz, int Rssi, uint SignalQuality, string Security, string Cipher, string PhyType,
+            int ChannelWidth, string LastSeenAt, string LastObservationAt, int MissedScans, bool IsPresent)
+        {
+            public static ScanObservationState From(AccessPoint ap, string adapterId, int scanCycle, string timestamp) => new(
+                ap.Bssid.Trim().ToUpperInvariant(), adapterId, scanCycle, ap.Ssid ?? string.Empty, ap.Channel,
+                ap.Band ?? "Unknown", ap.FrequencyMHz, ap.Rssi, ap.SignalQuality, ap.Security ?? "Unknown",
+                ap.Cipher ?? "Unknown", ap.PhyType ?? "Unknown", ap.ChannelWidth, timestamp, timestamp, 0, true);
         }
 
         private sealed record TimelineDeviceState(string IpAddress, string MacAddress, string Hostname, string Vendor, string DeviceType,
@@ -874,57 +915,227 @@ namespace WinWiFi.Data
             }
         }
 
+        public const int SignalChangeThresholdDbm = 5;
+        public const int MissingScanThreshold = 3;
+        public static readonly TimeSpan ObservationHeartbeatInterval = TimeSpan.FromHours(1);
+
+        /// <summary>
+        /// Stores a compact history: material changes, first sightings, disappearances,
+        /// and hourly heartbeats become observations; every scan only refreshes the
+        /// lightweight per-BSSID last-seen state otherwise.
+        /// </summary>
         public async Task SaveScanObservationsBatchAsync(string projectId, string adapterId, int scanCycle, IEnumerable<AccessPoint> accessPoints, CancellationToken cancellationToken = default)
         {
             ValidateProjectId(projectId);
             if (accessPoints == null) return;
+            var observed = accessPoints
+                .Where(ap => ap is not null && !string.IsNullOrWhiteSpace(ap.Bssid))
+                .GroupBy(ap => ap.Bssid, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
 
             await _writeLock.WaitAsync(cancellationToken);
             try
             {
                 using var conn = await OpenConnectionAsync(cancellationToken);
-
                 using var trans = conn.BeginTransaction();
-                string sql = @"
-                    INSERT INTO scan_observations (
-                        project_id, adapter_id, scan_cycle, bssid, ssid, channel, band,
-                        frequency_mhz, rssi, signal_quality, security, cipher, phy_type,
-                        channel_width, observed_at
-                    ) VALUES (
-                        @project_id, @adapter_id, @scan_cycle, @bssid, @ssid, @channel, @band,
-                        @frequency_mhz, @rssi, @signal_quality, @security, @cipher, @phy_type,
-                        @channel_width, @observed_at
-                    );";
+                var now = DateTimeOffset.UtcNow;
+                string nowText = now.ToString("O");
 
-                string nowStr = DateTime.UtcNow.ToString("o");
-                foreach (var ap in accessPoints)
+                // Existing databases have detailed snapshots but no compact state.
+                // Seed each BSSID from its latest historical row once, without
+                // rewriting or deleting the user's existing history.
+                using (var migrationCheck = new SqliteCommand("SELECT EXISTS(SELECT 1 FROM scan_observation_migrations WHERE project_id=@pid);", conn, trans))
                 {
-                    using var cmd = new SqliteCommand(sql, conn, trans);
-                    cmd.Parameters.AddWithValue("@project_id", projectId);
-                    cmd.Parameters.AddWithValue("@adapter_id", adapterId ?? "");
-                    cmd.Parameters.AddWithValue("@scan_cycle", scanCycle);
-                    cmd.Parameters.AddWithValue("@bssid", ap.Bssid);
-                    cmd.Parameters.AddWithValue("@ssid", ap.Ssid ?? "");
-                    cmd.Parameters.AddWithValue("@channel", ap.Channel);
-                    cmd.Parameters.AddWithValue("@band", ap.Band ?? "Unknown");
-                    cmd.Parameters.AddWithValue("@frequency_mhz", ap.FrequencyMHz);
-                    cmd.Parameters.AddWithValue("@rssi", ap.Rssi);
-                    cmd.Parameters.AddWithValue("@signal_quality", (int)ap.SignalQuality);
-                    cmd.Parameters.AddWithValue("@security", ap.Security ?? "Unknown");
-                    cmd.Parameters.AddWithValue("@cipher", ap.Cipher ?? "None");
-                    cmd.Parameters.AddWithValue("@phy_type", ap.PhyType ?? "Unknown");
-                    cmd.Parameters.AddWithValue("@channel_width", ap.ChannelWidth);
-                    cmd.Parameters.AddWithValue("@observed_at", nowStr);
+                    migrationCheck.Parameters.AddWithValue("@pid", projectId);
+                    if (Convert.ToInt32(await migrationCheck.ExecuteScalarAsync(cancellationToken)) == 0)
+                    {
+                        using var seed = new SqliteCommand(@"
+                            INSERT OR IGNORE INTO scan_observation_state (
+                                project_id, bssid, adapter_id, scan_cycle, ssid, channel, band, frequency_mhz,
+                                rssi, signal_quality, security, cipher, phy_type, channel_width,
+                                last_seen_at, last_observation_at, missed_scans, is_present)
+                            SELECT o.project_id, upper(o.bssid), COALESCE(o.adapter_id,''), COALESCE(o.scan_cycle,0),
+                                COALESCE(o.ssid,''), COALESCE(o.channel,0), COALESCE(o.band,'Unknown'),
+                                COALESCE(o.frequency_mhz,0), COALESCE(o.rssi,0), COALESCE(o.signal_quality,0),
+                                COALESCE(o.security,'Unknown'), COALESCE(o.cipher,'Unknown'),
+                                COALESCE(o.phy_type,'Unknown'), COALESCE(o.channel_width,20),
+                                COALESCE(o.last_seen_at,o.observed_at), o.observed_at, 0,
+                                CASE WHEN o.event_type='AP_DISAPPEARED' THEN 0 ELSE 1 END
+                            FROM scan_observations o
+                            WHERE o.project_id=@pid
+                              AND o.id=(SELECT MAX(latest.id) FROM scan_observations latest
+                                        WHERE latest.project_id=o.project_id AND upper(latest.bssid)=upper(o.bssid));", conn, trans);
+                        seed.Parameters.AddWithValue("@pid", projectId);
+                        await seed.ExecuteNonQueryAsync(cancellationToken);
 
-                    await cmd.ExecuteNonQueryAsync(cancellationToken);
+                        using var mark = new SqliteCommand("INSERT OR IGNORE INTO scan_observation_migrations(project_id,initialized_at) VALUES(@pid,@at);", conn, trans);
+                        mark.Parameters.AddWithValue("@pid", projectId);
+                        mark.Parameters.AddWithValue("@at", nowText);
+                        await mark.ExecuteNonQueryAsync(cancellationToken);
+                    }
                 }
 
-                trans.Commit();
+                var states = new Dictionary<string, ScanObservationState>(StringComparer.OrdinalIgnoreCase);
+                using (var stateQuery = new SqliteCommand(@"SELECT bssid,adapter_id,scan_cycle,ssid,channel,band,frequency_mhz,
+                        rssi,signal_quality,security,cipher,phy_type,channel_width,last_seen_at,last_observation_at,missed_scans,is_present
+                    FROM scan_observation_state WHERE project_id=@pid;", conn, trans))
+                {
+                    stateQuery.Parameters.AddWithValue("@pid", projectId);
+                    using var reader = await stateQuery.ExecuteReaderAsync(cancellationToken);
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        var state = new ScanObservationState(
+                            reader.GetString(0), reader.IsDBNull(1) ? string.Empty : reader.GetString(1), reader.GetInt32(2),
+                            reader.IsDBNull(3) ? string.Empty : reader.GetString(3), reader.GetInt32(4),
+                            reader.IsDBNull(5) ? "Unknown" : reader.GetString(5), reader.GetInt32(6), reader.GetInt32(7),
+                            (uint)reader.GetInt32(8), reader.IsDBNull(9) ? "Unknown" : reader.GetString(9),
+                            reader.IsDBNull(10) ? "Unknown" : reader.GetString(10), reader.IsDBNull(11) ? "Unknown" : reader.GetString(11),
+                            reader.GetInt32(12), reader.GetString(13), reader.GetString(14), reader.GetInt32(15), reader.GetInt32(16) != 0);
+                        states[state.Bssid] = state;
+                    }
+                }
+
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var ap in observed)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string bssid = ap.Bssid.Trim().ToUpperInvariant();
+                    seen.Add(bssid);
+                    var sample = ScanObservationState.From(ap, adapterId ?? string.Empty, scanCycle, nowText);
+                    states.TryGetValue(bssid, out var previous);
+                    string? eventType = GetObservationEventType(previous, sample, now);
+
+                    if (eventType is not null)
+                    {
+                        await InsertScanObservationAsync(conn, trans, projectId, sample, eventType, nowText, nowText, cancellationToken);
+                    }
+
+                    // On ordinary scans only last-seen, cycle, and miss-count change.
+                    // The comparison baseline remains the last recorded observation,
+                    // so small RSSI shifts can accumulate until they are meaningful.
+                    var recorded = eventType is null && previous is not null ? previous : sample;
+                    var next = recorded with
+                    {
+                        AdapterId = adapterId ?? string.Empty,
+                        ScanCycle = scanCycle,
+                        LastSeenAt = nowText,
+                        LastObservationAt = eventType is null && previous is not null ? previous.LastObservationAt : nowText,
+                        MissedScans = 0,
+                        IsPresent = true
+                    };
+                    await UpsertScanObservationStateAsync(conn, trans, projectId, next, cancellationToken);
+                    states[bssid] = next;
+                }
+
+                foreach (var previous in states.Values.Where(state => state.IsPresent && !seen.Contains(state.Bssid)).ToList())
+                {
+                    int missedScans = previous.MissedScans + 1;
+                    if (missedScans >= MissingScanThreshold)
+                    {
+                        await InsertScanObservationAsync(conn, trans, projectId, previous, "AP_DISAPPEARED", nowText, previous.LastSeenAt, cancellationToken);
+                        var absent = previous with { LastObservationAt = nowText, MissedScans = missedScans, IsPresent = false };
+                        await UpsertScanObservationStateAsync(conn, trans, projectId, absent, cancellationToken);
+                        states[previous.Bssid] = absent;
+                    }
+                    else
+                    {
+                        var waiting = previous with { MissedScans = missedScans };
+                        await UpsertScanObservationStateAsync(conn, trans, projectId, waiting, cancellationToken);
+                        states[previous.Bssid] = waiting;
+                    }
+                }
+
+                await trans.CommitAsync(cancellationToken);
             }
             finally
             {
                 _writeLock.Release();
             }
+        }
+
+        private static string? GetObservationEventType(ScanObservationState? previous, ScanObservationState current, DateTimeOffset now)
+        {
+            if (previous is null) return "AP_FIRST_SEEN";
+            if (!previous.IsPresent) return "AP_APPEARED";
+
+            bool configurationChanged = !string.Equals(previous.Ssid, current.Ssid, StringComparison.Ordinal)
+                || previous.Channel != current.Channel
+                || !string.Equals(previous.Band, current.Band, StringComparison.OrdinalIgnoreCase)
+                || previous.FrequencyMHz != current.FrequencyMHz
+                || !string.Equals(previous.Security, current.Security, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(previous.Cipher, current.Cipher, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(previous.PhyType, current.PhyType, StringComparison.OrdinalIgnoreCase)
+                || previous.ChannelWidth != current.ChannelWidth;
+            if (configurationChanged) return "CONFIGURATION_CHANGED";
+            if (Math.Abs(current.Rssi - previous.Rssi) >= SignalChangeThresholdDbm) return "SIGNAL_CHANGED";
+            if (DateTimeOffset.TryParse(previous.LastObservationAt, out var lastObservation)
+                && now - lastObservation >= ObservationHeartbeatInterval) return "HEARTBEAT";
+            return null;
+        }
+
+        private static async Task InsertScanObservationAsync(SqliteConnection conn, SqliteTransaction trans, string projectId,
+            ScanObservationState sample, string eventType, string observedAt, string lastSeenAt, CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand(@"INSERT INTO scan_observations (
+                    project_id,adapter_id,scan_cycle,bssid,ssid,channel,band,frequency_mhz,rssi,signal_quality,
+                    security,cipher,phy_type,channel_width,observed_at,event_type,last_seen_at)
+                VALUES (@project,@adapter,@cycle,@bssid,@ssid,@channel,@band,@frequency,@rssi,@quality,
+                    @security,@cipher,@phy,@width,@observed,@event,@lastSeen);", conn, trans);
+            cmd.Parameters.AddWithValue("@project", projectId);
+            cmd.Parameters.AddWithValue("@adapter", sample.AdapterId);
+            cmd.Parameters.AddWithValue("@cycle", sample.ScanCycle);
+            cmd.Parameters.AddWithValue("@bssid", sample.Bssid);
+            cmd.Parameters.AddWithValue("@ssid", sample.Ssid);
+            cmd.Parameters.AddWithValue("@channel", sample.Channel);
+            cmd.Parameters.AddWithValue("@band", sample.Band);
+            cmd.Parameters.AddWithValue("@frequency", sample.FrequencyMHz);
+            cmd.Parameters.AddWithValue("@rssi", sample.Rssi);
+            cmd.Parameters.AddWithValue("@quality", (int)sample.SignalQuality);
+            cmd.Parameters.AddWithValue("@security", sample.Security);
+            cmd.Parameters.AddWithValue("@cipher", sample.Cipher);
+            cmd.Parameters.AddWithValue("@phy", sample.PhyType);
+            cmd.Parameters.AddWithValue("@width", sample.ChannelWidth);
+            cmd.Parameters.AddWithValue("@observed", observedAt);
+            cmd.Parameters.AddWithValue("@event", eventType);
+            cmd.Parameters.AddWithValue("@lastSeen", lastSeenAt);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private static async Task UpsertScanObservationStateAsync(SqliteConnection conn, SqliteTransaction trans, string projectId,
+            ScanObservationState state, CancellationToken cancellationToken)
+        {
+            using var cmd = new SqliteCommand(@"INSERT INTO scan_observation_state (
+                    project_id,bssid,adapter_id,scan_cycle,ssid,channel,band,frequency_mhz,rssi,signal_quality,
+                    security,cipher,phy_type,channel_width,last_seen_at,last_observation_at,missed_scans,is_present)
+                VALUES (@project,@bssid,@adapter,@cycle,@ssid,@channel,@band,@frequency,@rssi,@quality,
+                    @security,@cipher,@phy,@width,@lastSeen,@lastObservation,@missed,@present)
+                ON CONFLICT(project_id,bssid) DO UPDATE SET
+                    adapter_id=excluded.adapter_id,scan_cycle=excluded.scan_cycle,ssid=excluded.ssid,
+                    channel=excluded.channel,band=excluded.band,frequency_mhz=excluded.frequency_mhz,
+                    rssi=excluded.rssi,signal_quality=excluded.signal_quality,security=excluded.security,
+                    cipher=excluded.cipher,phy_type=excluded.phy_type,channel_width=excluded.channel_width,
+                    last_seen_at=excluded.last_seen_at,last_observation_at=excluded.last_observation_at,
+                    missed_scans=excluded.missed_scans,is_present=excluded.is_present;", conn, trans);
+            cmd.Parameters.AddWithValue("@project", projectId);
+            cmd.Parameters.AddWithValue("@bssid", state.Bssid);
+            cmd.Parameters.AddWithValue("@adapter", state.AdapterId);
+            cmd.Parameters.AddWithValue("@cycle", state.ScanCycle);
+            cmd.Parameters.AddWithValue("@ssid", state.Ssid);
+            cmd.Parameters.AddWithValue("@channel", state.Channel);
+            cmd.Parameters.AddWithValue("@band", state.Band);
+            cmd.Parameters.AddWithValue("@frequency", state.FrequencyMHz);
+            cmd.Parameters.AddWithValue("@rssi", state.Rssi);
+            cmd.Parameters.AddWithValue("@quality", (int)state.SignalQuality);
+            cmd.Parameters.AddWithValue("@security", state.Security);
+            cmd.Parameters.AddWithValue("@cipher", state.Cipher);
+            cmd.Parameters.AddWithValue("@phy", state.PhyType);
+            cmd.Parameters.AddWithValue("@width", state.ChannelWidth);
+            cmd.Parameters.AddWithValue("@lastSeen", state.LastSeenAt);
+            cmd.Parameters.AddWithValue("@lastObservation", state.LastObservationAt);
+            cmd.Parameters.AddWithValue("@missed", state.MissedScans);
+            cmd.Parameters.AddWithValue("@present", state.IsPresent ? 1 : 0);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
         public async Task<List<ScanObservationRecord>> GetScanObservationsAsync(string projectId, string? bssid = null, int limit = 500, CancellationToken cancellationToken = default)
@@ -935,14 +1146,16 @@ namespace WinWiFi.Data
 
             string sql = string.IsNullOrEmpty(bssid)
                 ? @"SELECT id, project_id, adapter_id, scan_cycle, bssid, ssid, channel, band,
-                           frequency_mhz, rssi, signal_quality, security, cipher, phy_type, channel_width, observed_at
+                           frequency_mhz, rssi, signal_quality, security, cipher, phy_type, channel_width, observed_at,
+                           event_type, COALESCE(last_seen_at,observed_at)
                     FROM scan_observations
                     WHERE project_id = @pid
                     ORDER BY id DESC LIMIT @limit;"
                 : @"SELECT id, project_id, adapter_id, scan_cycle, bssid, ssid, channel, band,
-                           frequency_mhz, rssi, signal_quality, security, cipher, phy_type, channel_width, observed_at
+                           frequency_mhz, rssi, signal_quality, security, cipher, phy_type, channel_width, observed_at,
+                           event_type, COALESCE(last_seen_at,observed_at)
                     FROM scan_observations
-                    WHERE project_id = @pid AND bssid = @bssid
+                    WHERE project_id = @pid AND upper(bssid) = upper(@bssid)
                     ORDER BY id DESC LIMIT @limit;";
 
             using var cmd = new SqliteCommand(sql, conn);
@@ -973,7 +1186,9 @@ namespace WinWiFi.Data
                     Cipher = reader.IsDBNull(12) ? "None" : reader.GetString(12),
                     PhyType = reader.IsDBNull(13) ? "Unknown" : reader.GetString(13),
                     ChannelWidth = reader.GetInt32(14),
-                    ObservedAt = reader.GetString(15)
+                    ObservedAt = reader.GetString(15),
+                    EventType = reader.IsDBNull(16) ? "OBSERVATION" : reader.GetString(16),
+                    LastSeenAt = reader.IsDBNull(17) ? reader.GetString(15) : reader.GetString(17)
                 });
             }
 
@@ -1120,13 +1335,18 @@ namespace WinWiFi.Data
 
             if (!string.IsNullOrWhiteSpace(snapshotAt))
             {
-                using var snapshot = new SqliteCommand(@"SELECT bssid, ssid, channel, band, frequency_mhz, rssi, signal_quality, security, cipher, phy_type, channel_width, observed_at
-                    FROM scan_observations WHERE project_id=@pid AND observed_at=@at;", conn);
+                using var snapshot = new SqliteCommand(@"SELECT o.bssid,o.ssid,o.channel,o.band,o.frequency_mhz,o.rssi,o.signal_quality,
+                        o.security,o.cipher,o.phy_type,o.channel_width,o.observed_at,o.event_type,COALESCE(o.last_seen_at,o.observed_at)
+                    FROM scan_observations o
+                    WHERE o.project_id=@pid AND o.observed_at<=@at
+                      AND o.id=(SELECT MAX(latest.id) FROM scan_observations latest
+                                WHERE latest.project_id=o.project_id AND upper(latest.bssid)=upper(o.bssid) AND latest.observed_at<=@at);", conn);
                 snapshot.Parameters.AddWithValue("@pid", projectId);
-                snapshot.Parameters.AddWithValue("@at", snapshotAt);
+                snapshot.Parameters.AddWithValue("@at", asOf);
                 using var reader = await snapshot.ExecuteReaderAsync(cancellationToken);
                 while (await reader.ReadAsync(cancellationToken))
                 {
+                    string eventType = reader.IsDBNull(12) ? "OBSERVATION" : reader.GetString(12);
                     var ap = new NetworkTimelineEntityState
                     {
                         EntityType = "AP", EntityKey = reader.GetString(0), Bssid = reader.GetString(0),
@@ -1135,15 +1355,15 @@ namespace WinWiFi.Data
                         Rssi = reader.GetInt32(5), SignalQuality = (uint)reader.GetInt32(6),
                         Security = reader.IsDBNull(7) ? "Unknown" : reader.GetString(7), Cipher = reader.IsDBNull(8) ? "Unknown" : reader.GetString(8),
                         Vendor = string.Empty, ChannelWidth = reader.GetInt32(10),
-                        FirstSeenAt = snapshotAt!, LastSeenAt = reader.GetString(11), IsPresent = true
+                        FirstSeenAt = reader.GetString(11), LastSeenAt = reader.GetString(13), IsPresent = eventType != "AP_DISAPPEARED"
                     };
                     if (!string.IsNullOrWhiteSpace(ap.EntityKey)) accessPoints[ap.EntityKey] = ap;
                 }
 
-                using var firstLast = new SqliteCommand(@"SELECT bssid, MIN(observed_at), MAX(observed_at) FROM scan_observations
-                    WHERE project_id=@pid AND observed_at<=@at GROUP BY bssid;", conn);
+                using var firstLast = new SqliteCommand(@"SELECT upper(bssid), MIN(observed_at), MAX(COALESCE(last_seen_at,observed_at)) FROM scan_observations
+                    WHERE project_id=@pid AND observed_at<=@at GROUP BY upper(bssid);", conn);
                 firstLast.Parameters.AddWithValue("@pid", projectId);
-                firstLast.Parameters.AddWithValue("@at", snapshotAt);
+                firstLast.Parameters.AddWithValue("@at", asOf);
                 using var history = await firstLast.ExecuteReaderAsync(cancellationToken);
                 while (await history.ReadAsync(cancellationToken))
                 {

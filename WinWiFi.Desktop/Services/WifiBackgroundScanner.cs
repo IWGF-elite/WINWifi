@@ -130,13 +130,14 @@ public sealed class WifiBackgroundScanner : BackgroundService
                 }
                 else
                 {
-                    if (_storageService is not null && !string.IsNullOrWhiteSpace(_activeProjectId))
-                    {
-                        await _storageService.SaveAccessPointsAsync(_activeProjectId!, networks);
-                    }
                     var dominantChannel = networks.GroupBy(network => network.Channel).OrderByDescending(group => group.Count()).FirstOrDefault()?.Key ?? 0;
                     if (dominantChannel > 0) ChannelHopped?.Invoke(dominantChannel);
                     SetState(ScanTelemetryState.Idle);
+                }
+                if (_storageService is not null && !string.IsNullOrWhiteSpace(_activeProjectId))
+                {
+                    await _storageService.SaveAccessPointsAsync(_activeProjectId!, networks, stoppingToken);
+                    await _storageService.SaveScanObservationsBatchAsync(_activeProjectId!, _activeAdapterId!, _scanCycle, networks, stoppingToken);
                 }
                 ScanCycleCompleted?.Invoke(new ScanCycleStats { CycleNumber = _scanCycle, NetworksDiscoveredCount = networks.Count, Timestamp = DateTime.UtcNow, DurationMs = (int)timer.ElapsedMilliseconds, State = _state });
             }

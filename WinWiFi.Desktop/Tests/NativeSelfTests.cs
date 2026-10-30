@@ -661,8 +661,8 @@ SSID 2 : Guest-Open
                 return "Telemetry transitions verified, including a pause requested during an active cycle remaining Paused after completion.";
             }));
 
-            // Test 12: SQLite Scan Observations Persistence
-            results.Add(RunTest("T12-SCAN-OBSERVATIONS-SQLITE", "SQLite Discrete Scan Observations History", () =>
+            // Test 12: compact SQLite scan history and sparse-history reconstruction.
+            results.Add(RunTest("T12-SCAN-OBSERVATIONS-SQLITE", "Change-Aware SQLite Scan History", () =>
             {
                 string tempDb = Path.Combine(Path.GetTempPath(), $"winwifi_test_{Guid.NewGuid():N}.db");
                 try
@@ -675,15 +675,80 @@ SSID 2 : Guest-Open
                     };
 
                     storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 1, aps).GetAwaiter().GetResult();
-                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 2, aps).GetAwaiter().GetResult();
-
                     int total = storage.GetTotalObservationsCountAsync("proj-test").GetAwaiter().GetResult();
-                    if (total != 4) throw new Exception($"Expected 4 total discrete observations across 2 cycles, got {total}");
+                    if (total != 2) throw new Exception($"Expected one initial observation per AP, got {total}");
 
-                    var records = storage.GetScanObservationsAsync("proj-test", "00:11:22:33:44:55").GetAwaiter().GetResult();
-                    if (records.Count != 2) throw new Exception($"Expected 2 historical records for BSSID, got {records.Count}");
+                    string firstSeen = ReadScanObservationState(tempDb, "00:11:22:33:44:55", "last_seen_at");
+                    Thread.Sleep(15);
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 2, aps).GetAwaiter().GetResult();
+                    total = storage.GetTotalObservationsCountAsync("proj-test").GetAwaiter().GetResult();
+                    string refreshedSeen = ReadScanObservationState(tempDb, "00:11:22:33:44:55", "last_seen_at");
+                    if (total != 2 || string.CompareOrdinal(refreshedSeen, firstSeen) <= 0)
+                        throw new Exception("An unchanged scan should update the lightweight last-seen state without adding a history row.");
 
-                    return $"Successfully validated {total} historical discrete scan observations in SQLite WAL database.";
+                    aps[0].Rssi = -60;
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 3, aps).GetAwaiter().GetResult();
+                    aps[1].Channel = 44;
+                    aps[1].Security = "WPA3-Personal";
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 4, aps).GetAwaiter().GetResult();
+                    total = storage.GetTotalObservationsCountAsync("proj-test").GetAwaiter().GetResult();
+                    if (total != 4) throw new Exception($"Signal and channel/security changes should each add one record, got {total}");
+
+                    using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = tempDb }.ToString()))
+                    {
+                        connection.Open();
+                        using var ageHeartbeat = new SqliteCommand("UPDATE scan_observation_state SET last_observation_at=datetime('now','-2 hours') WHERE project_id='proj-test' AND bssid='00:11:22:33:44:55';", connection);
+                        ageHeartbeat.ExecuteNonQuery();
+                    }
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 5, aps).GetAwaiter().GetResult();
+                    total = storage.GetTotalObservationsCountAsync("proj-test").GetAwaiter().GetResult();
+                    if (total != 5) throw new Exception($"An unchanged AP should get a single hourly heartbeat, got {total}");
+
+                    var remaining = new List<AccessPoint> { aps[0] };
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 6, remaining).GetAwaiter().GetResult();
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 7, remaining).GetAwaiter().GetResult();
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 8, remaining).GetAwaiter().GetResult();
+                    total = storage.GetTotalObservationsCountAsync("proj-test").GetAwaiter().GetResult();
+                    if (total != 6) throw new Exception($"An AP missing for three scans should add one disappearance event, got {total}");
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 9, remaining).GetAwaiter().GetResult();
+                    if (storage.GetTotalObservationsCountAsync("proj-test").GetAwaiter().GetResult() != 6)
+                        throw new Exception("A continuously absent AP must not create repeated disappearance rows.");
+
+                    var absentRecords = storage.GetScanObservationsAsync("proj-test", "AA:BB:CC:DD:EE:FF").GetAwaiter().GetResult();
+                    if (absentRecords.Count != 3 || absentRecords[0].EventType != "AP_DISAPPEARED")
+                        throw new Exception("Expected one disappearance marker after the AP's initial and configuration-change observations.");
+                    var atDisappearance = storage.GetNetworkTimeMachineStateAsync("proj-test", absentRecords[0].ObservedAt).GetAwaiter().GetResult();
+                    if (!atDisappearance.AccessPoints.Any(ap => ap.Bssid == "AA:BB:CC:DD:EE:FF" && !ap.IsPresent))
+                        throw new Exception("Sparse scan history did not reconstruct the AP's absent state.");
+
+                    storage.SaveScanObservationsBatchAsync("proj-test", "adapter-01", 10, aps).GetAwaiter().GetResult();
+                    var afterReturn = storage.GetScanObservationsAsync("proj-test", "AA:BB:CC:DD:EE:FF").GetAwaiter().GetResult();
+                    if (afterReturn[0].EventType != "AP_APPEARED") throw new Exception("An AP returning after disappearance should create one appearance record.");
+                    var current = storage.GetNetworkTimeMachineStateAsync("proj-test", DateTimeOffset.UtcNow.AddMinutes(1).ToString("O")).GetAwaiter().GetResult();
+                    if (!current.AccessPoints.Any(ap => ap.Bssid == "AA:BB:CC:DD:EE:FF" && ap.IsPresent))
+                        throw new Exception("Scan history did not reconstruct the AP's current returned state.");
+
+                    using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = tempDb }.ToString()))
+                    {
+                        connection.Open();
+                        string recent = DateTimeOffset.UtcNow.AddMinutes(-2).ToString("O");
+                        using var legacyRows = new SqliteCommand(@"INSERT INTO scan_observations
+                            (project_id,adapter_id,scan_cycle,bssid,ssid,channel,band,frequency_mhz,rssi,signal_quality,security,cipher,phy_type,channel_width,observed_at)
+                            VALUES ('proj-legacy','adapter-01',1,'22:33:44:55:66:77','Legacy AP',11,'2.4 GHz',2462,-65,70,'WPA2-Personal','CCMP','802.11ac',20,@old),
+                                   ('proj-legacy','adapter-01',2,'22:33:44:55:66:77','Legacy AP',11,'2.4 GHz',2462,-65,70,'WPA2-Personal','CCMP','802.11ac',20,@recent);", connection);
+                        legacyRows.Parameters.AddWithValue("@old", DateTimeOffset.UtcNow.AddMinutes(-4).ToString("O"));
+                        legacyRows.Parameters.AddWithValue("@recent", recent);
+                        legacyRows.ExecuteNonQuery();
+                    }
+                    storage.SaveScanObservationsBatchAsync("proj-legacy", "adapter-01", 3, new List<AccessPoint>
+                    {
+                        new() { Bssid = "22:33:44:55:66:77", Ssid = "Legacy AP", Channel = 11, Rssi = -65,
+                            SignalQuality = 70, Band = "2.4 GHz", FrequencyMHz = 2462, Security = "WPA2-Personal", Cipher = "CCMP", PhyType = "802.11ac", ChannelWidth = 20 }
+                    }).GetAwaiter().GetResult();
+                    if (storage.GetTotalObservationsCountAsync("proj-legacy").GetAwaiter().GetResult() != 2)
+                        throw new Exception("The first scan after migration should seed from existing history instead of duplicating an unchanged AP.");
+
+                    return "Verified first-seen rows, no-op last-seen refresh, accumulated RSSI threshold, configuration changes, hourly heartbeat, one-time disappearance/reappearance, sparse point-in-time reconstruction, and no duplicate row on legacy-history migration.";
                 }
                 finally
                 {
@@ -1671,6 +1736,17 @@ SSID 2 : Guest-Open
                 if (File.Exists(path + "-shm")) File.Delete(path + "-shm");
             }
             catch { }
+        }
+
+        private static string ReadScanObservationState(string databasePath, string bssid, string column)
+        {
+            if (!string.Equals(column, "last_seen_at", StringComparison.Ordinal))
+                throw new ArgumentOutOfRangeException(nameof(column));
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString());
+            connection.Open();
+            using var command = new SqliteCommand("SELECT last_seen_at FROM scan_observation_state WHERE project_id='proj-test' AND bssid=@bssid;", connection);
+            command.Parameters.AddWithValue("@bssid", bssid);
+            return Convert.ToString(command.ExecuteScalar()) ?? string.Empty;
         }
 
 #if WINDOWS_DESKTOP

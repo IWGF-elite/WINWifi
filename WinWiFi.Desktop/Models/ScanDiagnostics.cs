@@ -74,5 +74,7 @@ namespace WinWiFi.Models
         public string PhyType { get; set; } = "Unknown";
         public int ChannelWidth { get; set; } = 20;
         public string ObservedAt { get; set; } = DateTime.UtcNow.ToString("o");
+        public string EventType { get; set; } = "OBSERVATION";
+        public string LastSeenAt { get; set; } = string.Empty;
     }
 }

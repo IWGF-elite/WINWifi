@@ -187,7 +187,7 @@ namespace WinWiFi.Services
             _reportGenerator = reportGenerator ?? new ReportGenerator();
             _ownsStorage = storage is null;
             _storage = storage ?? new SqliteStorageService();
-            _scanner = scanner ?? new WifiBackgroundScanner(_wifiService, _securityAnalyzer);
+            _scanner = scanner ?? new WifiBackgroundScanner(_wifiService, _securityAnalyzer, _storage);
             _appUpdateService = appUpdateService;
             _shutdownAfterUpdate = shutdownAfterUpdate;
 
@@ -342,6 +342,11 @@ namespace WinWiFi.Services
                     if (initialAps.Count > 0)
                     {
                         ProcessScanResults(initialAps);
+                        if (_activeProjectId is not null)
+                        {
+                            await _storage.SaveAccessPointsAsync(_activeProjectId, initialAps, _cts.Token);
+                            await _storage.SaveScanObservationsBatchAsync(_activeProjectId, _activeAdapterId, _scanCycleCount, initialAps, _cts.Token);
+                        }
                     }
                 }
             }
@@ -374,6 +379,11 @@ namespace WinWiFi.Services
                 {
                     _scanCycleCount++;
                     ProcessScanResults(aps);
+                    if (_activeProjectId is not null)
+                    {
+                        await _storage.SaveAccessPointsAsync(_activeProjectId, aps, _cts.Token);
+                        await _storage.SaveScanObservationsBatchAsync(_activeProjectId, _activeAdapterId, _scanCycleCount, aps, _cts.Token);
+                    }
                 }
             }
             catch (OperationCanceledException) { }
@@ -1523,12 +1533,13 @@ namespace WinWiFi.Services
             // the bridge still serves live telemetry but must not invent a
             // shared write target.
             string? projectId = ResolveProjectId(request);
-            if (_storage != null && projectId is not null && aps.Count > 0)
+            if (_storage != null && projectId is not null)
             {
                 try
                 {
                     await _storage.EnsureProjectAsync(projectId, _activeProjectName);
                     await _storage.SaveAccessPointsAsync(projectId, aps);
+                    await _storage.SaveScanObservationsBatchAsync(projectId, _activeAdapterId, _scanCycleCount, aps);
                 }
                 catch (Exception dbEx)
                 {
