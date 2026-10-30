@@ -776,6 +776,9 @@ export default function App() {
     justification: string,
     durationMinutes: number
   ): Promise<void> => {
+    if (normalizeMac(connectedBssid) && normalizeMac(connectedBssid) === normalizeMac(ap.bssid)) {
+      throw new Error('This PC is already connected to this access point. No maintenance approval is needed.');
+    }
     requireCapability(operatorRoleRef.current, 'request_maintenance', 'Requesting maintenance approval');
     const projectId = currentProjectIdRef.current;
     const result = createMaintenanceRequest(maintenanceApprovalsRef.current, {
@@ -852,6 +855,9 @@ export default function App() {
   };
 
   const handleAuthorizedConnect = async (ap: AccessPoint, password: string, confirmed: boolean): Promise<string> => {
+    if (normalizeMac(connectedBssid) && normalizeMac(connectedBssid) === normalizeMac(ap.bssid)) {
+      return 'Already connected to this access point.';
+    }
     requireCapability(operatorRoleRef.current, 'connect_network', 'Connecting this PC to a network');
     if (bridgeClient.getState() !== 'CONNECTED') throw new Error('Windows bridge is not connected.');
     if (!confirmed) throw new Error('Connection blocked: confirm that you own or are authorized to test this network.');
@@ -1981,6 +1987,7 @@ export default function App() {
                 onOpenCaptureGuide={() => setShowArchitectureModal(true)}
                 onOpenImport={() => setShowImportModal(true)}
                 onConnect={handleAuthorizedConnect}
+                connectedBssid={connectedBssid}
                 maintenanceApprovals={maintenanceApprovals}
                 onRequestMaintenance={handleRequestMaintenance}
                 onApproveMaintenance={handleApproveMaintenance}

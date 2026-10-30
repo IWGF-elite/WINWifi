@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Ban, CheckCircle2, Clock, KeyRound, ShieldCheck, ShieldX, UserCheck, XCircle } from 'lucide-react';
 import { MaintenanceApprovalRecord, MaintenanceApprovalStatus } from '../types';
-import { countActiveApprovals } from '../services/maintenanceApproval';
+import { countActiveApprovals, isSameMaintenancePerson } from '../services/maintenanceApproval';
 
 interface MaintenanceApprovalCenterProps {
   approvals: MaintenanceApprovalRecord[];
@@ -74,7 +74,7 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
             Maintenance Approvals
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Active actions require a time-boxed, two-person approval. The approver must be a different person from the requester.
+            Pending requests appear here. An Administrator must record the decision using a name different from the requester; approval unlocks the connection action for its stated time window.
           </p>
         </div>
         <div className="flex items-center gap-2 text-[11px] font-mono">
@@ -105,7 +105,7 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
       </div>
 
       <p className="text-[11px] text-slate-500">
-        Approvals live in this project's local workspace. The native bridge still enforces its own authorization flag and BSSID allow-list when a connection is requested.
+        Approvals are stored in this project's local workspace. A request by itself never connects the PC; the requester still confirms Connect, and the Windows bridge checks authorization and the BSSID allow-list.
       </p>
       {!canDecide && (
         <p className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
@@ -124,6 +124,7 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
           {sorted.map(record => {
             const status = effectiveStatus(record);
             const busy = busyId === record.id;
+            const approverIsRequester = hasApproverName && isSameMaintenancePerson(approverName, record.requester);
             return (
               <div key={record.id} className="rounded-lg border border-slate-800 bg-slate-800/30 p-3 text-xs space-y-2">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -157,7 +158,7 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
                   <div className="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-2">
                     <button
                       type="button"
-                      disabled={!hasApproverName || !canDecide || busy}
+                      disabled={!hasApproverName || approverIsRequester || !canDecide || busy}
                       onClick={() => void run(record.id, () => onApprove(record.id, approverName))}
                       className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
                     >
@@ -165,13 +166,14 @@ export const MaintenanceApprovalCenter: React.FC<MaintenanceApprovalCenterProps>
                     </button>
                     <button
                       type="button"
-                      disabled={!hasApproverName || !canDecide || busy}
+                      disabled={!hasApproverName || approverIsRequester || !canDecide || busy}
                       onClick={() => void run(record.id, () => onReject(record.id, approverName, decisionNote))}
                       className="flex items-center gap-1.5 rounded-lg border border-rose-500/40 px-3 py-1.5 font-semibold text-rose-300 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <XCircle className="h-3.5 w-3.5" /> Reject
                     </button>
                     {!hasApproverName && <span className="text-[10px] text-slate-500">Enter the acting approver first.</span>}
+                    {approverIsRequester && <span className="text-[10px] text-amber-300">Choose a different analyst from {record.requester}.</span>}
                   </div>
                 )}
 

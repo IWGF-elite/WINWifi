@@ -60,7 +60,7 @@ const isExpired = (record: MaintenanceApprovalRecord, now: Date): boolean =>
 const isActiveStatus = (status: MaintenanceApprovalStatus): boolean =>
   status === 'Pending' || status === 'Approved';
 
-const samePerson = (left: string, right: string): boolean =>
+export const isSameMaintenancePerson = (left: string, right: string): boolean =>
   left.trim().toLowerCase() === right.trim().toLowerCase();
 
 /** Accepts untrusted stored JSON and returns bounded, internally consistent records. */
@@ -88,7 +88,7 @@ export function normalizeMaintenanceApprovals(input: unknown, now: Date = new Da
 
     const approver = sanitizeMaintenanceText(entry.approver, MAX_NAME);
     const approvedAt = parseIso(entry.approvedAt) ?? undefined;
-    if (status === 'Approved' && (!approver || !approvedAt || samePerson(approver, requester))) continue;
+    if (status === 'Approved' && (!approver || !approvedAt || isSameMaintenancePerson(approver, requester))) continue;
     if (status === 'Rejected' && !approver) continue;
 
     let id = typeof entry.id === 'string' ? entry.id.trim().slice(0, 64) : '';
@@ -194,7 +194,7 @@ export function approveMaintenance(
   }
   const approver = sanitizeMaintenanceText(approverName, MAX_NAME);
   if (approver.length < 2) return { records, error: 'Enter the approving analyst name (at least 2 characters).' };
-  if (samePerson(approver, record.requester)) {
+  if (isSameMaintenancePerson(approver, record.requester)) {
     return { records, error: 'The approver must be a different person from the requester.' };
   }
 
@@ -218,7 +218,7 @@ export function rejectMaintenance(
   if (record.status !== 'Pending') return { records, error: `This request is already ${record.status.toLowerCase()}.` };
   const approver = sanitizeMaintenanceText(approverName, MAX_NAME);
   if (approver.length < 2) return { records, error: 'Enter the rejecting analyst name (at least 2 characters).' };
-  if (samePerson(approver, record.requester)) {
+  if (isSameMaintenancePerson(approver, record.requester)) {
     return { records, error: 'A maintenance decision must be made by a different person from the requester.' };
   }
   const decisionNote = sanitizeMaintenanceText(note, MAX_DECISION_NOTE) || undefined;

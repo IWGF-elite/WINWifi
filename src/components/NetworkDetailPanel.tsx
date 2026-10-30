@@ -21,10 +21,12 @@ import {
 } from 'lucide-react';
 import { AIAdvisor } from '../services/aiAdvisor';
 import { NativeBridgeClient } from '../services/bridgeClient';
+import { normalizeMac } from '../services/assetRegistry';
 import {
   MAINTENANCE_DURATIONS,
   findActiveApproval,
-  getApprovalsForBssid
+  getApprovalsForBssid,
+  isSameMaintenancePerson
 } from '../services/maintenanceApproval';
 
 interface NetworkDetailPanelProps {
@@ -36,6 +38,7 @@ interface NetworkDetailPanelProps {
   onOpenCaptureGuide?: () => void;
   onOpenImport?: () => void;
   onConnect?: (ap: AccessPoint, password: string, confirmed: boolean) => Promise<string>;
+  connectedBssid?: string;
   maintenanceApprovals?: MaintenanceApprovalRecord[];
   onRequestMaintenance?: (ap: AccessPoint, requester: string, justification: string, durationMinutes: number) => Promise<void>;
   onApproveMaintenance?: (id: string, approver: string) => Promise<void>;
@@ -53,6 +56,7 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
   onOpenCaptureGuide,
   onOpenImport,
   onConnect,
+  connectedBssid = '',
   maintenanceApprovals,
   onRequestMaintenance,
   onApproveMaintenance,
@@ -84,21 +88,34 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
       .catch(() => setHistory([]));
   }, [ap?.bssid, dataSourceProfile]);
 
+  useEffect(() => {
+    setPassword('');
+    setShowPassword(false);
+    setAuthorizationConfirmed(false);
+    setConnectionMessage('');
+    setMaintenanceMessage('');
+    setMaintenanceError('');
+    setInlineApprover('');
+  }, [ap?.bssid, connectedBssid]);
+
   if (!ap) return null;
 
+  const alreadyConnected = Boolean(normalizeMac(connectedBssid)) && normalizeMac(connectedBssid) === normalizeMac(ap.bssid);
   const approvalsForAp = getApprovalsForBssid(maintenanceApprovals ?? [], ap.bssid);
   const activeApproval = findActiveApproval(maintenanceApprovals ?? [], ap.bssid);
   const pendingApproval = approvalsForAp.find(record =>
     record.status === 'Pending' && Date.parse(record.expiresAt) > Date.now()) ?? null;
+  const inlineApproverMatchesRequester = Boolean(pendingApproval && isSameMaintenancePerson(inlineApprover, pendingApproval.requester));
 
   const handleRequestApproval = async () => {
     if (!onRequestMaintenance || !canRequestMaintenance) return;
+    if (alreadyConnected) return;
     setMaintenanceBusy(true);
     setMaintenanceError('');
     setMaintenanceMessage('');
     try {
       await onRequestMaintenance(ap, requesterName, justification, durationMinutes);
-      setMaintenanceMessage('Request recorded. A different analyst must approve it before Connect is enabled.');
+      setMaintenanceMessage('Request recorded. It is now Pending in Settings & Test Lab → Maintenance Approvals. A different Administrator must approve it before Connect is enabled.');
       setJustification('');
     } catch (error: any) {
       setMaintenanceError(error?.message || 'The maintenance request could not be created.');
@@ -109,6 +126,10 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
   const handleInlineApprove = async () => {
     if (!onApproveMaintenance || !pendingApproval || !canApproveMaintenance) return;
+    if (isSameMaintenancePerson(inlineApprover, pendingApproval.requester)) {
+      setMaintenanceError('The requester cannot approve their own request. Use a different analyst name.');
+      return;
+    }
     setMaintenanceBusy(true);
     setMaintenanceError('');
     setMaintenanceMessage('');
@@ -142,6 +163,10 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
   const handleConnect = async () => {
     if (!onConnect) return;
+    if (alreadyConnected) {
+      setConnectionMessage('Already connected to this access point.');
+      return;
+    }
     if (!activeApproval || !canConnect) {
       setConnectionMessage('Connection blocked: an active maintenance approval is required for this BSSID.');
       return;
@@ -258,12 +283,12 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
 
       {/* Content Grid */}
       <div className="p-4 space-y-5 overflow-y-auto max-h-[580px] text-xs">
-        <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`}>
+        {dataSourceProfile === 'LIVE_WINDOWS' && onConnect && !alreadyConnected && <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`}>
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="font-semibold text-slate-100 flex items-center gap-1.5"><KeyRound className="h-4 w-4 text-amber-400" /> Connect Maintenance Approval</h3>
               <p className="mt-1 text-[11px] text-slate-400">
-                Connecting is an active action. It requires a time-boxed approval from a second person for this exact BSSID.
+                Request approval to connect this PC to this exact BSSID. A different analyst with the Administrator role can approve here or in Settings &amp; Test Lab → Maintenance Approvals. The request does not connect to Wi-Fi; approval only unlocks the Connect button for the selected time window.
               </p>
             </div>
           </div>
@@ -293,18 +318,22 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => void handleInlineApprove()}
-                  disabled={inlineApprover.trim().length < 2 || maintenanceBusy || !onApproveMaintenance || !canApproveMaintenance}
+                  disabled={inlineApprover.trim().length < 2 || inlineApproverMatchesRequester || maintenanceBusy || !onApproveMaintenance || !canApproveMaintenance}
                   className="rounded bg-emerald-600 px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {maintenanceBusy ? 'Recording…' : 'Approve for this BSSID'}
                 </button>
               </div>
-              <p className="text-[10px] text-amber-200/70">The approver must be a different person from {pendingApproval.requester}. Rejection is available in Settings → Maintenance Approvals.</p>
+              <p className="text-[10px] text-amber-200/80">
+                {inlineApproverMatchesRequester
+                  ? `The requester (${pendingApproval.requester}) cannot approve this request. Enter a different analyst.`
+                  : `A different analyst with the Administrator role must approve. You can approve here or in Settings & Test Lab → Maintenance Approvals.`}
+              </p>
             </div>
           ) : (
             <div className="mt-3 space-y-2">
               <p className="text-[11px] text-slate-400">
-                Requesting an approval does not connect anything. Nothing is sent to Windows until an approval exists and you confirm the connection prompt.
+                After you request approval, it appears as Pending in Settings &amp; Test Lab → Maintenance Approvals. A different analyst using the Administrator role must approve it. Once approved, this panel updates and the Connect button unlocks until the approval expires. No Windows connection is attempted until you confirm Connect.
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label className="space-y-1">
@@ -356,9 +385,19 @@ export const NetworkDetailPanel: React.FC<NetworkDetailPanelProps> = ({
           <p className="mt-2 text-[10px] text-slate-500">
             Approvals are stored in this project's local workspace. The native bridge independently checks its authorization flag and BSSID allow-list.
           </p>
-        </section>
+        </section>}
 
-        {dataSourceProfile === 'LIVE_WINDOWS' && onConnect && (
+        {alreadyConnected ? (
+          <section className={`rounded-xl border p-4 ${isDarkMode ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'}`} role="status">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+              <div>
+                <h3 className="font-semibold text-emerald-200">Already connected</h3>
+                <p className="mt-1 text-xs text-emerald-100/80">Windows reports this PC connected to {ap.ssid || '[hidden network]'} ({ap.bssid}). No password, maintenance approval, or new connection request is needed.</p>
+              </div>
+            </div>
+          </section>
+        ) : dataSourceProfile === 'LIVE_WINDOWS' && onConnect && (
           <section className={`rounded-xl border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`}>
             <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-100">Connect on Windows</h3><p className="mt-1 text-[11px] text-slate-400">Uses the Windows WLAN profile store. WinWiFi does not retain the password.</p></div><Radio className="h-4 w-4 text-blue-400" /></div>
             <div className="mt-3 flex overflow-hidden rounded border border-slate-700 bg-slate-950 focus-within:border-blue-500"><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} placeholder="Password, or leave empty for an existing Windows profile" className="min-w-0 flex-1 bg-transparent px-2.5 py-2 text-slate-100 outline-none" /><button type="button" onClick={() => setShowPassword(value => !value)} className="border-l border-slate-700 px-2.5 text-slate-300 hover:bg-slate-800" title={showPassword ? 'Hide password' : 'Show password'} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
