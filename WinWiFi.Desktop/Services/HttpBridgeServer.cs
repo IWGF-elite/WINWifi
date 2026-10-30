@@ -34,6 +34,11 @@ namespace WinWiFi.Services
         private CancellationTokenSource? _cts;
         private readonly object _localScanSync = new();
         private CancellationTokenSource? _localNetworkScanCts;
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _localInventoryLocks = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, int> _localDiscoveryCursors = new(StringComparer.OrdinalIgnoreCase);
+        private const int LocalDiscoverySliceSize = 128;
+        private readonly ConcurrentDictionary<string, long> _localInventoryNextProbeTicks = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan LocalInventoryProbeInterval = TimeSpan.FromSeconds(8);
         private Task? _listenerTask;
         private readonly ConcurrentDictionary<string, StreamWriter> _sseClients = new();
         // Scanner events (networks, diagnostics, state) fire concurrently on
@@ -948,8 +953,17 @@ namespace WinWiFi.Services
             if (scanCts is null) throw new InvalidOperationException("Local scan cancellation source was not initialized.");
             string projectId = ResolveProjectId(request) ?? _activeProjectId ?? "proj-001";
             LocalNetworkInfo snapshot;
+            var scanNetworkInfo = LocalNetworkService.GetNetworkInfo(adapterId);
+            SemaphoreSlim? inventoryLock = scanNetworkInfo.Status == "Available"
+                ? _localInventoryLocks.GetOrAdd(scanNetworkInfo.NetworkId, _ => new SemaphoreSlim(1, 1)) : null;
+            bool inventoryLockHeld = false;
             try
             {
+                if (inventoryLock is not null)
+                {
+                    await inventoryLock.WaitAsync(scanCts.Token);
+                    inventoryLockHeld = true;
+                }
                 snapshot = await LocalNetworkService.ScanAsync(adapterId, scanCts.Token,
                     scanOptions.FullPortScan, scanOptions.ProbesPerSecond);
             }
@@ -964,6 +978,11 @@ namespace WinWiFi.Services
             }
             finally
             {
+                if (inventoryLockHeld && inventoryLock is not null)
+                {
+                    _localInventoryNextProbeTicks[scanNetworkInfo.NetworkId] = DateTimeOffset.UtcNow.UtcTicks + LocalInventoryProbeInterval.Ticks;
+                    inventoryLock.Release();
+                }
                 lock (_localScanSync)
                 {
                     if (ReferenceEquals(_localNetworkScanCts, scanCts)) _localNetworkScanCts = null;
@@ -1027,10 +1046,71 @@ namespace WinWiFi.Services
             string projectId = ResolveProjectId(request) ?? _activeProjectId ?? "proj-001";
             var snapshot = LocalNetworkService.GetNetworkInfo(adapterId);
             if (snapshot.Status == "Available")
-                snapshot.Devices = (await _storage.GetLanDevicesAsync(projectId, snapshot.NetworkId))
+            {
+                var inventoryLock = _localInventoryLocks.GetOrAdd(snapshot.NetworkId, _ => new SemaphoreSlim(1, 1));
+                snapshot.Devices = (await _storage.GetLanDevicesAsync(projectId, snapshot.NetworkId, _cts?.Token ?? CancellationToken.None))
                     .Where(d => LocalNetworkService.IsDiscoverableHost(d.IpAddress, snapshot.LocalIp, snapshot.PrefixLength))
                     .ToList();
+                snapshot.ScannedAt = snapshot.Devices.Select(device => device.LastCheckedAt).Where(value => !string.IsNullOrWhiteSpace(value))
+                    .OrderByDescending(value => value, StringComparer.Ordinal).FirstOrDefault() ?? string.Empty;
+
+                bool ownsProbeLock = inventoryLock.Wait(0);
+                if (ownsProbeLock && TryScheduleLocalInventoryProbe(snapshot.NetworkId))
+                {
+                    snapshot.CheckingDevices = true;
+                    _ = RefreshLocalInventoryInBackgroundAsync(projectId, snapshot, inventoryLock);
+                }
+                else
+                {
+                    if (ownsProbeLock) inventoryLock.Release();
+                    else snapshot.CheckingDevices = true;
+                }
+                if (LocalNetworkService.GetDiscoveryAddresses(snapshot, 4096).Count > 4096)
+                    snapshot.Reason = "Known devices are checked live; automatic new-device discovery is limited to subnets with 4,096 or fewer host addresses.";
+            }
             await WriteJsonAsync(response, snapshot);
+        }
+
+        private bool TryScheduleLocalInventoryProbe(string networkId)
+        {
+            long now = DateTimeOffset.UtcNow.UtcTicks;
+            long next = now + LocalInventoryProbeInterval.Ticks;
+            while (true)
+            {
+                if (_localInventoryNextProbeTicks.TryGetValue(networkId, out long scheduled))
+                {
+                    if (scheduled > now) return false;
+                    if (_localInventoryNextProbeTicks.TryUpdate(networkId, next, scheduled)) return true;
+                }
+                else if (_localInventoryNextProbeTicks.TryAdd(networkId, next)) return true;
+            }
+        }
+
+        private async Task RefreshLocalInventoryInBackgroundAsync(string projectId, LocalNetworkInfo snapshot, SemaphoreSlim inventoryLock)
+        {
+            try
+            {
+                await Task.Yield();
+                CancellationToken cancellationToken = _cts?.Token ?? CancellationToken.None;
+                var known = (await _storage.GetLanDevicesAsync(projectId, snapshot.NetworkId, cancellationToken))
+                    .Where(device => LocalNetworkService.IsDiscoverableHost(device.IpAddress, snapshot.LocalIp, snapshot.PrefixLength))
+                    .ToList();
+                var candidates = LocalNetworkService.GetDiscoveryAddresses(snapshot, 4096);
+                List<string> discoverySlice = new();
+                if (candidates.Count <= 4096 && candidates.Count > 0)
+                {
+                    int offset = _localDiscoveryCursors.GetOrAdd(snapshot.NetworkId, 0);
+                    discoverySlice = candidates.Skip(offset).Take(LocalDiscoverySliceSize).ToList();
+                    int nextOffset = offset + LocalDiscoverySliceSize;
+                    _localDiscoveryCursors[snapshot.NetworkId] = nextOffset >= candidates.Count ? 0 : nextOffset;
+                }
+
+                var refreshed = await LocalNetworkService.RefreshKnownDevicesAsync(snapshot, known, discoverySlice, cancellationToken);
+                await _storage.SaveLanDevicesAsync(projectId, snapshot.NetworkId, refreshed, cancellationToken);
+            }
+            catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true) { }
+            catch (Exception ex) { Console.WriteLine($"[HttpBridgeServer] Live device refresh failed for {snapshot.NetworkId}: {ex.Message}"); }
+            finally { inventoryLock.Release(); }
         }
 
         private async Task HandleLocalDeviceKnownAsync(HttpListenerRequest request, HttpListenerResponse response)

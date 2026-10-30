@@ -9,12 +9,14 @@ public sealed class LocalNetworkInfo
     public string NetworkId { get; set; } = string.Empty;
     public string LocalIp { get; set; } = string.Empty;
     public int PrefixLength { get; set; }
+    public int InterfaceIndex { get; set; }
     public string GatewayIp { get; set; } = string.Empty;
     public List<string> DnsServers { get; set; } = new();
     public List<string> DhcpServers { get; set; } = new();
     public string Status { get; set; } = "Unavailable";
     public string Reason { get; set; } = string.Empty;
     public string ScannedAt { get; set; } = string.Empty;
+    public bool CheckingDevices { get; set; }
     public string PortScanMode { get; set; } = "Common ports";
     public int PortsScanned { get; set; }
     public bool Cancelled { get; set; }
@@ -39,6 +41,7 @@ public sealed class LanDeviceRecord
     public string OsGuess { get; set; } = "Unknown";
     public string FirstSeen { get; set; } = string.Empty;
     public string LastSeen { get; set; } = string.Empty;
+    public string LastCheckedAt { get; set; } = string.Empty;
 }
 
 public sealed class LanOpenPort

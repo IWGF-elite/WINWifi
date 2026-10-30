@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Download, RefreshCw, Search, Router, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
 import { LanDeviceRecord, LocalNetworkActivity, LocalNetworkInfo } from '../types';
 import { NativeBridgeClient } from '../services/bridgeClient';
@@ -23,13 +23,15 @@ export const formatScanAge = (scannedAt: string | undefined, now = Date.now()): 
   return `Updated ${hours}h ${minutes % 60}m ago`;
 };
 
-const ScanAge: React.FC<{ scannedAt?: string }> = ({ scannedAt }) => {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return <>{scannedAt ? `Last scan ${dateText(scannedAt)} · ${formatScanAge(scannedAt, now)}` : 'No completed device scan in this session'}</>;
+const ScanAge: React.FC<{ scannedAt?: string; now: number }> = ({ scannedAt, now }) => {
+  return <>{scannedAt ? `Last device check ${dateText(scannedAt)} · ${formatScanAge(scannedAt, now)}` : 'No live device check yet'}</>;
+};
+
+const formatAge = (timestamp: string | undefined, now: number): string => {
+  if (!timestamp) return 'not recorded';
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) return 'time unavailable';
+  return formatScanAge(new Date(parsed).toISOString(), now).replace(/^Updated /, '');
 };
 
 export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
@@ -47,6 +49,33 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
   const [selected, setSelected] = useState<LanDeviceRecord | null>(null);
   const [fullPortScan, setFullPortScan] = useState(false);
   const [probesPerSecond, setProbesPerSecond] = useState(100);
+  const [checkingInventory, setCheckingInventory] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const inventoryRequestRef = useRef(false);
+  const scanInProgressRef = useRef(false);
+
+  const refreshInventory = useCallback(async (showFailure = false) => {
+    if (!adapterId || inventoryRequestRef.current || scanInProgressRef.current) return;
+    inventoryRequestRef.current = true;
+    setCheckingInventory(true);
+    try {
+      const snapshot = await NativeBridgeClient.getInstance().getLocalNetworkDevices(adapterId);
+      const refreshedDevices = snapshot.devices || [];
+      setDevices(refreshedDevices);
+      setNetwork(current => ({
+        ...(current || snapshot),
+        ...snapshot,
+        devices: refreshedDevices,
+        scannedAt: snapshot.scannedAt || current?.scannedAt
+      }));
+      if (showFailure) setError('');
+    } catch (reason) {
+      if (showFailure) setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      inventoryRequestRef.current = false;
+      setCheckingInventory(false);
+    }
+  }, [adapterId]);
 
   const load = async () => {
     if (!adapterId) { setNetwork(null); setDevices([]); return; }
@@ -60,13 +89,7 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
     }).catch(reason => {
       setError(reason instanceof Error ? reason.message : String(reason));
     });
-    const devicesTask = bridge.getLocalNetworkDevices(adapterId).then(saved => {
-      const savedDevices = saved.devices || [];
-      setDevices(savedDevices);
-      setNetwork(current => current ? { ...current, devices: savedDevices } : current);
-    }).catch(reason => {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    });
+    const devicesTask = refreshInventory(true);
     const activityTask = bridge.getLocalNetworkActivity().then(currentActivity => {
       setActivity(currentActivity);
       setActivityError(currentActivity.status === 'Available' ? '' : currentActivity.reason || 'Windows did not return connection data.');
@@ -87,8 +110,26 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
     void load();
   }, [adapterId]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!adapterId) return;
+    const timer = window.setInterval(() => void refreshInventory(false), 4000);
+    return () => window.clearInterval(timer);
+  }, [adapterId, refreshInventory]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const current = devices.find(device => device.ipAddress === selected.ipAddress);
+    if (current && current !== selected) setSelected(current);
+  }, [devices, selected]);
+
   const scan = async () => {
     if (!adapterId || busy) return;
+    scanInProgressRef.current = true;
     setBusy(true);
     setError('');
     try {
@@ -108,6 +149,7 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      scanInProgressRef.current = false;
       setBusy(false);
     }
   };
@@ -143,8 +185,8 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
   }, [activity]);
 
   const exportCsv = () => {
-    const fields = ['IP', 'MAC', 'Vendor', 'Hostname', 'Type', 'Online', 'Known', 'New', 'Randomized MAC', 'First seen', 'Last seen', 'OS hint', 'Open TCP services'];
-    const rows = visible.map(d => [d.ipAddress, d.macAddress, d.vendor, d.hostname, d.deviceType, d.isOnline, d.isKnown, d.isNew, d.isRandomizedMac, d.firstSeen, d.lastSeen, d.osGuess, d.openPorts.map(p => p.port + '/' + p.service + (p.banner ? ' ' + p.banner : '')).join('; ')]);
+    const fields = ['IP', 'MAC', 'Vendor', 'Hostname', 'Type', 'Online', 'Known', 'New', 'Randomized MAC', 'First seen', 'Last seen', 'Last checked', 'OS hint', 'Open TCP services'];
+    const rows = visible.map(d => [d.ipAddress, d.macAddress, d.vendor, d.hostname, d.deviceType, d.isOnline, d.isKnown, d.isNew, d.isRandomizedMac, d.firstSeen, d.lastSeen, d.lastCheckedAt, d.osGuess, d.openPorts.map(p => p.port + '/' + p.service + (p.banner ? ' ' + p.banner : '')).join('; ')]);
     downloadBlob(new Blob([[fields, ...rows].map(row => row.map(csv).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), 'winwifi-local-device-inventory.csv');
   };
 
@@ -223,18 +265,19 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
       <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-400" role="status" aria-live="polite">
         {busy ? <><Activity className="h-3 w-3 animate-pulse text-amber-300" /> Scanning…</> : loading ? <><Activity className="h-3 w-3 animate-pulse text-cyan-300" /> Loading inventory…</> : <>
           <Activity className="h-3 w-3 text-cyan-400" />
-          <ScanAge scannedAt={network?.scannedAt} />
+          <ScanAge scannedAt={network?.scannedAt} now={now} />
         </>}
       </span>
     </div>
     {error && <div className="mt-2 rounded border border-rose-800 bg-rose-950/40 p-2 text-xs text-rose-300">{error}</div>}
     {busy && <div className="mt-2 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-[11px] text-amber-200" role="status" aria-live="polite">{fullPortScan ? `Probing ports 1–65535 on discovered hosts at ${probesPerSecond} attempts per second. The duration depends on responding devices; the scan can be cancelled at any time.` : 'Discovering devices and checking common services on the selected network. This can take several seconds; the scan can be cancelled at any time.'}</div>}
+    {!busy && (checkingInventory || network?.checkingDevices) && <div className="mt-2 flex items-center gap-2 text-[10px] text-cyan-300" role="status" aria-live="polite"><Activity className="h-3 w-3 animate-pulse" />Checking known devices and discovering new hosts in the background…</div>}
     {network?.scannedAt && <p className="mt-2 text-[10px] text-slate-500">{network.portScanMode || 'Common ports'} · {network.portsScanned ?? 0} port attempts{network.cancelled ? ' · cancelled' : ''}</p>}
     <div className="mt-3 overflow-auto rounded border border-slate-800">
       <table className="min-w-full text-left text-[11px]">
         <thead className="bg-slate-950 text-slate-400"><tr>{['State', 'IP address', 'MAC address', 'Vendor', 'Hostname', 'Type', 'Ports', 'Review'].map(h => <th key={h} className="whitespace-nowrap px-2 py-2">{h}</th>)}</tr></thead>
         <tbody>{visible.map(d => <tr key={d.ipAddress} className="border-t border-slate-800 text-slate-300 hover:bg-slate-800/60">
-          <td className="px-2 py-2">{d.isOnline ? <Wifi className="h-3.5 w-3.5 text-emerald-400" /> : <WifiOff className="h-3.5 w-3.5 text-slate-500" />}</td>
+          <td className="whitespace-nowrap px-2 py-2"><div className="flex items-center gap-1.5">{d.isOnline ? <Wifi className="h-3.5 w-3.5 text-emerald-400" /> : <WifiOff className="h-3.5 w-3.5 text-slate-500" />}<span className={d.isOnline ? 'text-emerald-300' : 'text-slate-400'}>{d.isOnline ? 'Online' : 'Offline'}</span></div><div className="mt-0.5 text-[9px] text-slate-500">Checked {formatAge(d.lastCheckedAt, now)} · last seen {formatAge(d.lastSeen, now)}</div></td>
           <td className="whitespace-nowrap px-2 py-2 font-mono"><button onClick={() => setSelected(d)} className="text-blue-300 hover:underline">{d.ipAddress}</button>{d.isNew && <span className="ml-1 rounded bg-amber-500/15 px-1 text-amber-300">NEW</span>}</td>
           <td className="whitespace-nowrap px-2 py-2 font-mono">{d.macAddress || 'Not in ARP cache'}{d.isRandomizedMac && <span title="Locally administered MAC" className="ml-1 text-amber-300">LAA</span>}</td>
           <td className="whitespace-nowrap px-2 py-2">{d.vendor}</td><td className="whitespace-nowrap px-2 py-2">{d.hostname || 'Not resolved'}</td><td className="whitespace-nowrap px-2 py-2">{d.deviceType}</td>
@@ -247,7 +290,7 @@ export const LanDeviceInventory: React.FC<Props> = ({ adapterId }) => {
     {selected && <div className="mt-3 rounded-lg border border-blue-800/60 bg-slate-950 p-3">
       <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold text-slate-100">{selected.deviceType === 'Gateway' ? <Router className="h-4 w-4 text-blue-400" /> : <ShieldAlert className="h-4 w-4 text-slate-400" />}{selected.ipAddress} · {selected.hostname || 'Unknown host'}</div><button onClick={() => setSelected(null)} className="text-xs text-slate-400">Close</button></div>
       <div className="mt-2 grid gap-2 text-[11px] text-slate-300 sm:grid-cols-2">
-        <div>MAC: {selected.macAddress || 'Not observed'} · Vendor: {selected.vendor}{selected.isRandomizedMac ? ' · Randomized/local MAC bit' : ''}</div><div>First seen: {dateText(selected.firstSeen)} · Last seen: {dateText(selected.lastSeen)}</div>
+        <div>MAC: {selected.macAddress || 'Not observed'} · Vendor: {selected.vendor}{selected.isRandomizedMac ? ' · Randomized/local MAC bit' : ''}</div><div>First seen: {dateText(selected.firstSeen)} · Last seen: {dateText(selected.lastSeen)} · Checked {formatAge(selected.lastCheckedAt, now)}</div>
         <div className="sm:col-span-2">OS hint: {selected.osGuess || 'Unknown'}{selected.pingTtl ? ' (reply TTL ' + selected.pingTtl + ')' : ''}</div>
         <div className="sm:col-span-2">Evidence: {selected.evidence.join(' · ') || 'No evidence recorded'}</div>
         <div className="sm:col-span-2">Services: {selected.openPorts.length ? selected.openPorts.map(p => p.port + '/' + p.protocol + ' ' + p.service + (p.banner ? ' [' + p.banner + ']' : '') + (p.riskFlag ? ' — ' + p.riskReason : '')).join(' · ') : 'No probed TCP ports responded'}</div>

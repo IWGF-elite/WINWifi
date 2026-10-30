@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -20,6 +21,37 @@ public static class LocalNetworkService
 {
     private const int FullPortProbeTimeoutMs = 500;
     private const int MaxFullPortProbeWorkers = 128;
+    private const int LiveHostProbeWorkers = 64;
+    private static readonly TimeSpan HostPingTimeout = TimeSpan.FromMilliseconds(450);
+    private static readonly TimeSpan ArpResolutionTimeout = TimeSpan.FromMilliseconds(1800);
+
+    [StructLayout(LayoutKind.Explicit, Size = 28)]
+    private struct SockaddrInet
+    {
+        [FieldOffset(0)] public ushort Family;
+        [FieldOffset(4)] public uint Address;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MibIpNetRow2
+    {
+        public SockaddrInet Address;
+        public uint InterfaceIndex;
+        public ulong InterfaceLuid;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] PhysicalAddress;
+        public uint PhysicalAddressLength;
+        public uint State;
+        public byte Flags;
+        public uint ReachabilityTime;
+    }
+
+    [DllImport("iphlpapi.dll", ExactSpelling = true)]
+    private static extern uint ResolveIpNetEntry2(ref MibIpNetRow2 row, IntPtr sourceAddress);
+
+    internal static int GetNeighborRowSize() => Marshal.SizeOf<MibIpNetRow2>();
+
+    internal static bool HasLiveHostResponse(bool icmpResponded, bool freshNeighborResolved, bool knownTcpServiceResponded) =>
+        icmpResponded || freshNeighborResolved || knownTcpServiceResponded;
 
     private sealed record SsdpDiscovery(string SearchTarget, string Server, string Location, string UniqueServiceName, string Hostname);
 
@@ -51,6 +83,191 @@ public static class LocalNetworkService
         && Guid.TryParse(adapterId, out var adapterGuid)
         && interfaceGuid == adapterGuid;
 
+    public static List<string> GetDiscoveryAddresses(LocalNetworkInfo network, int maxAddresses = 4096)
+    {
+        if (network is null || network.Status != "Available" || maxAddresses < 1) return new();
+        return EnumerateHosts(network.LocalIp, network.PrefixLength).Take(maxAddresses + 1)
+            .Select(address => address.ToString()).ToList();
+    }
+
+    /// <summary>Refreshes known devices with current ping and fresh neighbor-resolution results and optionally adds newly responding hosts.</summary>
+    public static async Task<List<LanDeviceRecord>> RefreshKnownDevicesAsync(LocalNetworkInfo network,
+        IEnumerable<LanDeviceRecord> knownDevices, IEnumerable<string>? discoveryTargets = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (network.Status != "Available") return new();
+        var known = knownDevices
+            .Where(device => !string.IsNullOrWhiteSpace(device.IpAddress)
+                && IsDiscoverableHost(device.IpAddress, network.LocalIp, network.PrefixLength))
+            .GroupBy(device => device.IpAddress, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToDictionary(device => device.IpAddress, StringComparer.OrdinalIgnoreCase);
+        var targets = known.Keys
+            .Concat(discoveryTargets ?? Enumerable.Empty<string>())
+            .Where(ip => IsDiscoverableHost(ip, network.LocalIp, network.PrefixLength))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        using var gate = new SemaphoreSlim(LiveHostProbeWorkers);
+        var probes = await Task.WhenAll(targets.Select(async ip =>
+        {
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                known.TryGetValue(ip, out var existing);
+                return await ProbeAddressAsync(ip, network.LocalIp, network.InterfaceIndex, existing, cancellationToken).ConfigureAwait(false);
+            }
+            finally { gate.Release(); }
+        })).ConfigureAwait(false);
+
+        var arpSnapshot = ReadArpTableSnapshot();
+        string checkedAt = DateTimeOffset.UtcNow.ToString("O");
+        var refreshed = new List<LanDeviceRecord>(known.Count + probes.Length);
+        var probedIps = probes.Select(probe => probe.IpAddress).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var probe in probes)
+        {
+            known.TryGetValue(probe.IpAddress, out var previous);
+            bool arpResponded = !string.IsNullOrWhiteSpace(probe.MacAddress);
+            bool isOnline = HasLiveHostResponse(probe.PingReply?.Status == IPStatus.Success, arpResponded, probe.TcpPort is not null);
+            if (previous is null && !isOnline) continue;
+
+            var device = previous is null ? new LanDeviceRecord
+            {
+                NetworkId = network.NetworkId,
+                IpAddress = probe.IpAddress,
+                FirstSeen = checkedAt,
+                IsNew = true,
+                DeviceType = probe.IpAddress.Equals(network.GatewayIp, StringComparison.OrdinalIgnoreCase) ? "Gateway" : "Unknown"
+            } : CloneLanDevice(previous);
+            device.IsOnline = isOnline;
+            device.LastCheckedAt = checkedAt;
+            if (isOnline) device.LastSeen = checkedAt;
+            device.PingTtl = probe.PingReply?.Options?.Ttl ?? device.PingTtl;
+            if (probe.MacAddress is not null)
+            {
+                device.MacAddress = probe.MacAddress;
+                device.Vendor = OuiLookupService.ResolveVendor(probe.MacAddress);
+                device.IsRandomizedMac = OuiLookupService.IsLocallyAdministered(probe.MacAddress);
+            }
+            else if (arpSnapshot.TryGetValue(probe.IpAddress, out var cachedMac)
+                && string.IsNullOrWhiteSpace(device.MacAddress))
+            {
+                device.MacAddress = cachedMac;
+                device.Vendor = OuiLookupService.ResolveVendor(cachedMac);
+                device.IsRandomizedMac = OuiLookupService.IsLocallyAdministered(cachedMac);
+            }
+
+            device.Evidence = device.Evidence.Where(item =>
+                !item.StartsWith("Live status:", StringComparison.OrdinalIgnoreCase)
+                && !item.StartsWith("Fresh ARP response", StringComparison.OrdinalIgnoreCase)
+                && !item.StartsWith("Fresh TCP response", StringComparison.OrdinalIgnoreCase)
+                && !item.StartsWith("Fresh ICMP response", StringComparison.OrdinalIgnoreCase)
+                && !item.StartsWith("No response to live checks", StringComparison.OrdinalIgnoreCase)
+                && !item.Contains("Not observed in the latest scan", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (probe.PingReply?.Status == IPStatus.Success)
+                device.Evidence.Add("Live status: fresh ICMP echo response");
+            if (arpResponded)
+                device.Evidence.Add("Live status: fresh ARP neighbor response");
+            if (probe.TcpPort is int port)
+                device.Evidence.Add($"Live status: TCP connection accepted on previously observed port {port}");
+            if (!isOnline)
+                device.Evidence.Add("No response to live checks on this adapter during the latest probe");
+            if (!string.IsNullOrWhiteSpace(device.MacAddress)
+                && !device.Evidence.Any(item => item.StartsWith("MAC address from Windows ARP cache", StringComparison.OrdinalIgnoreCase)))
+                device.Evidence.Add(arpResponded ? "MAC address from fresh ARP resolution" : "Previously observed MAC address");
+            refreshed.Add(device);
+        }
+
+        // Preserve records even if a single probe was cancelled or could not be
+        // scheduled; do not turn missing work into an offline assertion.
+        foreach (var device in known.Values.Where(device => !probedIps.Contains(device.IpAddress)))
+            refreshed.Add(CloneLanDevice(device));
+        return refreshed.OrderBy(device => ToUInt(IPAddress.Parse(device.IpAddress))).ToList();
+    }
+
+    private static LanDeviceRecord CloneLanDevice(LanDeviceRecord source) => new()
+    {
+        NetworkId = source.NetworkId, IpAddress = source.IpAddress, MacAddress = source.MacAddress,
+        Vendor = source.Vendor, Hostname = source.Hostname, DeviceType = source.DeviceType,
+        Evidence = source.Evidence.ToList(), OpenPorts = source.OpenPorts.Select(port => new LanOpenPort
+        {
+            Port = port.Port, Protocol = port.Protocol, Service = port.Service,
+            RiskFlag = port.RiskFlag, RiskReason = port.RiskReason, Banner = port.Banner
+        }).ToList(),
+        IsOnline = source.IsOnline, IsNew = source.IsNew, IsKnown = source.IsKnown,
+        IsRandomizedMac = source.IsRandomizedMac, PingTtl = source.PingTtl, OsGuess = source.OsGuess,
+        FirstSeen = source.FirstSeen, LastSeen = source.LastSeen, LastCheckedAt = source.LastCheckedAt
+    };
+
+    private sealed record HostProbeResult(string IpAddress, PingReply? PingReply, string? MacAddress, int? TcpPort);
+
+    private static async Task<HostProbeResult> ProbeAddressAsync(string ip, string localIp, int interfaceIndex,
+        LanDeviceRecord? previous, CancellationToken cancellationToken)
+    {
+        PingReply? pingReply = null;
+        try
+        {
+            using var ping = new Ping();
+            var reply = await ping.SendPingAsync(ip, (int)HostPingTimeout.TotalMilliseconds)
+                .WaitAsync(HostPingTimeout + TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
+            if (reply.Status == IPStatus.Success) pingReply = reply;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch { }
+
+        string? macAddress = null;
+        if (pingReply is null && OperatingSystem.IsWindows() && interfaceIndex > 0)
+        {
+            try
+            {
+                macAddress = await Task.Run(() => TryResolveNeighborMac(ip, interfaceIndex), cancellationToken)
+                    .WaitAsync(ArpResolutionTimeout, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch { }
+        }
+
+        int? tcpPort = null;
+        if (pingReply is null && macAddress is null && previous is not null)
+        {
+            foreach (int port in previous.OpenPorts.Select(item => item.Port).Where(port => port is > 0 and <= 65535).Distinct().Take(2))
+            {
+                try
+                {
+                    using var client = new TcpClient();
+                    await client.ConnectAsync(ip, port).WaitAsync(TimeSpan.FromMilliseconds(450), cancellationToken).ConfigureAwait(false);
+                    tcpPort = port;
+                    break;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch { }
+            }
+        }
+        return new HostProbeResult(ip, pingReply, macAddress, tcpPort);
+    }
+
+    private static string? TryResolveNeighborMac(string ip, int interfaceIndex)
+    {
+        try
+        {
+            byte[] addressBytes = IPAddress.Parse(ip).GetAddressBytes();
+            var row = new MibIpNetRow2
+            {
+                Address = new SockaddrInet
+                {
+                    Family = (ushort)AddressFamily.InterNetwork,
+                    Address = BitConverter.ToUInt32(addressBytes, 0)
+                },
+                InterfaceIndex = (uint)interfaceIndex,
+                PhysicalAddress = new byte[32]
+            };
+            uint status = ResolveIpNetEntry2(ref row, IntPtr.Zero);
+            if (status != 0 || row.PhysicalAddressLength < 6 || row.PhysicalAddress is null) return null;
+            return string.Join(":", row.PhysicalAddress.Take((int)row.PhysicalAddressLength).Select(value => value.ToString("X2")));
+        }
+        catch { return null; }
+    }
+
     public static async Task<LocalNetworkInfo> ScanAsync(string? adapterId, CancellationToken cancellationToken = default, bool fullPortScan = false, int probesPerSecond = 100)
     {
         probesPerSecond = Math.Clamp(probesPerSecond, 1, 250);
@@ -66,40 +283,42 @@ public static class LocalNetworkService
             return result;
         }
 
-        using var gate = new SemaphoreSlim(48);
-        var replies = await Task.WhenAll(hosts.Select(async ip =>
+        using var gate = new SemaphoreSlim(LiveHostProbeWorkers);
+        var hostProbes = await Task.WhenAll(hosts.Select(async ip =>
         {
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                using var ping = new Ping();
-                var reply = await ping.SendPingAsync(ip, 350).WaitAsync(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
-                return reply.Status == IPStatus.Success ? reply : null;
+                return await ProbeAddressAsync(ip.ToString(), result.LocalIp, result.InterfaceIndex, null, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch { return null; }
+            catch { return new HostProbeResult(ip.ToString(), null, null, null); }
             finally { gate.Release(); }
         })).ConfigureAwait(false);
 
-        var online = replies
-            .Where(reply => reply is not null && IsDiscoverableHost(reply.Address.ToString(), result.LocalIp, result.PrefixLength))
-            .ToDictionary(reply => reply!.Address.ToString(), reply => reply!, StringComparer.OrdinalIgnoreCase);
-        await Task.Delay(150, cancellationToken).ConfigureAwait(false);
+        var online = hostProbes.Where(probe => probe.PingReply?.Status == IPStatus.Success)
+            .ToDictionary(probe => probe.IpAddress, probe => probe.PingReply!, StringComparer.OrdinalIgnoreCase);
+        var freshArp = hostProbes.Where(probe => probe.MacAddress is not null)
+            .ToDictionary(probe => probe.IpAddress, probe => probe.MacAddress!, StringComparer.OrdinalIgnoreCase);
+        var responding = hostProbes.Where(probe => HasLiveHostResponse(
+                probe.PingReply?.Status == IPStatus.Success, probe.MacAddress is not null, probe.TcpPort is not null))
+            .Select(probe => probe.IpAddress).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var neighbors = ReadArpTableSnapshot()
             .Where(pair => IsDiscoverableHost(pair.Key, result.LocalIp, result.PrefixLength)
                 && !IsNonUnicastMac(pair.Value))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        foreach (var neighbor in freshArp) neighbors[neighbor.Key] = neighbor.Value;
         var ssdp = await DiscoverSsdpAsync(result.LocalIp, result.PrefixLength, cancellationToken).ConfigureAwait(false);
-        var addresses = online.Keys.Concat(neighbors.Keys).Concat(ssdp.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var addresses = responding.Concat(neighbors.Keys).Concat(ssdp.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var mdnsNames = await ResolveMdnsNamesAsync(
-            online.Keys.Concat(ssdp.Keys).Distinct(StringComparer.OrdinalIgnoreCase), result.LocalIp, cancellationToken).ConfigureAwait(false);
+            responding.Concat(ssdp.Keys).Distinct(StringComparer.OrdinalIgnoreCase), result.LocalIp, cancellationToken).ConfigureAwait(false);
         string now = DateTimeOffset.UtcNow.ToString("O");
         using var portGate = new SemaphoreSlim(fullPortScan ? MaxFullPortProbeWorkers : 48);
         var fullRangePacer = new ProbePacer(probesPerSecond);
         foreach (string ip in addresses)
         {
             neighbors.TryGetValue(ip, out string? mac);
-            bool isOnline = online.ContainsKey(ip) || ssdp.ContainsKey(ip) || ip == result.GatewayIp;
+            bool isOnline = responding.Contains(ip) || ssdp.ContainsKey(ip) || ip == result.GatewayIp;
             var device = new LanDeviceRecord
             {
                 NetworkId = result.NetworkId,
@@ -117,11 +336,13 @@ public static class LocalNetworkService
                     : "Unknown",
                 FirstSeen = now,
                 LastSeen = isOnline ? now : string.Empty,
+                LastCheckedAt = now,
                 DeviceType = ip == result.GatewayIp ? "Gateway" : ssdp.TryGetValue(ip, out var ssdpInfo) ? GetSsdpDeviceType(ssdpInfo.SearchTarget) : "Unknown"
             };
-            if (online.ContainsKey(ip)) device.Evidence.Add("IPv4 ping response");
+            if (online.ContainsKey(ip)) device.Evidence.Add("Fresh ICMP echo response");
+            else if (freshArp.ContainsKey(ip)) device.Evidence.Add("Fresh ARP neighbor response");
             else if (ssdp.ContainsKey(ip)) device.Evidence.Add("SSDP multicast discovery response");
-            else device.Evidence.Add("Windows ARP cache entry; not confirmed online by ping");
+            else device.Evidence.Add("Windows ARP cache entry; not confirmed online by current probes");
             if (mac is not null) device.Evidence.Add("MAC address from Windows ARP cache");
             if (device.IsRandomizedMac) device.Evidence.Add("Locally administered MAC bit is set; this can indicate randomization");
             if (ip == result.GatewayIp) device.Evidence.Add("Default gateway for selected adapter");
@@ -216,6 +437,7 @@ public static class LocalNetworkService
             NetworkId = $"{new IPAddress(networkBytes)}/{prefix}",
             LocalIp = address.Address.ToString(),
             PrefixLength = prefix,
+            InterfaceIndex = properties.GetIPv4Properties()?.Index ?? 0,
             GatewayIp = properties.GatewayAddresses
                 .Select(g => g.Address)
                 .FirstOrDefault(g => g.AddressFamily == AddressFamily.InterNetwork)?.ToString() ?? string.Empty,

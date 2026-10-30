@@ -79,6 +79,7 @@ export interface LocalNetworkInfo {
   status: 'Available' | 'Unavailable';
   reason: string;
   scannedAt?: string;
+  checkingDevices?: boolean;
   portScanMode?: string;
   portsScanned?: number;
   cancelled?: boolean;
@@ -231,6 +232,7 @@ export interface LanDeviceRecord {
   osGuess: string;
   firstSeen: string;
   lastSeen: string;
+  lastCheckedAt?: string;
 }
 
 export interface ClientDevice {

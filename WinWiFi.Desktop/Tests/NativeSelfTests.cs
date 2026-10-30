@@ -1522,6 +1522,49 @@ SSID 2 : Guest-Open
                 return "Windows interface IDs match by parsed GUID, independent of braces and letter case.";
             }));
 
+            results.Add(RunTest("T26C-LAN-LIVENESS", "LAN Status Requires Fresh Host Evidence and Neighbor Rows Marshal Correctly", () =>
+            {
+                int rowSize = LocalNetworkService.GetNeighborRowSize();
+                if (rowSize != 88) throw new Exception($"Windows neighbor row marshaled to {rowSize} bytes; expected 88.");
+                if (!LocalNetworkService.HasLiveHostResponse(false, true, false))
+                    throw new Exception("A fresh ARP/neighbor resolution did not mark a ping-blocking host online.");
+                if (!LocalNetworkService.HasLiveHostResponse(false, false, true))
+                    throw new Exception("An accepting previously observed TCP service did not mark its host online.");
+                if (LocalNetworkService.HasLiveHostResponse(false, false, false))
+                    throw new Exception("A stale database/ARP-cache record alone was incorrectly treated as a live response.");
+                return "The Windows MIB_IPNET_ROW2 layout is 88 bytes; fresh ARP and known TCP responses count as online, while cached identity without a response does not.";
+            }));
+
+            results.Add(await RunTestAsync("T26D-LAN-CHECK-ROUNDTRIP", "LAN Device Check Times Persist Without Replacing Device History", async () =>
+            {
+                string testDb = Path.Combine(Path.GetTempPath(), $"winwifi_lan_check_{Guid.NewGuid():N}.db");
+                const string projectId = "proj-lan-check-test";
+                const string networkId = "192.0.2.0/24";
+                const string checkedAt = "2026-10-30T11:00:00.0000000+00:00";
+                try
+                {
+                    using var storage = new SqliteStorageService(testDb);
+                    await storage.EnsureProjectAsync(projectId, "LAN live-check test");
+                    await storage.SaveLanDevicesAsync(projectId, networkId, new[]
+                    {
+                        new LanDeviceRecord
+                        {
+                            NetworkId = networkId, IpAddress = "192.0.2.10", MacAddress = "00:11:22:33:44:55",
+                            IsOnline = true, FirstSeen = checkedAt, LastSeen = checkedAt, LastCheckedAt = checkedAt
+                        }
+                    });
+                    var saved = await storage.GetLanDevicesAsync(projectId, networkId);
+                    if (saved.Count != 1 || saved[0].LastCheckedAt != checkedAt || saved[0].LastSeen != checkedAt)
+                        throw new Exception("The last-checked time or existing first/last-seen history did not round-trip through SQLite.");
+                    return "Per-device check time and first/last-seen fields survive SQLite persistence using a temporary test database.";
+                }
+                finally
+                {
+                    SqliteStorageService.ReleaseAllPools();
+                    TryDeleteScanDatabase(testDb);
+                }
+            }));
+
             results.Add(await RunTestAsync("T27-BRIDGE-SHUTDOWN", "Bridge Shutdown Survives a Blocked UI Context", async () =>
             {
                 // The desktop shell stops its bridge from the WPF UI thread and

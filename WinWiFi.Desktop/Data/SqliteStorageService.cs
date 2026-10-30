@@ -317,6 +317,7 @@ namespace WinWiFi.Data
                     os_guess TEXT NOT NULL DEFAULT 'Unknown',
                     first_seen TEXT NOT NULL,
                     last_seen TEXT NOT NULL DEFAULT '',
+                    checked_at TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY (project_id, network_id, ip_address)
                 );
 
@@ -351,6 +352,7 @@ namespace WinWiFi.Data
             EnsureColumnExists(conn, "scan_observations", "last_seen_at", "TEXT");
             EnsureColumnExists(conn, "lan_devices", "ping_ttl", "INTEGER");
             EnsureColumnExists(conn, "lan_devices", "os_guess", "TEXT NOT NULL DEFAULT 'Unknown'");
+            EnsureColumnExists(conn, "lan_devices", "checked_at", "TEXT NOT NULL DEFAULT ''");
 
             // Older installations may already have an access_points table. CREATE TABLE IF NOT EXISTS
             // does not add columns to it, so migrate newer fields in place and keep existing audit data.
@@ -1660,7 +1662,7 @@ namespace WinWiFi.Data
             ValidateProjectId(projectId);
             var records = new List<LanDeviceRecord>();
             using var conn = await OpenConnectionAsync(cancellationToken);
-            using var cmd = new SqliteCommand(@"SELECT ip_address, mac_address, hostname, vendor, device_type, evidence_json, ports_json, is_online, is_known, is_randomized_mac, ping_ttl, os_guess, first_seen, last_seen
+            using var cmd = new SqliteCommand(@"SELECT ip_address, mac_address, hostname, vendor, device_type, evidence_json, ports_json, is_online, is_known, is_randomized_mac, ping_ttl, os_guess, first_seen, last_seen, checked_at
                 FROM lan_devices WHERE project_id = @pid AND network_id = @network ORDER BY is_online DESC, ip_address;", conn);
             cmd.Parameters.AddWithValue("@pid", projectId);
             cmd.Parameters.AddWithValue("@network", networkId);
@@ -1683,7 +1685,8 @@ namespace WinWiFi.Data
                     PingTtl = reader.IsDBNull(10) ? null : reader.GetInt32(10),
                     OsGuess = reader.IsDBNull(11) ? "Unknown" : reader.GetString(11),
                     FirstSeen = reader.IsDBNull(12) ? "" : reader.GetString(12),
-                    LastSeen = reader.IsDBNull(13) ? "" : reader.GetString(13)
+                    LastSeen = reader.IsDBNull(13) ? "" : reader.GetString(13),
+                    LastCheckedAt = reader.IsDBNull(14) ? "" : reader.GetString(14)
                 });
             }
             return records;
@@ -1702,15 +1705,16 @@ namespace WinWiFi.Data
                 using var trans = conn.BeginTransaction();
                 const string sql = @"INSERT INTO lan_devices (
                     project_id, network_id, ip_address, mac_address, hostname, vendor, device_type,
-                    evidence_json, ports_json, is_online, is_randomized_mac, ping_ttl, os_guess, first_seen, last_seen
-                ) VALUES (@pid,@network,@ip,@mac,@hostname,@vendor,@type,@evidence,@ports,@online,@randomized,@ttl,@os,@first,@last)
+                    evidence_json, ports_json, is_online, is_randomized_mac, ping_ttl, os_guess, first_seen, last_seen, checked_at
+                ) VALUES (@pid,@network,@ip,@mac,@hostname,@vendor,@type,@evidence,@ports,@online,@randomized,@ttl,@os,@first,@last,@checked)
                 ON CONFLICT(project_id, network_id, ip_address) DO UPDATE SET
                     mac_address=excluded.mac_address, hostname=excluded.hostname, vendor=excluded.vendor,
                     device_type=excluded.device_type, evidence_json=excluded.evidence_json, ports_json=excluded.ports_json,
                     is_online=excluded.is_online, is_randomized_mac=excluded.is_randomized_mac,
                     ping_ttl=excluded.ping_ttl, os_guess=excluded.os_guess,
                     first_seen=CASE WHEN lan_devices.first_seen='' THEN excluded.first_seen ELSE lan_devices.first_seen END,
-                    last_seen=CASE WHEN excluded.is_online=1 THEN excluded.last_seen ELSE lan_devices.last_seen END;";
+                    last_seen=CASE WHEN excluded.is_online=1 THEN excluded.last_seen ELSE lan_devices.last_seen END,
+                    checked_at=excluded.checked_at;";
                 string now = DateTimeOffset.UtcNow.ToString("O");
                 foreach (var device in observedDevices)
                 {
@@ -1772,6 +1776,7 @@ namespace WinWiFi.Data
                     cmd.Parameters.AddWithValue("@os", device.OsGuess ?? "Unknown");
                     cmd.Parameters.AddWithValue("@first", device.FirstSeen ?? DateTimeOffset.UtcNow.ToString("O"));
                     cmd.Parameters.AddWithValue("@last", device.LastSeen ?? "");
+                    cmd.Parameters.AddWithValue("@checked", string.IsNullOrWhiteSpace(device.LastCheckedAt) ? now : device.LastCheckedAt);
                     await cmd.ExecuteNonQueryAsync(cancellationToken);
                 }
                 trans.Commit();
