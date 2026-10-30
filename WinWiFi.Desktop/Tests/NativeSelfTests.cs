@@ -735,15 +735,15 @@ SSID 2 : Guest-Open
                         using var legacyRows = new SqliteCommand(@"INSERT INTO scan_observations
                             (project_id,adapter_id,scan_cycle,bssid,ssid,channel,band,frequency_mhz,rssi,signal_quality,security,cipher,phy_type,channel_width,observed_at)
                             VALUES ('proj-legacy','adapter-01',1,'22:33:44:55:66:77','Legacy AP',11,'2.4 GHz',2462,-65,70,'WPA2-Personal','CCMP','802.11ac',20,@old),
-                                   ('proj-legacy','adapter-01',2,'22:33:44:55:66:77','Legacy AP',11,'2.4 GHz',2462,-65,70,'WPA2-Personal','CCMP','802.11ac',20,@recent);", connection);
+                                   ('proj-legacy','adapter-01',2,'22:33:44:55:66:77','Legacy AP',44,'5 GHz',5220,-65,70,'WPA3-Personal','CCMP','802.11ac',80,@recent);", connection);
                         legacyRows.Parameters.AddWithValue("@old", DateTimeOffset.UtcNow.AddMinutes(-4).ToString("O"));
                         legacyRows.Parameters.AddWithValue("@recent", recent);
                         legacyRows.ExecuteNonQuery();
                     }
                     storage.SaveScanObservationsBatchAsync("proj-legacy", "adapter-01", 3, new List<AccessPoint>
                     {
-                        new() { Bssid = "22:33:44:55:66:77", Ssid = "Legacy AP", Channel = 11, Rssi = -65,
-                            SignalQuality = 70, Band = "2.4 GHz", FrequencyMHz = 2462, Security = "WPA2-Personal", Cipher = "CCMP", PhyType = "802.11ac", ChannelWidth = 20 }
+                        new() { Bssid = "22:33:44:55:66:77", Ssid = "Legacy AP", Channel = 44, Rssi = -65,
+                            SignalQuality = 70, Band = "5 GHz", FrequencyMHz = 5220, Security = "WPA3-Personal", Cipher = "CCMP", PhyType = "802.11ac", ChannelWidth = 80 }
                     }).GetAwaiter().GetResult();
                     if (storage.GetTotalObservationsCountAsync("proj-legacy").GetAwaiter().GetResult() != 2)
                         throw new Exception("The first scan after migration should seed from existing history instead of duplicating an unchanged AP.");

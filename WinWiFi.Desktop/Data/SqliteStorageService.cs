@@ -952,7 +952,19 @@ namespace WinWiFi.Data
                     migrationCheck.Parameters.AddWithValue("@pid", projectId);
                     if (Convert.ToInt32(await migrationCheck.ExecuteScalarAsync(cancellationToken)) == 0)
                     {
+                        // Seed compact state from one latest-row aggregation. The
+                        // previous correlated MAX(id) query scanned the full
+                        // observation history once for every history row. On a
+                        // long-lived database this became quadratic work and,
+                        // because the first scanner cycle could run on WPF's
+                        // dispatcher, made the whole window appear hung.
                         using var seed = new SqliteCommand(@"
+                            WITH latest_ids AS (
+                                SELECT MAX(id) AS id
+                                FROM scan_observations
+                                WHERE project_id=@pid
+                                GROUP BY upper(bssid)
+                            )
                             INSERT OR IGNORE INTO scan_observation_state (
                                 project_id, bssid, adapter_id, scan_cycle, ssid, channel, band, frequency_mhz,
                                 rssi, signal_quality, security, cipher, phy_type, channel_width,
@@ -965,9 +977,8 @@ namespace WinWiFi.Data
                                 COALESCE(o.last_seen_at,o.observed_at), o.observed_at, 0,
                                 CASE WHEN o.event_type='AP_DISAPPEARED' THEN 0 ELSE 1 END
                             FROM scan_observations o
-                            WHERE o.project_id=@pid
-                              AND o.id=(SELECT MAX(latest.id) FROM scan_observations latest
-                                        WHERE latest.project_id=o.project_id AND upper(latest.bssid)=upper(o.bssid));", conn, trans);
+                            INNER JOIN latest_ids latest ON latest.id=o.id
+                            WHERE o.project_id=@pid;", conn, trans);
                         seed.Parameters.AddWithValue("@pid", projectId);
                         await seed.ExecuteNonQueryAsync(cancellationToken);
 

@@ -1496,7 +1496,7 @@ export default function App() {
 
   return (
     <ScanActivityProvider active={isScanning}>
-    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
+    <div className={`h-screen min-h-0 overflow-hidden flex flex-col font-sans transition-colors duration-200 ${
       isDarkMode ? 'bg-[#0b0d11] text-slate-100' : 'bg-[#eef0f6] text-slate-900'
     }`}>      {showStartupReadiness && <StartupReadinessOverlay
         bridgeState={bridgeState}
@@ -1513,6 +1513,7 @@ export default function App() {
         onRetry={() => void bridgeClient.retryNow()}
         onContinue={() => setShowStartupReadiness(false)}
       />}
+      <div className={`sticky top-0 z-50 flex-none ${isDarkMode ? 'bg-[#0b0d11]' : 'bg-[#eef0f6]'}`}>
       {/* Windows Native Title & Action Bar */}
       <TitleBar
         isDarkMode={isDarkMode}
@@ -1846,9 +1847,10 @@ export default function App() {
           </button>
         </div>
       </nav>
+      </div>
 
       {/* Main Content View */}
-      <main className="flex-1 p-3 lg:p-4 max-w-[1440px] w-full mx-auto space-y-4">
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 lg:p-4 max-w-[1440px] w-full mx-auto space-y-4">
         {/* TAB 1: Command Center Dashboard */}
         {activeTab === 'dashboard' && (
           <CommandCenterDashboard

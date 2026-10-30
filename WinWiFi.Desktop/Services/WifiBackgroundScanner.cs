@@ -47,6 +47,18 @@ public sealed class WifiBackgroundScanner : BackgroundService
     public event Action<ScanTelemetryState>? StateChanged;
     public event Action<ScanDiagnostics>? DiagnosticsUpdated;
 
+    /// <summary>
+    /// BackgroundService invokes ExecuteAsync inline until its first incomplete
+    /// await. The desktop bridge is started from WPF's dispatcher, so starting
+    /// the scanner directly there caused later scan and SQLite continuations to
+    /// resume on the window thread. Begin the hosted loop on the thread pool;
+    /// scanner work must never hold up WebView2 or the native window.
+    /// </summary>
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        return Task.Run(() => base.StartAsync(cancellationToken), cancellationToken);
+    }
+
     public void SetActiveAdapter(string adapterId)
     {
         if (string.IsNullOrWhiteSpace(adapterId)) throw new ArgumentException("An adapter identifier is required.", nameof(adapterId));
@@ -90,13 +102,13 @@ public sealed class WifiBackgroundScanner : BackgroundService
         {
             if (!_isScanning)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
                 continue;
             }
             if (string.IsNullOrWhiteSpace(_activeAdapterId))
             {
                 SetState(ScanTelemetryState.AdapterUnavailable);
-                await Task.Delay(Interval, stoppingToken);
+                await Task.Delay(Interval, stoppingToken).ConfigureAwait(false);
                 continue;
             }
             var timer = Stopwatch.StartNew();
@@ -108,9 +120,9 @@ public sealed class WifiBackgroundScanner : BackgroundService
                 // WlanGetNetworkBssList only returns Windows' last cache. Ask the
                 // OS to update that cache first so nearby networks are not hidden
                 // until another application happens to scan.
-                await _wifiService.TriggerHardwareScanAsync(_activeAdapterId, stoppingToken);
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
-                var batch = await _wifiService.ScanNetworksExAsync(_activeAdapterId, stoppingToken);
+                await _wifiService.TriggerHardwareScanAsync(_activeAdapterId, stoppingToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
+                var batch = await _wifiService.ScanNetworksExAsync(_activeAdapterId, stoppingToken).ConfigureAwait(false);
                 timer.Stop();
                 var networks = batch.AccessPoints;
                 // Emit every completed real scan, including an empty BSS list.
@@ -136,8 +148,8 @@ public sealed class WifiBackgroundScanner : BackgroundService
                 }
                 if (_storageService is not null && !string.IsNullOrWhiteSpace(_activeProjectId))
                 {
-                    await _storageService.SaveAccessPointsAsync(_activeProjectId!, networks, stoppingToken);
-                    await _storageService.SaveScanObservationsBatchAsync(_activeProjectId!, _activeAdapterId!, _scanCycle, networks, stoppingToken);
+                    await _storageService.SaveAccessPointsAsync(_activeProjectId!, networks, stoppingToken).ConfigureAwait(false);
+                    await _storageService.SaveScanObservationsBatchAsync(_activeProjectId!, _activeAdapterId!, _scanCycle, networks, stoppingToken).ConfigureAwait(false);
                 }
                 ScanCycleCompleted?.Invoke(new ScanCycleStats { CycleNumber = _scanCycle, NetworksDiscoveredCount = networks.Count, Timestamp = DateTime.UtcNow, DurationMs = (int)timer.ElapsedMilliseconds, State = _state });
             }
@@ -153,7 +165,7 @@ public sealed class WifiBackgroundScanner : BackgroundService
             // rather than adding a full interval after the scan dwell completes.
             var remaining = Interval - timer.Elapsed;
             if (remaining > TimeSpan.Zero)
-                await Task.Delay(remaining, stoppingToken);
+                await Task.Delay(remaining, stoppingToken).ConfigureAwait(false);
         }
         SetState(_isScanning ? ScanTelemetryState.Idle : ScanTelemetryState.Paused);
     }
