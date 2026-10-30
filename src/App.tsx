@@ -102,6 +102,7 @@ import { NetworkDoctorPanel } from './components/NetworkDoctorPanel';
 import { NetworkTimeMachinePanel } from './components/NetworkTimeMachinePanel';
 import { WalkModePanel } from './components/WalkModePanel';
 import { StartupReadinessOverlay } from './components/StartupReadinessOverlay';
+import { AppSidebar } from './components/AppSidebar';
 import { BridgeErrorKind, bridgeStatusView, isEmbeddedDashboard } from './services/bridgeStatus';
 
 const applyAnalystOverrides = (
@@ -126,26 +127,7 @@ const applyAnalystOverrides = (
 // as findings; only threat-level detections become incident cases.
 
 
-// Icons
-import { 
-  LayoutDashboard, 
-  Wifi, 
-  Laptop, 
-  Activity, 
-  Flame, 
-  FileText, 
-  Layers, 
-  KeyRound, 
-  Building2, 
-  FileCheck, 
-  Cpu, 
-  Sliders,
-  Sparkles,
-  Radio,
-  BellRing,
-  Clock3,
-  MapPin
-} from 'lucide-react';
+import { Radio } from 'lucide-react';
 
 export default function App() {
   const engine = WifiEngine.getInstance();
@@ -1519,6 +1501,22 @@ export default function App() {
         onRetry={() => void bridgeClient.retryNow()}
         onContinue={() => setShowStartupReadiness(false)}
       />}
+      <div className="winwifi-app-body">
+      <AppSidebar
+        activeTab={activeTab}
+        uiMode={uiMode}
+        isScanning={isScanning}
+        bridgeConnected={bridgeState === 'CONNECTED'}
+        accessPointCount={accessPoints.length}
+        rogueCount={rogueFindings.length}
+        activeAlertCount={alertSummary.active}
+        openIncidentCount={openIncidentCount}
+        packetCount={packets.length}
+        handshakeCount={handshakes.length}
+        onNavigate={handleNavigate}
+        onToggleUIMode={() => handleToggleUIMode(uiMode === 'beginner' ? 'expert' : 'beginner')}
+      />
+      <div className="winwifi-main-column">
       <div className={`sticky top-0 z-50 flex-none ${isDarkMode ? 'bg-[#0b0d11]' : 'bg-[#eef0f6]'}`}>
       {/* Windows Native Title & Action Bar */}
       <TitleBar
@@ -1585,274 +1583,7 @@ export default function App() {
         );
       })()}
 
-      {/* Navigation Ribbon Bar */}
-      <nav className={`winwifi-nav px-3 pt-1 border-b flex items-center justify-between overflow-x-auto text-xs select-none ${
-        isDarkMode ? 'bg-[#12141a] border-[#1e222d]' : 'bg-[#f4f5fa] border-slate-200'
-      }`}>
-        <div className="flex items-center gap-0.5 min-w-max">
-          {/* TAB 1: Command Center Dashboard */}
-          <button
-            onClick={() => handleNavigate('dashboard')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'dashboard'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <LayoutDashboard className="w-3.5 h-3.5" />
-            <span>Command Center</span>
-          </button>
 
-          {/* TAB 2: Networks / Asset Inventory */}
-          <button
-            onClick={() => handleNavigate('networks')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'networks' || activeTab === 'discovery'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Wifi className="w-3.5 h-3.5" />
-            <span>Network Inventory</span>
-            <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
-              {accessPoints.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => handleNavigate('doctor')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'doctor'
-                ? 'border-cyan-500 text-cyan-300 bg-cyan-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            <span>Network Diagnostics</span>
-          </button>
-
-          <button
-            onClick={() => handleNavigate('time-machine')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'time-machine'
-                ? 'border-cyan-500 text-cyan-300 bg-cyan-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Clock3 className="w-3.5 h-3.5" />
-            <span>Scan History</span>
-          </button>
-
-          <button
-            onClick={() => handleNavigate('walk-mode')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'walk-mode'
-                ? 'border-cyan-500 text-cyan-300 bg-cyan-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <MapPin className="w-3.5 h-3.5" />
-            <span>Signal Survey</span>
-          </button>
-
-          {/* TAB 3: Clients */}
-          <button
-            onClick={() => handleNavigate('clients')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'clients'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Laptop className="w-3.5 h-3.5" />
-            <span>Client Devices</span>
-          </button>
-
-          {/* TAB 4: RF Spectrum */}
-          <button
-            onClick={() => handleNavigate('spectrum')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'spectrum'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            <span>Spectrum Analysis</span>
-          </button>
-
-          {/* TAB 5: Threats & Rogues */}
-          <button
-            onClick={() => handleNavigate('threats')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'threats'
-                ? 'border-rose-500 text-rose-400 bg-rose-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Flame className="w-3.5 h-3.5 text-rose-400" />
-            <span>Threat Detection</span>
-            {rogueFindings.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/20 text-rose-400 font-bold">
-                {rogueFindings.length}
-              </span>
-            )}
-          </button>
-
-          {/* TAB 6: Local Operations Alerts */}
-          <button
-            onClick={() => handleNavigate('alerts')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'alerts'
-                ? 'border-amber-500 text-amber-400 bg-amber-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <BellRing className="w-3.5 h-3.5" />
-            <span>Security Alerts</span>
-            {alertSummary.active > 0 && (
-              <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                alertSummary.critical > 0 ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
-              }`}>
-                {alertSummary.active}
-              </span>
-            )}
-          </button>
-
-          {/* TAB 7: Investigations */}
-          <button
-            onClick={() => handleNavigate('investigations')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'investigations'
-                ? 'border-purple-500 text-purple-400 bg-purple-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Incident Management</span>
-            <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
-              {openIncidentCount}
-            </span>
-          </button>
-
-          {/* TAB 7: Packet Dissector */}
-          <button
-            onClick={() => handleNavigate('packets')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'packets'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Packet Analysis</span>
-            <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
-              {packets.length}
-            </span>
-          </button>
-
-          {/* TAB 8: Cryptographic Handshakes */}
-          <button
-            onClick={() => handleNavigate('handshakes')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'handshakes'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>Handshake Analysis</span>
-            {handshakes.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-400 font-bold">
-                {handshakes.length}
-              </span>
-            )}
-          </button>
-
-          {/* TAB 9: Multi-Site Projects */}
-          <button
-            onClick={() => handleNavigate('projects')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'projects' || activeTab === 'database'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Building2 className="w-3.5 h-3.5" />
-            <span>Projects &amp; Authorization</span>
-          </button>
-
-          {/* TAB 10: Reports */}
-          <button
-            onClick={() => handleNavigate('reports')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'reports'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <FileCheck className="w-3.5 h-3.5" />
-            <span>Reports</span>
-          </button>
-
-          {/* TAB 11: Hardware & Diagnostics */}
-          <button
-            onClick={() => handleNavigate('devices')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'devices'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Cpu className="w-3.5 h-3.5" />
-            <span>Hardware &amp; Capabilities</span>
-          </button>
-
-          {/* TAB 12: Settings & Lab */}
-          <button
-            onClick={() => handleNavigate('settings')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'settings'
-                ? 'border-purple-500 text-purple-400 bg-purple-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>Settings &amp; Test Lab</span>
-          </button>
-
-          {/* TAB 13: Native .NET 8 WPF */}
-          <button
-            onClick={() => handleNavigate('native-desktop')}
-            className={`flex items-center gap-1.5 px-3 py-2 font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'native-desktop'
-                ? 'border-blue-500 text-blue-400 bg-blue-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Laptop className="w-3.5 h-3.5 text-blue-400" />
-            <span>System Capabilities</span>
-            <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
-              EXE
-            </span>
-          </button>
-        </div>
-
-        {/* Presentation Mode Toggle Badge on the right */}
-        <div className="flex items-center gap-2 pr-2 py-1">
-          <button
-            onClick={() => handleToggleUIMode(uiMode === 'beginner' ? 'expert' : 'beginner')}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800/80 border border-slate-700/80 hover:bg-slate-700/80 transition-colors text-[11px]"
-            title="Switch presentation depth"
-          >
-            <Sparkles className="w-3 h-3 text-amber-400" />
-            <span className="text-slate-400">Mode:</span>
-            <span className={`font-semibold capitalize ${uiMode === 'expert' ? 'text-purple-400' : 'text-blue-400'}`}>
-              {uiMode}
-            </span>
-          </button>
-        </div>
-      </nav>
       </div>
 
       {/* Main Content View */}
@@ -2184,6 +1915,8 @@ export default function App() {
           isDarkMode={isDarkMode}
         />
       </main>
+      </div>
+      </div>
 
       {/* Reporting Modal */}
       {showReportModal && (

@@ -277,59 +277,255 @@
 :root[data-theme="dark"] button[class~="bg-emerald-600"]:hover:not(:disabled) {
   background: linear-gradient(112deg, #327fc8 0%, #4a75d8 54%, #755fb7 100%) !important;
 }
-:root[data-theme="dark"] .winwifi-nav {
-  min-height: 3.1rem;
-  margin: 0.35rem 0.75rem 0.25rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid rgb(255 255 255 / 6%) !important;
-  border-radius: 1rem;
-  background: linear-gradient(180deg, #151519 0%, #101014 100%) !important;
-  box-shadow: 0 10px 28px rgb(0 0 0 / 22%), inset 0 1px 0 rgb(255 255 255 / 3%);
+.winwifi-app-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
-:root[data-theme="dark"] .winwifi-nav > div:first-child {
-  gap: 0.25rem;
-  padding: 0.1rem;
+.winwifi-main-column {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
-:root[data-theme="dark"] .winwifi-nav > div:first-child > button {
-  min-height: 2.35rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid transparent !important;
-  border-radius: 0.7rem;
-  color: #92929c;
-  background: transparent;
+.winwifi-sidebar {
+  display: flex;
+  flex: 0 0 15.25rem;
+  flex-direction: column;
+  width: 15.25rem;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid rgb(255 255 255 / 7%);
+  background: linear-gradient(180deg, #121318 0%, #0e0f13 100%);
+  box-shadow: 10px 0 32px rgb(0 0 0 / 16%);
 }
-:root[data-theme="dark"] .winwifi-nav > div:first-child > button:not([class*="border-blue-500"]):not([class*="border-cyan-500"]):not([class*="border-rose-500"]):not([class*="border-amber-500"]):not([class*="border-purple-500"]) svg {
-  color: #777781 !important;
-  transition: color 140ms ease, transform 140ms ease;
+.winwifi-sidebar-brand {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 4.5rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgb(255 255 255 / 6%);
 }
-:root[data-theme="dark"] .winwifi-nav > div:first-child > button:not([class*="border-blue-500"]):not([class*="border-cyan-500"]):not([class*="border-rose-500"]):not([class*="border-amber-500"]):not([class*="border-purple-500"]):hover svg {
-  color: #c5c5cc !important;
-  transform: translateY(-1px);
+.winwifi-sidebar-logo {
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  border-radius: 0.8rem;
+  box-shadow: 0 4px 14px rgb(37 116 196 / 18%);
 }
-:root[data-theme="dark"] .winwifi-nav button[class*="border-blue-500"],
-:root[data-theme="dark"] .winwifi-nav button[class*="border-cyan-500"],
-:root[data-theme="dark"] .winwifi-nav button[class*="border-rose-500"],
-:root[data-theme="dark"] .winwifi-nav button[class*="border-amber-500"],
-:root[data-theme="dark"] .winwifi-nav button[class*="border-purple-500"] {
+.winwifi-sidebar-brand-name {
+  color: #e8e8ec;
+  font-size: 0.9rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+.winwifi-sidebar-brand-subtitle {
+  margin-top: 0.12rem;
+  color: #777781;
+  font-size: 0.57rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+.winwifi-sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.65rem 0.65rem 0.85rem;
+}
+.winwifi-sidebar-group + .winwifi-sidebar-group {
+  margin-top: 0.85rem;
+}
+.winwifi-sidebar-heading {
+  margin: 0 0 0.4rem 0.65rem;
+  color: #62636d;
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.15em;
+}
+.winwifi-sidebar-link {
   position: relative;
-  border-color: rgb(87 190 224 / 18%) !important;
-  color: #77e2e8 !important;
-  background: linear-gradient(120deg, rgb(48 213 212 / 13%), rgb(55 112 232 / 11%) 62%, rgb(157 78 220 / 10%)) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%), 0 4px 16px rgb(36 139 190 / 10%);
+  display: flex;
+  width: 100%;
+  min-height: 2.35rem;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.12rem 0;
+  padding: 0.52rem 0.65rem;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  color: #a0a0aa;
+  background: transparent;
+  text-align: left;
 }
-:root[data-theme="dark"] .winwifi-nav button[class*="border-blue-500"] svg,
-:root[data-theme="dark"] .winwifi-nav button[class*="border-cyan-500"] svg,
-:root[data-theme="dark"] .winwifi-nav button[class*="border-rose-500"] svg,
-:root[data-theme="dark"] .winwifi-nav button[class*="border-amber-500"] svg,
-:root[data-theme="dark"] .winwifi-nav button[class*="border-purple-500"] svg {
-  color: var(--app-accent) !important;
+.winwifi-sidebar-link:hover:not(:disabled) {
+  color: #e7e7ed;
+  border-color: rgb(255 255 255 / 5%);
+  background: rgb(255 255 255 / 4%);
 }
-:root[data-theme="dark"] .winwifi-nav button[class*="border-blue-500"]::after,
-:root[data-theme="dark"] .winwifi-nav button[class*="border-cyan-500"]::after,
-:root[data-theme="dark"] .winwifi-nav button[class*="border-rose-500"]::after,
-:root[data-theme="dark"] .winwifi-nav button[class*="border-amber-500"]::after,
-:root[data-theme="dark"] .winwifi-nav button[class*="border-purple-500"]::after {
-  content: none;
+.winwifi-sidebar-link.is-active {
+  color: #effaff;
+  border-color: rgb(98 154 225 / 20%);
+  background: linear-gradient(100deg, rgb(39 105 174 / 27%), rgb(46 71 116 / 18%) 75%, rgb(255 255 255 / 2%));
+  box-shadow: inset 3px 0 0 #5aa9e8, 0 5px 16px rgb(10 35 70 / 18%);
+}
+.winwifi-sidebar-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  color: #73737e;
+  transition: color 140ms ease;
+}
+.winwifi-sidebar-link:hover .winwifi-sidebar-icon {
+  color: #c6d0df;
+}
+.winwifi-sidebar-link.is-active .winwifi-sidebar-icon {
+  color: #8ed9f1;
+}
+.winwifi-sidebar-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 0.79rem;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.winwifi-sidebar-count {
+  flex: 0 0 auto;
+  min-width: 1.15rem;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-radius: 999px;
+  color: #b6b6c0;
+  background: rgb(255 255 255 / 5%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  text-align: center;
+}
+.winwifi-sidebar-footer {
+  flex: 0 0 auto;
+  padding: 0.75rem;
+  border-top: 1px solid rgb(255 255 255 / 6%);
+  background: rgb(0 0 0 / 10%);
+}
+.winwifi-sidebar-status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.5rem 0.7rem;
+}
+.winwifi-sidebar-status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #777781;
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 4%);
+}
+.winwifi-sidebar-status-dot.is-connected {
+  background: #b7c0cb;
+}
+.winwifi-sidebar-status-dot.is-offline {
+  background: #c29c63;
+}
+.winwifi-sidebar-status-copy,
+.winwifi-sidebar-mode-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+.winwifi-sidebar-status-copy strong,
+.winwifi-sidebar-mode-copy strong {
+  overflow: hidden;
+  color: #c9c9d1;
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.winwifi-sidebar-status-copy small,
+.winwifi-sidebar-mode-copy small {
+  color: #71717b;
+  font-size: 0.6rem;
+}
+.winwifi-sidebar-mode {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 0.75rem;
+  color: #b7b7c1;
+  background: linear-gradient(120deg, #1a1b21, #17181d);
+  text-align: left;
+}
+.winwifi-sidebar-mode:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 12%);
+  background: #202127;
+}
+.winwifi-sidebar-mode-icon {
+  display: grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.55rem;
+  color: #c9d5e2;
+  background: linear-gradient(135deg, #273b54, #292c3a);
+  font-size: 0.56rem;
+  font-weight: 800;
+}
+.winwifi-sidebar-mode-copy {
+  flex: 1 1 auto;
+}
+.winwifi-sidebar-mode-copy strong {
+  text-transform: capitalize;
+}
+.winwifi-sidebar-mode-switch {
+  color: #72737c;
+  font-size: 1rem;
+}
+:root[data-theme="dark"] .winwifi-sidebar .winwifi-sidebar-link:not(:disabled):hover,
+:root[data-theme="dark"] .winwifi-sidebar .winwifi-sidebar-mode:not(:disabled):hover {
+  transform: none;
+  box-shadow: none;
+  filter: none;
+}
+:root[data-theme="light"] .winwifi-sidebar {
+  border-color: #e3e6ee;
+  background: linear-gradient(180deg, #f7f8fb 0%, #f0f2f7 100%);
+  box-shadow: 8px 0 24px rgb(27 39 62 / 6%);
+}
+:root[data-theme="light"] .winwifi-sidebar-brand,
+:root[data-theme="light"] .winwifi-sidebar-footer {
+  border-color: #e3e6ee;
+}
+:root[data-theme="light"] .winwifi-sidebar-brand-name { color: #222733; }
+:root[data-theme="light"] .winwifi-sidebar-brand-subtitle,
+:root[data-theme="light"] .winwifi-sidebar-heading { color: #8992a2; }
+:root[data-theme="light"] .winwifi-sidebar-link { color: #5f6877; }
+:root[data-theme="light"] .winwifi-sidebar-link:hover:not(:disabled) { color: #252d39; background: rgb(30 65 110 / 5%); }
+:root[data-theme="light"] .winwifi-sidebar-link.is-active { color: #1f4368; background: linear-gradient(100deg, rgb(60 131 207 / 13%), rgb(74 117 176 / 6%)); }
+:root[data-theme="light"] .winwifi-sidebar-icon { color: #8b95a5; }
+:root[data-theme="light"] .winwifi-sidebar-link.is-active .winwifi-sidebar-icon { color: #2879bf; }
+:root[data-theme="light"] .winwifi-sidebar-count { border-color: #e1e5ec; color: #5d6878; background: #e9edf3; }
+:root[data-theme="light"] .winwifi-sidebar-status-copy strong,
+:root[data-theme="light"] .winwifi-sidebar-mode-copy strong { color: #414a58; }
+:root[data-theme="light"] .winwifi-sidebar-status-copy small,
+:root[data-theme="light"] .winwifi-sidebar-mode-copy small { color: #8992a2; }
+:root[data-theme="light"] .winwifi-sidebar-mode { border-color: #e2e6ed; color: #596475; background: #f8f9fb; }
+:root[data-theme="light"] .winwifi-sidebar-mode:hover:not(:disabled) { background: #edf0f5; }
+:root[data-theme="light"] .winwifi-sidebar-mode-icon { color: #426183; background: #e6edf5; }
+.winwifi-sidebar .winwifi-sidebar-link:not(:disabled):hover {
+  transform: none;
+  box-shadow: none;
 }
 :root[data-theme="dark"] .winwifi-gradient-value {
   background: var(--app-accent-gradient);
@@ -371,9 +567,7 @@
 }
 
 /* The native window uses 90% of the usable monitor area. These rules keep the
-   custom title bar compact when Windows DPI scaling gives the dashboard a
-   narrow CSS viewport. The navigation ribbon remains horizontally scrollable
-   by design, while page panels use their existing responsive grid breakpoints. */
+   custom title bar and left navigation compact under Windows DPI scaling. */
 @media (max-width: 900px) {
   .winwifi-window-chrome {
     padding-inline: 0.5rem;
@@ -404,4 +598,35 @@
     width: 64px !important;
     height: 64px !important;
   }
+}
+
+@media (max-width: 1050px) {
+  .winwifi-sidebar {
+    flex-basis: 4.65rem;
+    width: 4.65rem;
+  }
+  .winwifi-sidebar-brand {
+    justify-content: center;
+    padding-inline: 0.45rem;
+  }
+  .winwifi-sidebar-brand-copy,
+  .winwifi-sidebar-heading,
+  .winwifi-sidebar-label,
+  .winwifi-sidebar-count,
+  .winwifi-sidebar-status-copy,
+  .winwifi-sidebar-mode-copy,
+  .winwifi-sidebar-mode-switch {
+    display: none;
+  }
+  .winwifi-sidebar-scroll { padding-inline: 0.45rem; }
+  .winwifi-sidebar-group + .winwifi-sidebar-group { margin-top: 0.65rem; }
+  .winwifi-sidebar-link {
+    justify-content: center;
+    min-height: 2.65rem;
+    padding: 0.6rem 0.4rem;
+  }
+  .winwifi-sidebar-icon { width: 1.1rem; height: 1.1rem; }
+  .winwifi-sidebar-footer { padding: 0.5rem; }
+  .winwifi-sidebar-status { justify-content: center; padding-inline: 0; }
+  .winwifi-sidebar-mode { justify-content: center; padding: 0.45rem; }
 }
