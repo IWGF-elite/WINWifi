@@ -13,6 +13,7 @@ import {
   Zap
 } from 'lucide-react';
 import { NativeBridgeClient } from '../services/bridgeClient';
+import { useScanActive } from '../contexts/ScanActivityContext';
 import { 
   BridgeConnectionState, 
   BridgeConfig, 
@@ -24,16 +25,21 @@ interface BridgeConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
   isDarkMode: boolean;
-  onConnectedDataReceived?: () => void;
+  onConnectedDataReceived?: () => Promise<number | null | void> | void;
+  onScanActivityChange?: (active: boolean) => void;
+  refreshPending?: boolean;
 }
 
 export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
   isOpen,
   onClose,
   isDarkMode,
-  onConnectedDataReceived
+  onConnectedDataReceived,
+  onScanActivityChange,
+  refreshPending = false
 }) => {
   const bridge = NativeBridgeClient.getInstance();
+  const scanActive = useScanActive();
 
   const [config, setConfig] = useState<BridgeConfig>(() => bridge.getConfig());
   const [connectionState, setConnectionState] = useState<BridgeConnectionState>(() => bridge.getState());
@@ -43,6 +49,7 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [scanCommandPending, setScanCommandPending] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -126,28 +133,46 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
   };
 
   const handleTriggerStart = async () => {
+    if (scanCommandPending) return;
+    setScanCommandPending(true);
+    onScanActivityChange?.(true);
     try {
       const res = await bridge.startScan();
+      onScanActivityChange?.(res.isScanning);
       setTestResult(`Native scanner started: ${res.message}`);
     } catch (err: any) {
+      const status = await bridge.getScanStatus().catch(() => null);
+      onScanActivityChange?.(Boolean(status?.isScanning));
       setTestResult(`Failed to start scanner: ${err.message}`);
+    } finally {
+      setScanCommandPending(false);
     }
   };
 
   const handleTriggerStop = async () => {
+    if (scanCommandPending) return;
+    setScanCommandPending(true);
+    onScanActivityChange?.(false);
     try {
       const res = await bridge.stopScan();
+      onScanActivityChange?.(res.isScanning);
       setTestResult(`Native scanner stopped: ${res.message}`);
     } catch (err: any) {
+      const status = await bridge.getScanStatus().catch(() => null);
+      onScanActivityChange?.(Boolean(status?.isScanning));
       setTestResult(`Failed to stop scanner: ${err.message}`);
+    } finally {
+      setScanCommandPending(false);
     }
   };
 
   const handleTriggerRefresh = async () => {
     try {
-      const res = await bridge.refreshScan();
-      setTestResult(`Hardware refresh completed: Discovered ${res.count} BSS entries from Windows radio.`);
-      if (onConnectedDataReceived) onConnectedDataReceived();
+      if (!onConnectedDataReceived) throw new Error('The shared Windows scan refresh is unavailable.');
+      const count = await onConnectedDataReceived();
+      setTestResult(typeof count === 'number'
+        ? `Hardware refresh completed: Discovered ${count} BSS entries from Windows radio.`
+        : 'Refresh is already running or waiting for the Windows refresh interval. Check the main status message.');
     } catch (err: any) {
       setTestResult(`Failed to refresh hardware scan: ${err.message}`);
     }
@@ -334,11 +359,11 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
                 <label className="block text-[11px] text-slate-400 mb-1">Polling Fallback Interval (ms)</label>
                 <input
                   type="number"
-                  min="1000"
-                  max="15000"
-                  step="500"
+                  min="10000"
+                  max="60000"
+                  step="1000"
                   value={config.pollIntervalMs}
-                  onChange={(e) => setConfig({ ...config, pollIntervalMs: parseInt(e.target.value) || 2500 })}
+                  onChange={(e) => setConfig({ ...config, pollIntervalMs: parseInt(e.target.value) || 10000 })}
                   className={`w-full px-2.5 py-1.5 rounded-md border text-xs ${
                     isDarkMode ? 'bg-[#14161d] border-slate-700 text-slate-100' : 'bg-white border-slate-300 text-slate-900'
                   }`}
@@ -377,7 +402,7 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
               <h4 className="font-semibold text-xs text-slate-200 flex items-center justify-between">
                 <span className="flex items-center gap-2">
                   <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Real Hardware Scanner Control</span>
+                  <span>Windows Scanner Controls</span>
                 </span>
                 {health && (
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/15 text-blue-400">
@@ -389,6 +414,7 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={handleTriggerStart}
+                  disabled={scanActive || scanCommandPending}
                   className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 transition-colors"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
@@ -397,6 +423,7 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
 
                 <button
                   onClick={handleTriggerStop}
+                  disabled={!scanActive || scanCommandPending}
                   className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white font-medium flex items-center gap-1.5 transition-colors"
                 >
                   <Square className="w-3.5 h-3.5 fill-current" />
@@ -405,10 +432,11 @@ export const BridgeConfigModal: React.FC<BridgeConfigModalProps> = ({
 
                 <button
                   onClick={handleTriggerRefresh}
+                  disabled={refreshPending}
                   className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-1.5 transition-colors"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Immediate Hardware Refresh</span>
+                  <span>{refreshPending ? 'Refreshing…' : 'Immediate Hardware Refresh'}</span>
                 </button>
               </div>
 

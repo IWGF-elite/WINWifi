@@ -1,4 +1,5 @@
 import { downloadBlob } from '../services/download';
+import { useScanActive } from '../contexts/ScanActivityContext';
 import React, { useState } from 'react';
 import { AccessPoint, AuditProject, DataSourceProfile } from '../types';
 import { 
@@ -27,6 +28,7 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
   onClose,
   isDarkMode,
 }) => {
+  const scanActive = useScanActive();
   const [reportType, setReportType] = useState<'EXECUTIVE' | 'TECHNICAL'>('EXECUTIVE');
 
   const totalAps = accessPoints.length;
@@ -36,7 +38,7 @@ export const ReportingModal: React.FC<ReportingModalProps> = ({
   const avgScore = totalAps ? Math.round(accessPoints.reduce((acc, a) => acc + a.securityScore, 0) / totalAps) : null;
   const lastObserved = accessPoints.map(ap => Date.parse(ap.lastSeen)).filter(Number.isFinite).sort((a, b) => b - a)[0];
   const observationTime = lastObserved ? new Date(lastObserved).toLocaleString() : 'Unavailable';
-  const sourceLabel = dataSourceProfile === 'LIVE_WINDOWS' ? 'Live Windows WLAN scan' : dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED' ? 'Imported capture (not live)' : dataSourceProfile === 'REAL_NETSH' ? 'Imported Windows snapshot (not live)' : 'Saved scan (not live)';
+  const sourceLabel = dataSourceProfile === 'LIVE_WINDOWS' ? (scanActive ? 'Active Windows WLAN scan' : 'Windows WLAN scan · last observed; scanner stopped') : dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED' ? 'Imported capture (not live)' : dataSourceProfile === 'REAL_NETSH' ? 'Imported Windows snapshot (not live)' : 'Saved scan (not live)';
   const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
   const remediationActions = accessPoints.flatMap(ap => (ap.issues || []).map(issue => ({ ssid: ap.ssid, bssid: ap.bssid, title: issue.title, recommendation: issue.recommendation })))
     .filter((item, index, all) => all.findIndex(candidate => candidate.title === item.title && candidate.recommendation === item.recommendation) === index);

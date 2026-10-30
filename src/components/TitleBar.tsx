@@ -22,6 +22,7 @@ import { DataSourceProfile, BridgeConnectionState, WifiAdapter } from '../types'
 import { AppUpdateSnapshot } from '../services/bridgeClient';
 import { BridgeErrorKind, bridgeStatusView } from '../services/bridgeStatus';
 import { WinWiFiLogo } from './WinWiFiLogo';
+import { useScanActive } from '../contexts/ScanActivityContext';
 
 interface TitleBarProps {
   isDarkMode: boolean;
@@ -31,7 +32,8 @@ interface TitleBarProps {
   scannerState: string;
   lastScanCompletedAt: number | null;
   activeSourceLabel: string;
-  isScanning: boolean;
+  scanCommandPending?: boolean;
+  refreshPending?: boolean;
   onToggleScan: () => void;
   onRefreshScan?: () => void;
   bridgeState?: BridgeConnectionState;
@@ -60,7 +62,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   scannerState,
   lastScanCompletedAt,
   activeSourceLabel,
-  isScanning,
+  scanCommandPending = false,
+  refreshPending = false,
   onToggleScan,
   onRefreshScan,
   bridgeState = 'DISCONNECTED',
@@ -80,6 +83,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onApplyUpdate,
   onDeferUpdate,
 }) => {
+  const isScanning = useScanActive();
   const [isFittedToScreen, setIsFittedToScreen] = useState(false);
   const nativeWindow = (action: 'minimize' | 'fit' | 'close') => {
     (window as any).chrome?.webview?.postMessage?.(`window:${action}`);
@@ -98,10 +102,14 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const getOriginBadge = () => {
     switch (dataSourceProfile) {
       case 'LIVE_WINDOWS':
-        return {
+        return isScanning ? {
           label: hasFreshLiveData ? 'LIVE WINDOWS DATA' : 'WAITING FOR SCAN',
           classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
           icon: <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
+        } : {
+          label: 'SCAN STOPPED · LAST WINDOWS DATA',
+          classes: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+          icon: <Radio className="w-3 h-3 text-amber-300" />
         };
       case 'REAL_PCAP':
       case 'REAL_NETSH':
@@ -208,17 +216,18 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 ? 'bg-amber-600 hover:bg-amber-500 text-white ring-1 ring-amber-400/50'
                 : 'bg-blue-600 hover:bg-blue-500 text-white ring-1 ring-blue-400/50'
             }`}
-            title={isScanning ? "Stop continuous scanner" : "Start continuous scanner"}
+            disabled={scanCommandPending}
+            title={scanCommandPending ? 'Updating scanner state' : isScanning ? 'Stop continuous scanner' : 'Start continuous scanner'}
           >
             {isScanning ? (
               <>
                 <Square className="w-3.5 h-3.5 fill-current" />
-                <span>Stop Scan</span>
+                <span>{scanCommandPending ? 'Starting…' : 'Stop Scan'}</span>
               </>
             ) : (
               <>
                 <Play className="w-3.5 h-3.5 fill-current" />
-                <span>Start Scan</span>
+                <span>{scanCommandPending ? 'Stopping…' : 'Start Scan'}</span>
               </>
             )}
           </button>
@@ -227,6 +236,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           {onRefreshScan && (
             <button
               onClick={onRefreshScan}
+              disabled={refreshPending}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-medium transition-colors ${
                 isDarkMode
                   ? 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200'
@@ -235,19 +245,19 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               title="Trigger immediate hardware scan cycle and refresh network table"
             >
               <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
-              <span>Refresh</span>
+              <span>{refreshPending ? 'Refreshing…' : 'Refresh'}</span>
             </button>
           )}
 
           {/* Prominent Data Origin Pill */}
-          <div title={dataSourceProfile === 'LIVE_WINDOWS' && lastScanCompletedAt !== null ? `Live Windows WLAN data · last update ${new Date(lastScanCompletedAt).toLocaleTimeString()}` : undefined} className={`flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold tracking-wide text-[11px] ${origin.classes}`}>
+          <div title={dataSourceProfile === 'LIVE_WINDOWS' && lastScanCompletedAt !== null ? `${isScanning ? 'Live Windows WLAN scan' : 'Last Windows WLAN scan'} · completed ${new Date(lastScanCompletedAt).toLocaleTimeString()}` : undefined} className={`flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold tracking-wide text-[11px] ${origin.classes}`}>
             {origin.icon}
             <span>{origin.label}</span>
           </div>
-          {dataSourceProfile === 'LIVE_WINDOWS' && (scannerState === 'Error' || scannerState === 'AdapterUnavailable' || scannerState === 'Paused' || lastScanCompletedAt === null) && (
+          {dataSourceProfile === 'LIVE_WINDOWS' && (!isScanning || scannerState === 'Error' || scannerState === 'AdapterUnavailable' || scannerState === 'Paused' || lastScanCompletedAt === null) && (
             <span role="status" className={`inline-flex items-center gap-1 text-[10px] ${scannerState === 'Error' || scannerState === 'AdapterUnavailable' ? 'text-rose-300' : 'text-slate-400'}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${scannerState === 'Error' || scannerState === 'AdapterUnavailable' ? 'bg-rose-400' : 'bg-amber-400'}`} />
-              {scannerState === 'Error' ? 'Scan error' : scannerState === 'AdapterUnavailable' ? 'Wi-Fi unavailable' : scannerState === 'Paused' ? 'Scan paused' : 'Waiting for scan'}
+              {scannerState === 'Error' ? 'Scan error' : scannerState === 'AdapterUnavailable' ? 'Wi-Fi unavailable' : !isScanning || scannerState === 'Paused' ? 'Scan stopped' : 'Waiting for scan'}
             </span>
           )}
 

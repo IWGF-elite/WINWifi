@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AccessPoint, ClientDevice, UIMode, DataSourceProfile } from '../types';
 import { LanDeviceInventory } from './LanDeviceInventory';
+import { useScanActive } from '../contexts/ScanActivityContext';
 
 interface ClientObserverProps {
   accessPoints: AccessPoint[];
@@ -33,6 +34,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
   onSelectAP,
   onOpenImport
 }) => {
+  const scanActive = useScanActive();
   const [search, setSearch] = useState('');
   const [selectedBssid, setSelectedBssid] = useState<string>('all');
   const isLiveMode = dataSourceProfile === 'LIVE_WINDOWS' || dataSourceProfile === 'REAL_NETSH';
@@ -99,6 +101,7 @@ export const ClientObserver: React.FC<ClientObserverProps> = ({
   return (
     <div className="space-y-5 pb-8">
       {isLiveMode && <LanDeviceInventory adapterId={selectedAdapterId} />}
+      {isLiveMode && !scanActive && <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">Windows WLAN scan stopped. This view is showing the last scan context; client stations require imported capture data.</div>}
       {/* Operating Mode & Provenance Banner */}
       {isLiveMode ? (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-xs text-amber-200">

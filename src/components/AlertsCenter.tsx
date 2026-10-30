@@ -7,6 +7,7 @@ import {
   SEVERITY_ORDER,
   summarizeAlerts
 } from '../services/alerts';
+import { useScanActive } from '../contexts/ScanActivityContext';
 
 interface AlertsCenterProps {
   alerts: AlertRecord[];
@@ -45,6 +46,7 @@ export const AlertsCenter: React.FC<AlertsCenterProps> = ({
   alertEligibleObservationCount,
   onAcknowledge
 }) => {
+  const scanActive = useScanActive();
   const [statusFilter, setStatusFilter] = useState<'Active' | 'Open' | 'Acknowledged' | 'Resolved' | 'All'>('Active');
   const [severityFilter, setSeverityFilter] = useState<'All' | AlertSeverity>('All');
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -101,7 +103,7 @@ export const AlertsCenter: React.FC<AlertsCenterProps> = ({
         </p>
         {liveObservationCount > 0 && alertEligibleObservationCount === 0 && alerts.length === 0 && (
           <p className="mt-2 rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-200" role="status">
-            {liveObservationCount} live access points are visible, but none are enrolled or classified as trusted/corporate/approved for operational alerting. Review and add authorized networks in Projects &amp; Authorization to enable scoped alerts. Unenrolled networks remain visible without being treated as managed assets.
+            {liveObservationCount} {scanActive ? 'live' : 'last observed'} access point{liveObservationCount === 1 ? ' is' : 's are'} visible, but none are enrolled or classified as trusted/corporate/approved for operational alerting. Review and add authorized networks in Projects &amp; Authorization to enable scoped alerts. Unenrolled networks remain visible without being treated as managed assets.
           </p>
         )}
       </div>

@@ -70,7 +70,7 @@ export function estimateLocalNetworkScanTimeout(
 const DEFAULT_CONFIG: BridgeConfig = {
   baseUrl: 'http://127.0.0.1:38989',
   allowRemote: false,
-  pollIntervalMs: 2500,
+  pollIntervalMs: 10000,
   timeoutMs: 5000,
   autoReconnect: true
 };
@@ -88,6 +88,7 @@ export class NativeBridgeClient {
   private sseRetryTimer: any = null;
   private reconnectAttempts = 0;
   private maxReconnectDelayMs = 5000;
+  private scanningActive = false;
   private projectId = '';
   private projectName = '';
   private token = '';
@@ -100,6 +101,7 @@ export class NativeBridgeClient {
   private clientListeners: Set<BridgeEventCallback<any[]>> = new Set();
   private diagnosticListeners: Set<BridgeEventCallback<BridgeDiagnostics>> = new Set();
   private scanStatusListeners: Set<BridgeEventCallback<BridgeScanStatus>> = new Set();
+  private requestSuccessListeners: Set<() => void> = new Set();
   private errorListeners: Set<BridgeEventCallback<string>> = new Set();
 
   private constructor() {
@@ -159,6 +161,7 @@ export class NativeBridgeClient {
 
   public setConfig(partial: Partial<BridgeConfig>): void {
     const updated = { ...this.config, ...partial };
+    updated.pollIntervalMs = Math.max(10000, Math.min(60000, Number(updated.pollIntervalMs) || DEFAULT_CONFIG.pollIntervalMs));
 
     // Validate Localhost Safety constraint
     if (!updated.allowRemote && !this.isLocalhost(updated.baseUrl)) {
@@ -176,6 +179,20 @@ export class NativeBridgeClient {
       this.disconnect();
       this.connect();
     }
+  }
+
+  public setScanningActive(active: boolean): void {
+    if (this.scanningActive === active) return;
+    this.scanningActive = active;
+    if (!active) {
+      this.stopPolling();
+    } else if (this.state === 'CONNECTED' && !this.eventSource) {
+      this.startPolling();
+    }
+  }
+
+  public isScanningActive(): boolean {
+    return this.scanningActive;
   }
 
   private isLocalhost(urlStr: string): boolean {
@@ -198,7 +215,11 @@ export class NativeBridgeClient {
       const saved = localStorage.getItem('winwifi_bridge_config');
       if (saved) {
         const parsed = JSON.parse(saved);
-        this.config = { ...DEFAULT_CONFIG, ...parsed };
+        this.config = {
+          ...DEFAULT_CONFIG,
+          ...parsed,
+          pollIntervalMs: Math.max(10000, Math.min(60000, Number(parsed.pollIntervalMs) || DEFAULT_CONFIG.pollIntervalMs))
+        };
       }
     } catch {
       this.config = { ...DEFAULT_CONFIG };
@@ -357,6 +378,11 @@ export class NativeBridgeClient {
     return () => this.scanStatusListeners.delete(cb);
   }
 
+  public onRequestSuccess(cb: () => void): () => void {
+    this.requestSuccessListeners.add(cb);
+    return () => this.requestSuccessListeners.delete(cb);
+  }
+
   public onError(cb: BridgeEventCallback<string>): () => void {
     this.errorListeners.add(cb);
     return () => this.errorListeners.delete(cb);
@@ -415,7 +441,9 @@ export class NativeBridgeClient {
         throw new Error(`HTTP ${response.status}: ${detail}`);
       }
 
-      return await response.json() as T;
+      const result = await response.json() as T;
+      this.requestSuccessListeners.forEach(listener => listener());
+      return result;
     } catch (err: any) {
       clearTimeout(timer);
       if (err.name === 'AbortError') {
@@ -569,18 +597,22 @@ export class NativeBridgeClient {
    */
   public async startScan(adapterId?: string): Promise<{ isScanning: boolean; message: string }> {
     const query = adapterId ? `?adapterId=${encodeURIComponent(adapterId)}` : '';
-    return await this.request<{ isScanning: boolean; message: string }>(`/api/scan/start${query}`, {
+    const result = await this.request<{ isScanning: boolean; message: string }>(`/api/scan/start${query}`, {
       method: 'POST'
     });
+    this.setScanningActive(Boolean(result.isScanning));
+    return result;
   }
 
   /**
    * Stop / pause continuous scanning in background service
    */
   public async stopScan(): Promise<{ isScanning: boolean; message: string }> {
-    return await this.request<{ isScanning: boolean; message: string }>('/api/scan/stop', {
+    const result = await this.request<{ isScanning: boolean; message: string }>('/api/scan/stop', {
       method: 'POST'
     });
+    this.setScanningActive(Boolean(result.isScanning));
+    return result;
   }
 
   /**
@@ -694,6 +726,7 @@ export class NativeBridgeClient {
   }
 
   public disconnect(): void {
+    this.setScanningActive(false);
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -748,7 +781,10 @@ export class NativeBridgeClient {
       this.eventSource.addEventListener('scan_result', (event: MessageEvent) => {
         try {
           const payload = JSON.parse(event.data);
-          if (payload.accessPoints && Array.isArray(payload.accessPoints)) {
+          // SSE stays open so scan status and other bridge events can still be
+          // observed while paused. Do not let a delayed scan_result frame
+          // repaint network telemetry after the operator stopped the scanner.
+          if (this.scanningActive && payload.accessPoints && Array.isArray(payload.accessPoints)) {
             const tagged = this.tagOrigin(payload.accessPoints, 'LIVE_WINDOWS');
             this.networkListeners.forEach(cb => cb(tagged));
           }
@@ -772,6 +808,7 @@ export class NativeBridgeClient {
       this.eventSource.addEventListener('state_change', (event: MessageEvent) => {
         try {
           const stateData = JSON.parse(event.data) as BridgeScanStatus;
+          this.setScanningActive(Boolean(stateData.isScanning));
           this.scanStatusListeners.forEach(cb => cb(stateData));
         } catch (e) {
           console.error('[BridgeClient] Failed to parse SSE state_change payload', e);
@@ -781,6 +818,7 @@ export class NativeBridgeClient {
       this.eventSource.addEventListener('cycle_completed', (event: MessageEvent) => {
         try {
           const scanStatus = JSON.parse(event.data) as BridgeScanStatus;
+          this.setScanningActive(Boolean(scanStatus.isScanning));
           this.scanStatusListeners.forEach(cb => cb(scanStatus));
         } catch (e) {
           console.error('[BridgeClient] Failed to parse SSE cycle_completed payload', e);
@@ -820,10 +858,10 @@ export class NativeBridgeClient {
   // ================= Fallback HTTP Polling =================
 
   private startPolling(): void {
-    if (this.pollTimer) return;
+    if (this.pollTimer || !this.scanningActive) return;
 
     this.pollTimer = setInterval(() => {
-      if (this.state !== 'CONNECTED') return;
+      if (this.state !== 'CONNECTED' || !this.scanningActive) return;
 
       // Every endpoint is polled on every tick, in parallel and independently.
       // Networks alone used to be re-fetched here while SSE was down, so each
@@ -831,6 +869,9 @@ export class NativeBridgeClient {
       // incident from the store.
       void Promise.allSettled([this.getNetworks(), this.getIncidents(), this.getDrifts(), this.getScanStatus()])
         .then(([networks, incidents, drifts, scanStatus]) => {
+          // A response that was already in flight when Stop Scan was pressed
+          // must not deliver another live-looking snapshot into the UI.
+          if (this.state !== 'CONNECTED' || !this.scanningActive) return;
           if (networks.status === 'fulfilled') {
             this.networkListeners.forEach(cb => cb(networks.value));
           } else {
@@ -854,12 +895,13 @@ export class NativeBridgeClient {
           }
 
           if (scanStatus.status === 'fulfilled') {
+            this.setScanningActive(Boolean(scanStatus.value.isScanning));
             this.scanStatusListeners.forEach(cb => cb(scanStatus.value));
           } else {
             console.warn('[BridgeClient] Polling scanner status failed:', messageOf(scanStatus.reason));
           }
         });
-    }, this.config.pollIntervalMs);
+    }, Math.max(10000, this.config.pollIntervalMs));
   }
 
   private stopPolling(): void {

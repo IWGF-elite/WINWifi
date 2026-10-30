@@ -24,13 +24,13 @@ import {
 } from '../types';
 import { countOpenIncidents } from '../services/incidentMapper';
 import { countSuspiciousAccessPoints } from '../services/threatMetrics';
+import { useScanActive } from '../contexts/ScanActivityContext';
 
 interface CommandCenterDashboardProps {
   accessPoints: AccessPoint[];
   incidents: IncidentRecord[];
   securityChanges: SecurityChange[];
   uiMode: UIMode;
-  isScanning: boolean;
   dataSourceProfile?: DataSourceProfile;
   bridgeState?: BridgeConnectionState;
   lastLiveDataAt?: number | null;
@@ -45,7 +45,6 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
   incidents = [],
   securityChanges = [],
   uiMode,
-  isScanning = false,
   dataSourceProfile = 'OFFLINE',
   bridgeState = 'DISCONNECTED',
   lastLiveDataAt = null,
@@ -54,6 +53,7 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
   onNavigate,
   onSelectAP
 }) => {
+  const isScanning = useScanActive();
   // Calculations
   const totalNetworks = accessPoints.length;
   const hasNetworkData = totalNetworks > 0;
@@ -304,10 +304,10 @@ export const CommandCenterDashboard: React.FC<CommandCenterDashboardProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-sky-300"><Activity className="h-4 w-4" /> Wireless change radar</div>
             <div className="mt-2 flex items-end gap-3"><span className="text-4xl font-black tracking-tight text-slate-50">{avgSecurityScore ?? '—'}</span><span className="mb-1 text-sm font-semibold text-sky-200">{postureLabel}</span></div>
-            <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">Live posture is calculated from the access points currently observed by this project. Changes appear only after a real scan or imported evidence records them.</p>
+            <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">Posture is calculated from the latest access point observations in this project. Changes appear after a completed scan or imported evidence records them.</p>
           </div>
           <div className="grid min-w-[360px] grid-cols-2 gap-2 sm:grid-cols-4">
-            <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Observed now</p><p className="mt-1 text-lg font-bold text-slate-100">{totalNetworks}</p><p className="text-[10px] text-emerald-400">{liveAge === null ? 'Awaiting native scan' : `Native refresh ${liveAge}s ago`}</p></div>
+            <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Last observed</p><p className="mt-1 text-lg font-bold text-slate-100">{totalNetworks}</p><p className={`text-[10px] ${isScanning ? 'text-emerald-400' : 'text-amber-300'}`}>{isScanning ? (liveAge === null ? 'Waiting for native scan' : `Native refresh ${liveAge}s ago`) : (liveAge === null ? 'Scanner stopped' : `Stopped · last refresh ${liveAge}s ago`)}</p></div>
             <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Changes</p><p className="mt-1 text-lg font-bold text-sky-300">{securityChanges.length}</p></div>
             <div className="rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-slate-500">Rogue signals</p><p className="mt-1 text-lg font-bold text-rose-300">{rogueNetworks}</p></div>
             <button onClick={() => onNavigate('threats', 'changes')} className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-left transition hover:bg-sky-500/20"><p className="text-[10px] uppercase tracking-wide text-sky-300">Review</p><p className="mt-1 text-xs font-bold text-slate-100">Open timeline →</p></button>

@@ -72,6 +72,7 @@ import {
   summarizeAlerts
 } from './services/alerts';
 import type { AssetImportSummary } from './components/EnterpriseRegistry';
+import { ScanActivityProvider } from './contexts/ScanActivityContext';
 
 // Components
 import { TitleBar } from './components/TitleBar';
@@ -181,6 +182,11 @@ export default function App() {
   const [selectedAdapterId, setSelectedAdapterId] = useState<string>('');
   const [connectedBssid, setConnectedBssid] = useState<string>('');
   const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [scanCommandPending, setScanCommandPending] = useState(false);
+  const [refreshPending, setRefreshPending] = useState(false);
+  const scanCommandPendingRef = useRef(false);
+  const refreshPendingRef = useRef(false);
+  const lastRefreshCompletedAtRef = useRef(0);
   const [scannerState, setScannerState] = useState<string>('Idle');
 
   // Network Data & Packets
@@ -338,7 +344,7 @@ export default function App() {
       } catch { /* Update checks are best effort and never interrupt scanning. */ }
     };
     void refreshUpdateStatus();
-    const timer = window.setInterval(() => void refreshUpdateStatus(), 1_000);
+    const timer = window.setInterval(() => void refreshUpdateStatus(), 60_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [bridgeClient, bridgeState, embeddedShell]);
 
@@ -429,8 +435,16 @@ export default function App() {
 
   useEffect(() => {
     const applyScanStatus = (status: BridgeScanStatus) => {
-      setIsScanning(Boolean(status.isScanning));
+      const active = Boolean(status.isScanning);
+      bridgeClient.setScanningActive(active);
+      setIsScanning(active);
       if (status.state) setScannerState(status.state);
+      if (!active && dataSourceProfileRef.current === 'LIVE_WINDOWS') {
+        setActiveSourceLabel('Windows WLAN scan stopped · showing the last observed networks');
+      } else if (active && dataSourceProfileRef.current === 'LIVE_WINDOWS') {
+        setActiveSourceLabel(`Windows WLAN scan active (${accessPointsRef.current.length} access points)`);
+      }
+      setBridgeNotice(current => current.startsWith('Refresh failed:') || current.startsWith('Windows WLAN was refreshed recently.') ? '' : current);
       setStartupScanStatusLoaded(true);
       setStartupLoadError('');
       const completedAt = status.lastScanCompletedAt ? Date.parse(status.lastScanCompletedAt) : NaN;
@@ -438,6 +452,10 @@ export default function App() {
         setLastLiveDataAt(current => current === null || completedAt > current ? completedAt : current);
       }
     };
+
+    const unsubRequestSuccess = bridgeClient.onRequestSuccess(() => {
+      setBridgeNotice(current => current.startsWith('Refresh failed:') || current.startsWith('Windows WLAN was refreshed recently.') ? '' : current);
+    });
 
     const unsubStatus = bridgeClient.onStateChange(async (state) => {
       setBridgeState(state);
@@ -449,7 +467,8 @@ export default function App() {
           const health = await bridgeClient.checkHealth();
           setBridgeStatus(health);
           setStartupHealthLoaded(true);
-          setIsScanning(health.isScanning ?? false);
+          bridgeClient.setScanningActive(Boolean(health.isScanning));
+          setIsScanning(Boolean(health.isScanning));
           const scanStatus = await bridgeClient.getScanStatus().catch((error) => {
             setStartupLoadError(`Could not load scan status: ${error?.message || 'request failed'}`);
             return null;
@@ -469,6 +488,7 @@ export default function App() {
           setActiveSourceLabel('Native Windows Bridge');
         }
       } else if (state === 'DISCONNECTED' || state === 'ERROR') {
+        bridgeClient.setScanningActive(false);
         setLastLiveDataAt(null);
         setIsScanning(false);
         setScannerState(state === 'ERROR' ? 'Error' : 'Offline');
@@ -491,6 +511,7 @@ export default function App() {
           applyAnalystOverrides(liveAps, db.getAnalystOverrides(projectId)),
           enterpriseAssetsRef.current);
         setAccessPoints(resolvedAps);
+        setBridgeNotice(current => current.startsWith('Refresh failed:') || current.startsWith('Windows WLAN was refreshed recently.') ? '' : current);
         // The incidents listener runs in the same SSE frame, before React
         // re-renders, so the ref is updated here to keep analyst-case pruning
         // aligned with this scan. Incidents are owned by the incidents
@@ -499,13 +520,18 @@ export default function App() {
         accessPointsRef.current = resolvedAps;
         db.saveAccessPoints(projectId, resolvedAps);
         setDataSourceProfile('LIVE_WINDOWS');
-        setActiveSourceLabel(`Windows WLAN bridge (${resolvedAps.length} access points)`);
+        const scanActive = bridgeClient.isScanningActive();
+        setActiveSourceLabel(scanActive
+          ? `Windows WLAN scan active (${resolvedAps.length} access points)`
+          : `Last Windows WLAN scan · ${resolvedAps.length} access points`);
         const count = resolvedAps.length;
         const log = db.appendLog({
           level: count > 0 ? 'SUCCESS' : 'INFO',
           source: 'BRIDGE_RX',
           message: count > 0
-            ? `Ingested ${count} live BSS entries from the Windows WLAN telemetry bridge.`
+            ? scanActive
+              ? `Ingested ${count} live BSS entries from the Windows WLAN telemetry bridge.`
+              : `Loaded ${count} last observed BSS entries from the Windows WLAN telemetry bridge.`
             : 'Windows bridge is connected; the WLAN scan cache currently contains no access points.',
         });
         setLogs((prev) => [log, ...prev]);
@@ -557,6 +583,7 @@ export default function App() {
       unsubDrifts();
       unsubClients();
       unsubScanStatus();
+      unsubRequestSuccess();
       bridgeClient.disconnect();
     };
   }, [bridgeClient, db, threatEngine, hydrateAssetsFromBridge]);
@@ -640,33 +667,77 @@ export default function App() {
 
   // Toggle Continuous Scan (Real Bridge Hardware vs Benchmark)
   const handleToggleScan = async () => {
+    if (scanCommandPendingRef.current) return;
     if (bridgeClient.getState() !== 'CONNECTED') {
       setBridgeNotice('Scanning requires the WinWiFi Windows bridge running on this PC. A hosted Gemini Builder preview cannot access your local Wi-Fi adapter.');
       setShowBridgeModal(true);
       return;
     }
+    const requestedState = !isScanning;
+    scanCommandPendingRef.current = true;
+    setScanCommandPending(true);
+    // Keep the shared UI state and the bridge polling gate in lockstep from
+    // the click itself. A start can accept SSE updates immediately; a stop
+    // prevents new live results from entering the UI while the command settles.
+    bridgeClient.setScanningActive(requestedState);
+    setIsScanning(requestedState);
+    setScannerState(requestedState ? 'Starting' : 'Paused');
+    setBridgeNotice('');
     try {
-      const result = isScanning
-        ? await bridgeClient.stopScan()
-        : await bridgeClient.startScan(selectedAdapterId || undefined);
+      const result = requestedState
+        ? await bridgeClient.startScan(selectedAdapterId || undefined)
+        : await bridgeClient.stopScan();
+      bridgeClient.setScanningActive(result.isScanning);
       setIsScanning(result.isScanning);
-      setBridgeNotice(result.message);
+      setScannerState(result.isScanning ? 'Idle' : 'Paused');
+      if (!result.isScanning && dataSourceProfileRef.current === 'LIVE_WINDOWS') {
+        setActiveSourceLabel('Windows WLAN scan stopped · showing the last observed networks');
+      }
+      setBridgeNotice('');
       const log = db.appendLog({ level: 'INFO', source: 'BRIDGE_CTRL', message: result.message });
       setLogs((prev) => [log, ...prev]);
     } catch (err: any) {
       const message = `Scan control failed: ${err?.message || 'unknown bridge error'}`;
+      const actual = await bridgeClient.getScanStatus().catch(() => null);
+      if (actual) {
+        bridgeClient.setScanningActive(Boolean(actual.isScanning));
+        setIsScanning(Boolean(actual.isScanning));
+        if (actual.state) setScannerState(actual.state);
+        setActiveSourceLabel(actual.isScanning
+          ? `Windows WLAN scan active (${accessPointsRef.current.length} access points)`
+          : 'Windows WLAN scan stopped · showing the last observed networks');
+      } else {
+        bridgeClient.setScanningActive(!requestedState);
+        setIsScanning(!requestedState);
+        setActiveSourceLabel(!requestedState
+          ? `Windows WLAN scan active (${accessPointsRef.current.length} access points)`
+          : 'Windows WLAN scan stopped · showing the last observed networks');
+      }
       setBridgeNotice(message);
       db.appendLog({ level: 'ERROR', source: 'BRIDGE_CTRL', message });
+    } finally {
+      scanCommandPendingRef.current = false;
+      setScanCommandPending(false);
     }
   };
 
-  // Immediate Hardware Scan Refresh
-  const handleRefreshScan = async () => {
+  // One guarded refresh path is shared by the toolbar, discovery view, and bridge settings.
+  const handleRefreshScan = async (): Promise<number | null | void> => {
+    if (refreshPendingRef.current) return null;
+    const cooldownMs = 11_000;
+    const elapsed = Date.now() - lastRefreshCompletedAtRef.current;
+    if (elapsed < cooldownMs) {
+      const seconds = Math.ceil((cooldownMs - elapsed) / 1000);
+      setBridgeNotice(`Windows WLAN was refreshed recently. Try again in ${seconds} seconds.`);
+      return null;
+    }
     if (bridgeClient.getState() !== 'CONNECTED') {
       setBridgeNotice('Refresh requires the local Windows bridge. Start the desktop app or import a capture file.');
       setShowBridgeModal(true);
-      return;
+      return null;
     }
+    refreshPendingRef.current = true;
+    setRefreshPending(true);
     try {
       const result = await bridgeClient.refreshScan(selectedAdapterId || undefined);
       const resolvedAps = applyAssetsToAccessPoints(
@@ -675,19 +746,27 @@ export default function App() {
       setAccessPoints(resolvedAps);
       setDataSourceProfile('LIVE_WINDOWS');
       setLastLiveDataAt(Date.now());
-      setScannerState('Idle');
-      setActiveSourceLabel(resolvedAps.length ? `Windows WLAN bridge (${resolvedAps.length} access points)` : 'Windows bridge connected; no WLAN observations returned');
+      setScannerState(bridgeClient.isScanningActive() ? 'Idle' : 'Paused');
+      setActiveSourceLabel(bridgeClient.isScanningActive()
+        ? `Windows WLAN scan active (${resolvedAps.length} access points)`
+        : `Last Windows WLAN scan · ${resolvedAps.length} access points`);
       if (resolvedAps.length) db.saveAccessPoints(currentProjectId, resolvedAps);
       const log = db.appendLog({
         level: result.count > 0 ? 'SUCCESS' : 'INFO', source: 'BRIDGE_REFRESH',
         message: `Windows WLAN refresh completed (${result.count} access points returned).`,
       });
       setLogs((prev) => [log, ...prev]);
-      setBridgeNotice(result.count > 0 ? `Refresh complete: ${result.count} access points found.` : 'Refresh completed; Windows returned no access points.');
+      lastRefreshCompletedAtRef.current = Date.now();
+      setBridgeNotice('');
+      return result.count;
     } catch (err: any) {
       const message = `Refresh failed: ${err?.message || 'unknown bridge error'}`;
       setBridgeNotice(message);
       db.appendLog({ level: 'ERROR', source: 'BRIDGE_REFRESH', message });
+      return;
+    } finally {
+      refreshPendingRef.current = false;
+      setRefreshPending(false);
     }
   };
 
@@ -1416,6 +1495,7 @@ export default function App() {
   };
 
   return (
+    <ScanActivityProvider active={isScanning}>
     <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
       isDarkMode ? 'bg-[#0b0d11] text-slate-100' : 'bg-[#eef0f6] text-slate-900'
     }`}>      {showStartupReadiness && <StartupReadinessOverlay
@@ -1438,11 +1518,12 @@ export default function App() {
         isDarkMode={isDarkMode}
         onToggleDarkMode={handleToggleDarkMode}
         dataSourceProfile={dataSourceProfile}
-        hasFreshLiveData={bridgeState === 'CONNECTED' && dataSourceProfile === 'LIVE_WINDOWS' && lastLiveDataAt !== null}
+        hasFreshLiveData={bridgeState === 'CONNECTED' && isScanning && dataSourceProfile === 'LIVE_WINDOWS' && lastLiveDataAt !== null}
         scannerState={scannerState}
         lastScanCompletedAt={lastLiveDataAt}
         activeSourceLabel={activeSourceLabel}
-        isScanning={isScanning}
+        scanCommandPending={scanCommandPending}
+        refreshPending={refreshPending}
         onToggleScan={handleToggleScan}
         onRefreshScan={handleRefreshScan}
         bridgeState={bridgeState}
@@ -1775,7 +1856,6 @@ export default function App() {
             incidents={incidents}
             securityChanges={securityChanges}
             uiMode={uiMode}
-            isScanning={isScanning}
             dataSourceProfile={dataSourceProfile}
             bridgeState={bridgeState}
             lastLiveDataAt={lastLiveDataAt}
@@ -1834,14 +1914,16 @@ export default function App() {
                 <span className="text-slate-400">Provenance:</span>
                 <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${
                   dataSourceProfile === 'LIVE_WINDOWS'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    ? isScanning
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                     : dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'IMPORTED'
                       ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
                       : dataSourceProfile === 'OFFLINE'
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                         : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                 }`}>
-                  {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE WINDOWS DATA'}
+                  {dataSourceProfile === 'LIVE_WINDOWS' && (isScanning ? 'LIVE WINDOWS SCAN' : 'LAST WINDOWS SCAN · STOPPED')}
                   {(dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'IMPORTED') && 'IMPORTED DATA'}
                   {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATA'}
                 </span>
@@ -1882,6 +1964,7 @@ export default function App() {
                 onOpenBridgeConfig={embeddedShell ? undefined : () => setShowBridgeModal(true)}
                 isDarkMode={isDarkMode}
                 connectedBssid={connectedBssid}
+                refreshPending={refreshPending}
               />
             )}
 
@@ -2139,9 +2222,20 @@ export default function App() {
           isOpen={showBridgeModal}
           onClose={() => setShowBridgeModal(false)}
           onConnectedDataReceived={handleRefreshScan}
+          refreshPending={refreshPending}
+          onScanActivityChange={(active) => {
+            bridgeClient.setScanningActive(active);
+            setIsScanning(active);
+            setScannerState(active ? 'Idle' : 'Paused');
+            setActiveSourceLabel(active
+              ? `Windows WLAN scan active (${accessPointsRef.current.length} access points)`
+              : 'Windows WLAN scan stopped · showing the last observed networks');
+            setBridgeNotice('');
+          }}
           isDarkMode={isDarkMode}
         />
       )}
     </div>
+    </ScanActivityProvider>
   );
 }

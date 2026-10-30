@@ -23,6 +23,7 @@ import {
   Database,
   FlaskConical
 } from 'lucide-react';
+import { useScanActive } from '../contexts/ScanActivityContext';
 
 interface NetworkDiscoveryProps {
   accessPoints: AccessPoint[];
@@ -33,6 +34,7 @@ interface NetworkDiscoveryProps {
   activeSourceLabel?: string;
   onOpenImport?: () => void;
   onRefreshScan?: () => void;
+  refreshPending?: boolean;
   onOpenBridgeConfig?: () => void;
   isDarkMode: boolean;
   connectedBssid?: string;
@@ -53,10 +55,12 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
   activeSourceLabel = 'Default',
   onOpenImport,
   onRefreshScan,
+  refreshPending = false,
   onOpenBridgeConfig,
   isDarkMode,
   connectedBssid,
 }) => {
+  const scanActive = useScanActive();
   const [searchTerm, setSearchTerm] = useState('');
   const [bandFilter, setBandFilter] = useState<string>('ALL');
   const [securityFilter, setSecurityFilter] = useState<string>('ALL');
@@ -133,9 +137,9 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
     switch (origin) {
       case 'LIVE_WINDOWS':
         return (
-          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide flex items-center gap-1">
-            <Radio className="w-2.5 h-2.5" />
-            LIVE
+          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wide flex items-center gap-1 ${scanActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'}`}>
+            <Radio className={`w-2.5 h-2.5 ${scanActive ? 'animate-pulse' : ''}`} />
+            {scanActive ? 'LIVE' : 'LAST SCAN'}
           </span>
         );
       case 'IMPORTED':
@@ -225,7 +229,9 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
       {/* Active Data Source & Provenance Ribbon */}
       <div className={`px-4 py-2.5 border-b flex flex-wrap items-center justify-between gap-2 text-xs ${
         dataSourceProfile === 'LIVE_WINDOWS'
-          ? isDarkMode ? 'bg-emerald-950/30 border-emerald-900/50 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          ? scanActive
+            ? isDarkMode ? 'bg-emerald-950/30 border-emerald-900/50 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : isDarkMode ? 'bg-amber-950/30 border-amber-900/50 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800'
           : dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'REAL_NETSH' || dataSourceProfile === 'IMPORTED'
             ? isDarkMode ? 'bg-cyan-950/30 border-cyan-900/50 text-cyan-300' : 'bg-cyan-50 border-cyan-200 text-cyan-800'
             : dataSourceProfile === 'OFFLINE'
@@ -233,7 +239,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
               : isDarkMode ? 'bg-purple-950/30 border-purple-900/50 text-purple-300' : 'bg-purple-50 border-purple-200 text-purple-800'
       }`}>
         <div className="flex flex-wrap items-center gap-2.5">
-          {dataSourceProfile === 'LIVE_WINDOWS' && <Radio className="w-4 h-4 text-emerald-400 shrink-0 animate-pulse" />}
+          {dataSourceProfile === 'LIVE_WINDOWS' && <Radio className={`w-4 h-4 shrink-0 ${scanActive ? 'text-emerald-400 animate-pulse' : 'text-amber-300'}`} />}
           {(dataSourceProfile === 'REAL_PCAP' || dataSourceProfile === 'IMPORTED') && <HardDrive className="w-4 h-4 text-cyan-400 shrink-0" />}
           {dataSourceProfile === 'REAL_NETSH' && <Terminal className="w-4 h-4 text-cyan-400 shrink-0" />}
           {dataSourceProfile === 'OFFLINE' && <Database className="w-4 h-4 text-amber-400 shrink-0" />}
@@ -241,7 +247,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
           <div>
             <div className="font-bold flex items-center gap-2">
               <span>
-                {dataSourceProfile === 'LIVE_WINDOWS' && 'LIVE WINDOWS DATA (Native WLAN bridge)'}
+                {dataSourceProfile === 'LIVE_WINDOWS' && (scanActive ? 'LIVE WINDOWS SCAN (Native WLAN bridge)' : 'LAST WINDOWS SCAN · STOPPED')}
                 {dataSourceProfile === 'REAL_PCAP' && 'IMPORTED DATA (Binary PCAP / PCAPNG Dissection)'}
                 {dataSourceProfile === 'REAL_NETSH' && 'IMPORTED DATA (Windows Netsh CLI Acquisition)'}
                 {dataSourceProfile === 'OFFLINE' && 'OFFLINE DATA (Local Project SQLite Database)'}
@@ -251,7 +257,9 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
               </span>
             </div>
             <div className="text-[11px] opacity-80 mt-0.5">
-              Source: {activeSourceLabel} • Displayed observations are available to analysis engines
+              Source: {activeSourceLabel} • {dataSourceProfile === 'LIVE_WINDOWS'
+                ? scanActive ? 'New Windows observations are arriving while scanning is active.' : 'Showing the last Windows observations; no continuous scan is running.'
+                : 'These records are not being updated by the Windows WLAN scanner.'}
             </div>
           </div>
         </div>
@@ -261,6 +269,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
           {onRefreshScan && (
             <button
               onClick={onRefreshScan}
+              disabled={refreshPending}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold border transition-colors shadow-xs ${
                 isDarkMode 
                   ? 'bg-blue-600/20 border-blue-500/40 text-blue-300 hover:bg-blue-600/30' 
@@ -269,7 +278,7 @@ export const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({
               title="Trigger immediate hardware scan refresh"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Refresh Hardware Scan</span>
+              <span>{refreshPending ? 'Refreshing…' : 'Refresh Hardware Scan'}</span>
             </button>
           )}
 

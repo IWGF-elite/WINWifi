@@ -7,8 +7,10 @@ import { CommandCenterDashboard } from '../src/components/CommandCenterDashboard
 import { WalkModePanel, crossedSignalThreshold } from '../src/components/WalkModePanel';
 import { NetworkDiscovery } from '../src/components/NetworkDiscovery';
 import { ClientObserver } from '../src/components/ClientObserver';
+import { AlertsCenter } from '../src/components/AlertsCenter';
 import { formatScanAge } from '../src/components/LanDeviceInventory';
 import { TitleBar } from '../src/components/TitleBar';
+import { ScanActivityProvider } from '../src/contexts/ScanActivityContext';
 import { StartupReadinessOverlay } from '../src/components/StartupReadinessOverlay';
 import { ReportingCenter, escapeReportHtml } from '../src/components/ReportingCenter';
 import { PcapService } from '../src/services/pcapParser';
@@ -587,9 +589,12 @@ runTest('T13: SSE Failure Falls Back and Reconnects', () => {
       return 123 as any;
     };
     client.state = 'CONNECTED';
+    client.setScanningActive(true);
     client.initEventSource();
     FakeEventSource.instances[0].onerror?.(new Event('error'));
     if (!FakeEventSource.instances[0].closed || !client.pollTimer) throw new Error('SSE failure did not close the stream and start polling fallback');
+    client.setScanningActive(false);
+    if (client.pollTimer) throw new Error('Fallback polling continued after the scan was stopped');
     const retry = retryCallbacks.find(item => item.delay === 10_000);
     if (!retry) throw new Error('SSE retry was not scheduled for 10 seconds');
     retry.callback();
@@ -1866,6 +1871,7 @@ runTest('T29: Polling Fallback Re-fetches Incidents And Drift Independently', ()
     let incidentCalls = 0;
     let driftCalls = 0;
     client.state = 'CONNECTED';
+    client.setScanningActive(true);
     client.getNetworks = async () => [];
     // The counter is incremented inside the async body, which runs synchronously
     // up to its first await, so the assertion below needs no timer pump.
@@ -1915,6 +1921,7 @@ runTest('T29: Polling Fallback Re-fetches Incidents And Drift Independently', ()
       throw new Error('App.tsx still reconciles incidents with a hardcoded empty findings array');
     }
   } finally {
+    client.setScanningActive(false);
     (globalThis as any).setInterval = nativeSetInterval;
     client.stopPolling();
   }
@@ -1957,14 +1964,32 @@ runTest('T30: Native Configuration Drift Reaches The Dashboard', () => {
     }
 
     const received: { value: any[] | null } = { value: null };
+    const networkSnapshots: any[][] = [];
+    const networkSnapshotCount = () => networkSnapshots.length;
     const unsubscribe = client.onDrifts((value: any[]) => { received.value = value; });
+    const unsubscribeNetworks = client.onNetworks((value: any[]) => networkSnapshots.push(value));
     client.initEventSource();
 
     const scanResult = listeners.get('scan_result');
     if (!scanResult) throw new Error('The bridge client never subscribed to scan_result events');
-    scanResult({ data: JSON.stringify({ accessPoints: [], incidents: [], drifts: [drift] }) });
+    const ap = { bssid: '00:11:22:33:44:55', ssid: 'Office', channel: 6 };
+    scanResult({ data: JSON.stringify({ accessPoints: [ap], incidents: [], drifts: [drift] }) });
     if (!received.value || received.value.length !== 1 || received.value[0].type !== 'channel_shift') {
       throw new Error('An SSE scan_result payload carrying drifts was not delivered to drift listeners');
+    }
+    if (networkSnapshotCount() !== 0) {
+      throw new Error('A delayed scan_result repainted network data after scanning was stopped');
+    }
+
+    client.setScanningActive(true);
+    scanResult({ data: JSON.stringify({ accessPoints: [ap], incidents: [], drifts: [drift] }) });
+    if (networkSnapshotCount() !== 1 || networkSnapshots[0][0].bssid !== ap.bssid) {
+      throw new Error('Active scan_result network data was not delivered while scanning');
+    }
+    client.setScanningActive(false);
+    scanResult({ data: JSON.stringify({ accessPoints: [ap], incidents: [], drifts: [drift] }) });
+    if (networkSnapshotCount() !== 1) {
+      throw new Error('A scan_result repainted network data after Stop Scan was pressed');
     }
 
     received.value = null;
@@ -1974,6 +1999,7 @@ runTest('T30: Native Configuration Drift Reaches The Dashboard', () => {
     }
 
     unsubscribe();
+    unsubscribeNetworks();
     received.value = null;
     scanResult({ data: JSON.stringify({ accessPoints: [], incidents: [], drifts: [drift] }) });
     if (received.value !== null) {
@@ -2072,7 +2098,7 @@ runTest('T32: Command Center Surfaces Networks Awaiting Scope Review', () => {
   } as any;
   const markup = renderToStaticMarkup(createElement(CommandCenterDashboard, {
     accessPoints: [ap], incidents: [], securityChanges: [], uiMode: 'beginner',
-    isScanning: true, onNavigate: () => undefined, onSelectAP: () => undefined
+    onNavigate: () => undefined, onSelectAP: () => undefined
   }));
   if (!markup.includes('1 Observed Networks Await Scope Review')) {
     throw new Error('Pending live networks do not appear in the Command Center attention list');
@@ -2090,7 +2116,7 @@ runTest('T33: Walk Mode Never Presents Cached RSSI As Live When Bridge Is Offlin
   if (markup.includes('Live signal') || markup.includes('-83')) {
     throw new Error('Walk Mode displays an old cached RSSI as a live reading while the bridge is offline');
   }
-  if (!markup.includes('Connect the Windows bridge to use live signal readings.')) {
+  if (!markup.includes('Connect the Windows bridge to use signal readings.')) {
     throw new Error('Walk Mode does not explain why live readings are unavailable');
   }
 });
@@ -2157,7 +2183,7 @@ runTest('T37: Header Actions Stay Above Floating Page Content', () => {
     isDarkMode: true, onToggleDarkMode: () => undefined,
     dataSourceProfile: 'LIVE_WINDOWS', hasFreshLiveData: true,
     scannerState: 'Scanning', lastScanCompletedAt: Date.now(),
-    activeSourceLabel: 'Windows WLAN', isScanning: false,
+    activeSourceLabel: 'Windows WLAN',
     onToggleScan: () => undefined, onRefreshScan: () => undefined,
     bridgeState: 'CONNECTED', onOpenBridgeConfig: () => undefined,
     projectName: 'Assessment', onOpenReport: () => undefined,
@@ -2178,9 +2204,68 @@ runTest('T39: Walk Mode Beep Threshold Crossings Are Directional And Exposed', (
     throw new Error('Signal beep does not fire only when a real reading rises through its threshold.');
   }
   const ap = { bssid: '00:11:22:33:44:55', ssid: 'Live AP', rssi: -70, channel: 6, band: '2.4 GHz', dataSourceOrigin: 'LIVE_WINDOWS', isActiveInCurrentScan: true } as any;
-  const markup = renderToStaticMarkup(createElement(WalkModePanel, { accessPoints: [ap], bridgeConnected: true }));
+  const markup = renderToStaticMarkup(createElement(ScanActivityProvider, { active: true },
+    createElement(WalkModePanel, { accessPoints: [ap], bridgeConnected: true })));
   if (!markup.includes('Enable signal beep') || !markup.includes('Signal threshold for beep alert') || !markup.includes('Beep when signal reaches')) {
     throw new Error('Walk Mode does not expose an operable beep toggle and labeled threshold control.');
+  }
+});
+
+runTest('T41: Stop State Is Shared Across Scan Status Surfaces', () => {
+  const ap = {
+    bssid: '00:11:22:33:44:55', ssid: 'Previously observed', rssi: -70,
+    channel: 6, band: '2.4 GHz', channelWidthMhz: 20, security: 'WPA2-PSK',
+    cipher: 'CCMP', wpsEnabled: false, pmfRequired: false, vendor: 'Unknown',
+    beaconCount: 3, clients: [], dataSourceOrigin: 'LIVE_WINDOWS', isActiveInCurrentScan: true,
+    securityScore: 70, riskScore: 30, issues: [], firstSeen: '2026-10-29T00:00:00Z', lastSeen: '2026-10-29T00:00:00Z'
+  } as any;
+  const markup = renderToStaticMarkup(createElement(ScanActivityProvider, { active: false }, createElement('div', null,
+    createElement(TitleBar, {
+      isDarkMode: true, onToggleDarkMode: () => undefined, dataSourceProfile: 'LIVE_WINDOWS',
+      hasFreshLiveData: false, scannerState: 'Paused', lastScanCompletedAt: Date.now(), activeSourceLabel: 'Last Windows scan',
+      onToggleScan: () => undefined, onRefreshScan: () => undefined, bridgeState: 'CONNECTED',
+      scanCommandPending: true,
+      projectName: 'Assessment', onOpenReport: () => undefined, onOpenSelfTest: () => undefined,
+      onOpenImport: () => undefined, onOpenArchitecture: () => undefined, adapters: [], selectedAdapterId: '',
+      onSelectAdapter: () => undefined, onToggleFullscreen: () => undefined
+    }),
+    createElement(NetworkDiscovery, {
+      accessPoints: [ap], selectedBssid: null, onSelectAp: () => undefined, onCaptureHandshake: () => undefined,
+      dataSourceProfile: 'LIVE_WINDOWS', activeSourceLabel: 'Last Windows scan', isDarkMode: true
+    }),
+    createElement(CommandCenterDashboard, {
+      accessPoints: [ap], incidents: [], securityChanges: [], uiMode: 'beginner', dataSourceProfile: 'LIVE_WINDOWS',
+      bridgeState: 'CONNECTED', lastLiveDataAt: Date.now(), onNavigate: () => undefined, onSelectAP: () => undefined
+    }),
+    createElement(AlertsCenter, {
+      alerts: [], openInvestigationsCount: 0, operatorName: 'Auditor', canAcknowledge: true,
+      liveObservationCount: 1, alertEligibleObservationCount: 0, onAcknowledge: async () => undefined
+    }),
+    createElement(WalkModePanel, { accessPoints: [ap], bridgeConnected: true })
+  )));
+  if (!markup.includes('SCAN STOPPED') || !markup.includes('LAST WINDOWS SCAN · STOPPED') || !markup.includes('Scan Paused')) {
+    throw new Error('A scan-aware screen did not reflect the single stopped state');
+  }
+  if (!markup.includes('Stopping…')) {
+    throw new Error('The Stop Scan button did not show the stop action while its command was pending');
+  }
+  const walkMarkup = renderToStaticMarkup(createElement(ScanActivityProvider, { active: false },
+    createElement(WalkModePanel, { accessPoints: [ap], bridgeConnected: true })));
+  if (markup.includes('LIVE WINDOWS DATA') || markup.includes('>LIVE</span>') || walkMarkup.includes('Live signal') || walkMarkup.includes('>-70')) {
+    throw new Error(`Stopped state still looks live (badge=${markup.includes('LIVE WINDOWS DATA') || markup.includes('>LIVE</span>')}, cachedWalkSignal=${walkMarkup.includes('Live signal') || walkMarkup.includes('>-70')})`);
+  }
+  if (markup.includes('1 live access point') || !markup.includes('1 last observed access point is visible')) {
+    throw new Error('Alerts still labels retained observations as live after the scan stops');
+  }
+  const startingMarkup = renderToStaticMarkup(createElement(ScanActivityProvider, { active: true }, createElement(TitleBar, {
+    isDarkMode: true, onToggleDarkMode: () => undefined, dataSourceProfile: 'LIVE_WINDOWS', scanCommandPending: true,
+    scannerState: 'Starting', lastScanCompletedAt: null, activeSourceLabel: 'Starting scan', onToggleScan: () => undefined,
+    onRefreshScan: () => undefined, bridgeState: 'CONNECTED', projectName: 'Assessment', onOpenReport: () => undefined,
+    onOpenSelfTest: () => undefined, onOpenImport: () => undefined, onOpenArchitecture: () => undefined, adapters: [],
+    selectedAdapterId: '', onSelectAdapter: () => undefined, onToggleFullscreen: () => undefined
+  })));
+  if (!startingMarkup.includes('Starting…')) {
+    throw new Error('The Start Scan button did not show the start action while its command was pending');
   }
 });
 

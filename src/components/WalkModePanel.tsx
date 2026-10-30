@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessPoint, WalkSignalReading } from '../types';
 import { NativeBridgeClient } from '../services/bridgeClient';
+import { useScanActive } from '../contexts/ScanActivityContext';
 
 interface WalkModePanelProps {
   accessPoints: AccessPoint[];
@@ -15,12 +16,13 @@ export const crossedSignalThreshold = (previousDbm: number | null, currentDbm: n
   previousDbm !== null && currentDbm !== null && previousDbm < thresholdDbm && currentDbm >= thresholdDbm;
 
 export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, bridgeConnected }) => {
+  const scanActive = useScanActive();
   const bridge = useMemo(() => NativeBridgeClient.getInstance(), []);
-  const liveAccessPoints = useMemo(() => bridgeConnected
+  const liveAccessPoints = useMemo(() => bridgeConnected && scanActive
     ? accessPoints
       .filter(ap => ap.dataSourceOrigin === 'LIVE_WINDOWS' && ap.isActiveInCurrentScan !== false && ap.bssid)
       .sort((a, b) => a.ssid.localeCompare(b.ssid) || a.bssid.localeCompare(b.bssid))
-    : [], [accessPoints, bridgeConnected]);
+    : [], [accessPoints, bridgeConnected, scanActive]);
   const [selectedBssid, setSelectedBssid] = useState('');
   const [locationName, setLocationName] = useState('');
   const [minimumSignal, setMinimumSignal] = useState(-67);
@@ -67,6 +69,13 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
 
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => {
+    if (scanActive) return;
+    setBeepEnabled(false);
+    previousRef.current = { bssid: '', dbm: null };
+    void audioRef.current?.close().catch(() => undefined);
+    audioRef.current = null;
+  }, [scanActive]);
+  useEffect(() => {
     if (!selectedAp) return;
     setSelectedBssid(selectedAp.bssid);
   }, [selectedAp?.bssid]);
@@ -82,6 +91,7 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
   }, [beepEnabled, dbm, minimumSignal, playSignalBeep, selectedAp]);
 
   const toggleBeep = async () => {
+    if (!scanActive) return;
     if (beepEnabled) {
       setBeepEnabled(false);
       await audioRef.current?.close().catch(() => undefined);
@@ -106,7 +116,7 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
   };
 
   const recordLocation = async () => {
-    if (!bridgeConnected || !selectedAp || !locationName.trim()) return;
+    if (!bridgeConnected || !scanActive || !selectedAp || !locationName.trim()) return;
     setBusy(true); setError(''); setMessage('');
     try {
       const reading = await bridge.recordWalkSignalReading(selectedAp.bssid, locationName.trim());
@@ -135,10 +145,11 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
 
   return <div className="mx-auto w-full max-w-[1280px] space-y-4 text-slate-100">
     <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <div><h1 className="text-lg font-bold">Signal Survey</h1><p className="mt-1 text-xs text-slate-400">Track an access point’s live signal and save readings at named locations.</p></div>
-      <div className="flex flex-wrap gap-2"><button onClick={() => void reload()} disabled={!bridgeConnected || busy} className="whitespace-nowrap rounded-lg border border-slate-700 px-3 py-2 text-xs hover:bg-slate-800 disabled:opacity-50">Refresh locations</button><button onClick={() => void toggleBeep()} disabled={!selectedAp || !bridgeConnected} className={`whitespace-nowrap rounded-lg border px-3 py-2 text-xs font-semibold ${beepEnabled ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200' : 'border-slate-700 hover:bg-slate-800'}`}>{beepEnabled ? 'Signal beep on' : 'Enable signal beep'}</button></div>
+      <div><h1 className="text-lg font-bold">Signal Survey</h1><p className="mt-1 text-xs text-slate-400">Track access-point signal and save readings at named locations.</p></div>
+      <div className="flex flex-wrap gap-2"><button onClick={() => void reload()} disabled={!bridgeConnected || busy} className="whitespace-nowrap rounded-lg border border-slate-700 px-3 py-2 text-xs hover:bg-slate-800 disabled:opacity-50">Refresh locations</button><button onClick={() => void toggleBeep()} disabled={!selectedAp || !bridgeConnected || !scanActive} className={`whitespace-nowrap rounded-lg border px-3 py-2 text-xs font-semibold ${beepEnabled ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200' : 'border-slate-700 hover:bg-slate-800'}`}>{beepEnabled ? 'Signal beep on' : 'Enable signal beep'}</button></div>
     </header>
-    {!bridgeConnected && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">Connect the Windows bridge to use live signal readings.</p>}
+    {!bridgeConnected && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">Connect the Windows bridge to use signal readings.</p>}
+    {bridgeConnected && !scanActive && <p role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">Continuous scan stopped. Signal readings and location recording are paused until scanning is started.</p>}
     {error && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</p>}
     {message && <p role="status" className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{message}</p>}
     <section className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
@@ -147,9 +158,9 @@ export const WalkModePanel: React.FC<WalkModePanelProps> = ({ accessPoints, brid
         {selectedAp ? <><div className="flex flex-wrap items-end justify-between gap-4"><div><div className="text-[11px] uppercase tracking-wide text-slate-500">Live signal</div><div className="mt-1 text-4xl font-black tabular-nums">{dbm ?? '—'}<span className="ml-1 text-base font-medium text-slate-400">dBm</span></div><div className="mt-1 text-sm font-semibold text-cyan-300">{qualityLabel(dbm)}</div></div><div className="flex h-14 items-end gap-1.5" aria-label={`Signal ${qualityLabel(dbm)}`}>{[0, 1, 2, 3].map(index => <span key={index} className={`w-7 rounded-t ${index < bars && dbm !== null ? qualityColor(dbm) : 'bg-slate-700'}`} style={{ height: `${16 + index * 10}px` }} />)}</div></div>
           <div className="text-[11px] text-slate-500">{selectedAp.ssid || 'Hidden network'} · {selectedAp.bssid} · Ch {selectedAp.channel} · {selectedAp.band}</div>
           <label className="block min-w-0 text-xs text-slate-400"><span className="block leading-5">Beep when signal reaches <strong className="font-semibold text-slate-200">{minimumSignal} dBm</strong></span><input aria-label="Signal threshold for beep alert" type="range" min="-85" max="-45" value={minimumSignal} onChange={event => setMinimumSignal(Number(event.target.value))} className="mt-2 block w-full accent-cyan-400" /></label>
-        </> : <p className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-400">No current live WLAN scan reading is available. Turn on the Wi-Fi radio and refresh the scan.</p>}
+        </> : <p className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-400">No active Windows WLAN scan reading is available. Start scanning to resume signal monitoring.</p>}
       </div>
-      <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4"><h2 className="text-sm font-bold">Save a named location</h2><p className="text-xs text-slate-400">Each saved point uses the current Windows scan reading. Enter a room or place name, then record while standing there.</p><label className="block space-y-2 text-xs text-slate-400">Location name<input value={locationName} onChange={event => setLocationName(event.target.value)} maxLength={128} placeholder="e.g. Conference room" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600" /></label><button onClick={() => void recordLocation()} disabled={!bridgeConnected || !selectedAp || !locationName.trim() || busy} className="w-full rounded-lg bg-cyan-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50">{busy ? 'Saving…' : 'Record current signal'}</button></div>
+      <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4"><h2 className="text-sm font-bold">Save a named location</h2><p className="text-xs text-slate-400">Each saved point uses the current Windows scan reading. Enter a room or place name, then record while standing there.</p><label className="block space-y-2 text-xs text-slate-400">Location name<input value={locationName} onChange={event => setLocationName(event.target.value)} maxLength={128} placeholder="e.g. Conference room" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600" /></label><button onClick={() => void recordLocation()} disabled={!bridgeConnected || !scanActive || !selectedAp || !locationName.trim() || busy} className="w-full rounded-lg bg-cyan-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50">{busy ? 'Saving…' : 'Record current signal'}</button></div>
     </section>
     <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-sm font-bold">Signal by named location</h2><p className="mt-1 text-[11px] text-slate-500">Average of real saved readings for the selected access point. Locations are labels, not GPS coordinates.</p></div><span className="text-xs text-slate-500">{locations.length} locations</span></div>
       {!locations.length ? <p className="rounded-lg border border-dashed border-slate-700 p-4 text-sm text-slate-500">No signal measurements have been saved for this access point. Record a reading at a named location to begin.</p> : <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{locations.map(point => <article key={point.name} className="rounded-lg border border-slate-800 bg-slate-950/70 p-3"><div className="flex items-center justify-between gap-2"><h3 className="truncate text-sm font-semibold">{point.name}</h3><strong className="tabular-nums text-cyan-300">{point.average} dBm</strong></div><div className="mt-2 h-2 overflow-hidden rounded bg-slate-800"><div className={`h-full rounded ${qualityColor(point.average)}`} style={{ width: `${Math.max(0, Math.min(100, (point.average + 100) * 2))}%` }} /></div><p className="mt-2 text-[10px] text-slate-500">{point.count} real sample{point.count === 1 ? '' : 's'} · latest {new Date(point.latest).toLocaleString()}</p></article>)}</div>}

@@ -24,6 +24,7 @@ import {
   CapabilityStatus
 } from '../types';
 import { CapabilityMatrixService } from '../services/capabilityMatrix';
+import { useScanActive } from '../contexts/ScanActivityContext';
 
 interface HardwareDiagnosticsProps {
   adapter?: WifiAdapter;
@@ -44,6 +45,7 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
   onOpenBridgeConfig,
   onOpenImport
 }) => {
+  const scanActive = useScanActive();
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [copiedCommandIdx, setCopiedCommandIdx] = useState<number | null>(null);
@@ -146,7 +148,7 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
             </div>
             <div>
               <div className="text-xs text-slate-500 font-mono">
-                {bridgeState === 'CONNECTED' ? 'ACTIVE WINDOWS WIRELESS ADAPTER' : 'LIVE DATA UNAVAILABLE'}
+                {bridgeState === 'CONNECTED' ? (scanActive ? 'WINDOWS WLAN SCAN ACTIVE' : 'WINDOWS WLAN SCAN STOPPED') : 'WINDOWS BRIDGE UNAVAILABLE'}
               </div>
               <h1 className="text-lg font-bold text-slate-100 mt-0.5">
                 {bridgeState === 'CONNECTED'

@@ -96,7 +96,7 @@ export const HandshakeManager: React.FC<HandshakeManagerProps> = ({
           <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
             {isLive ? (
               <>
-                You are currently in <strong>Live Windows Mode</strong>. Native Windows WLAN APIs handle WPA key negotiation internally and do not expose raw EAPOL packets.
+                This data comes from a Windows WLAN scan. Native Windows WLAN APIs handle WPA key negotiation internally and do not expose raw EAPOL packets.
                 To audit handshakes for detected networks, capture 802.11 monitor traffic via a monitor-mode capture tool such as Npcap and import the capture file.
               </>
             ) : (
