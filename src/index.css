@@ -64,7 +64,7 @@
 
 /* Shared dark visual system: near-black canvas, floating charcoal surfaces,
    one cyan-to-blue-violet action accent, and muted but legible typography.
-   Semantic green/amber/red status colors stay distinct. */
+   Legacy green accents share the same cool palette so tabs stay consistent. */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --color-slate-50: #f5f5f7;
@@ -149,6 +149,20 @@
   --color-violet-800: var(--color-blue-800);
   --color-violet-900: var(--color-blue-900);
   --color-violet-950: var(--color-blue-950);
+
+  /* The older emerald utilities were used as a second accent across many
+     screens. Re-map them to the product accent so the dark theme is cohesive. */
+  --color-emerald-50: var(--color-blue-50);
+  --color-emerald-100: var(--color-blue-100);
+  --color-emerald-200: var(--color-blue-200);
+  --color-emerald-300: var(--color-blue-300);
+  --color-emerald-400: var(--color-blue-400);
+  --color-emerald-500: var(--color-blue-500);
+  --color-emerald-600: var(--color-blue-600);
+  --color-emerald-700: var(--color-blue-700);
+  --color-emerald-800: var(--color-blue-800);
+  --color-emerald-900: var(--color-blue-900);
+  --color-emerald-950: var(--color-blue-950);
 
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;

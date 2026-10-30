@@ -440,7 +440,12 @@ namespace WinWiFi.Services
                 try
                 {
                     var context = await _listener.GetContextAsync();
-                    _ = ProcessRequestAsync(context);
+                    // Async handlers still execute synchronously until their first
+                    // incomplete await. Several routes perform native Windows/Npcap
+                    // capability checks before that point, so invoking the handler
+                    // here can pin this single accept loop and leave unrelated
+                    // requests queued until the browser's short timeout expires.
+                    _ = Task.Run(() => ProcessRequestSafelyAsync(context));
                 }
                 catch (HttpListenerException) when (token.IsCancellationRequested)
                 {
@@ -451,6 +456,19 @@ namespace WinWiFi.Services
                     if (token.IsCancellationRequested) break;
                     Console.WriteLine($"[HttpBridgeServer] Listener loop error: {ex.Message}");
                 }
+            }
+        }
+
+        private async Task ProcessRequestSafelyAsync(HttpListenerContext context)
+        {
+            try
+            {
+                await ProcessRequestAsync(context).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HttpBridgeServer] Request processing failed: {ex.Message}");
+                try { context.Response.Close(); } catch { }
             }
         }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { 
   AccessPoint, 
   ClientDevice,
@@ -152,6 +152,13 @@ export default function App() {
   // Active Navigation Tab & Filter Parameter
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [tabFilterParam, setTabFilterParam] = useState<string>('');
+  const mainContentRef = useRef<HTMLElement | null>(null);
+
+  // Each tab owns a fresh view, so navigation should also start its shared
+  // content scroller at the top instead of inheriting the previous tab's offset.
+  useLayoutEffect(() => {
+    if (mainContentRef.current) mainContentRef.current.scrollTop = 0;
+  }, [activeTab]);
 
   // Data Source Profile & Ingestion Status
   const [dataSourceProfile, setDataSourceProfile] = useState<DataSourceProfile>('OFFLINE');
@@ -1587,7 +1594,7 @@ export default function App() {
       </div>
 
       {/* Main Content View */}
-      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 lg:p-4 max-w-[1440px] w-full mx-auto space-y-4">
+      <main ref={mainContentRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 lg:p-4 max-w-[1440px] w-full mx-auto space-y-4">
         <div key={activeTab} className="winwifi-tab-transition">
         {/* TAB 1: Command Center Dashboard */}
         {activeTab === 'dashboard' && (
