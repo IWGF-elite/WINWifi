@@ -152,7 +152,7 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
               </div>
               <h1 className="text-lg font-bold text-slate-100 mt-0.5">
                 {bridgeState === 'CONNECTED'
-                  ? bridgeStatus?.activeAdapterName || 'Windows NDIS Wireless Adapter'
+                  ? adapter?.name || bridgeStatus?.activeAdapterName || 'No Windows Wi-Fi adapter selected'
                   : dataSourceProfile === 'REAL_PCAP'
                     ? 'Imported 802.11 Capture'
                     : 'Windows network data unavailable'}
@@ -160,7 +160,7 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
               <p className="text-xs text-slate-400 mt-0.5">
                 {bridgeState === 'CONNECTED' ? (
                   <>
-                    Active Adapter ID: <span className="font-mono text-slate-200">{bridgeStatus?.activeAdapterId || 'Default'}</span> • 
+                    Adapter ID: <span className="font-mono text-slate-200">{adapter?.id || bridgeStatus?.activeAdapterId || 'Not available'}</span> •
                     Platform: <span className="text-slate-200">{bridgeStatus?.platform || 'Windows 64-bit'}</span> • 
                     Cycles: <span className="text-emerald-400 font-semibold">{bridgeStatus?.scanCyclesCompleted || 0}</span>
                   </>
@@ -201,6 +201,50 @@ export const HardwareDiagnostics: React.FC<HardwareDiagnosticsProps> = ({
           </div>
         </div>
       </div>
+
+      {bridgeState === 'CONNECTED' && (
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5" aria-label="Selected adapter capabilities">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-bold text-slate-100">Selected adapter capabilities</h2>
+              <p className="mt-1 text-xs text-slate-400">Results are read from the selected Windows adapter and its current driver.</p>
+            </div>
+            <span className="rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-[10px] font-semibold text-slate-300">
+              {adapter?.status || 'Status not reported'}
+            </span>
+          </div>
+          {!adapter ? (
+            <p className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-xs text-amber-200">
+              Windows did not report a selectable Wi-Fi adapter. Adapter-dependent features are unavailable until one is detected.
+            </p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg bg-slate-800/70 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Wi-Fi scan</p>
+                <p className="mt-1 text-sm font-semibold text-slate-100">Windows WLAN</p>
+                <p className="mt-1 text-[11px] text-slate-400">Uses the selected adapter when its radio is enabled.</p>
+              </div>
+              <div className="rounded-lg bg-slate-800/70 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Supported bands</p>
+                <p className="mt-1 text-sm font-semibold text-slate-100">
+                  {adapter.supportedBands?.length ? adapter.supportedBands.join(' · ') : 'Not reported'}
+                </p>
+                {!adapter.supportedBands?.length && <p className="mt-1 text-[11px] text-slate-400">Windows did not provide band details for this adapter.</p>}
+              </div>
+              <div className="rounded-lg bg-slate-800/70 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Passive monitor capture</p>
+                <p className={`mt-1 text-sm font-semibold ${adapter.monitorModeSupported ? 'text-emerald-300' : 'text-amber-200'}`}>
+                  {adapter.monitorModeSupported ? 'Available' : 'Unavailable on this setup'}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {adapter.monitorModeReason || 'No monitor-mode result was reported for this adapter.'}
+                </p>
+              </div>
+            </div>
+          )}
+          <p className="mt-3 text-[11px] text-slate-500">Packet injection is disabled. Imported capture analysis does not depend on monitor-mode support.</p>
+        </section>
+      )}
 
       {/* Primary Capability Matrix Section */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">

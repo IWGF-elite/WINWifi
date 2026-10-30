@@ -123,6 +123,7 @@ namespace WinWiFi.Models
         public string Chipset { get; set; } = "Unknown";
         public string DriverVersion { get; set; } = string.Empty;
         public bool MonitorModeSupported { get; set; }
+        public string MonitorModeReason { get; set; } = string.Empty;
         public bool PacketInjectionSupported { get; set; }
         public List<string> SupportedBands { get; set; } = new();
         public int CurrentChannel { get; set; }

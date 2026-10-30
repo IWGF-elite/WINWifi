@@ -207,6 +207,7 @@ namespace WinWiFi.Services
                                         Status = info.isState.ToString().Replace("wlan_interface_state_", ""),
                                         SupportedBands = new List<string>(),
                                         MonitorModeSupported = monitor.MonitorModeSupported,
+                                        MonitorModeReason = monitor.Reason,
                                         PacketInjectionSupported = false,
                                         CurrentChannel = 0,
                                         IsChannelHopping = false,
@@ -1153,6 +1154,7 @@ namespace WinWiFi.Services
                         Status = stateMatch.Success ? stateMatch.Groups[1].Value.Trim() : "Ready",
                         SupportedBands = new List<string>(),
                         MonitorModeSupported = false,
+                        MonitorModeReason = "Windows WLAN could not query monitor-mode support for this adapter.",
                         PacketInjectionSupported = false,
                         CurrentChannel = 0,
                         TxPowerDbm = 0

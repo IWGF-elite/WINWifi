@@ -2134,7 +2134,7 @@ runTest('T34: Network Grid Preserves Offline Provenance And Hides Uncaptured Cou
   const markup = renderToStaticMarkup(createElement(NetworkDiscovery, {
     accessPoints: [ap], selectedBssid: null, onSelectAp: () => undefined,
     onCaptureHandshake: () => undefined, dataSourceProfile: 'OFFLINE',
-    activeSourceLabel: 'Offline data', isDarkMode: true
+    activeSourceLabel: 'Offline data', isDarkMode: true, uiMode: 'expert'
   }));
   if (!markup.includes('OFFLINE') || markup.includes('>LIVE<')) {
     throw new Error('A cached WLAN observation is still labeled as live in offline mode');

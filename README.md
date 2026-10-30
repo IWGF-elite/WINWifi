@@ -95,6 +95,13 @@ from this repository's official Releases page before proceeding.
 - Microsoft Edge WebView2 Runtime (the installer includes Microsoft's official
   bootstrapper when it is needed)
 
+The app can enumerate more than one Windows Wi-Fi adapter. Choose the adapter
+from the selector in the app; the Hardware screen reports the selected
+adapter's available monitor-mode result and reason. Adapter and driver
+capabilities vary by PC, so features requiring raw 802.11 capture may be
+unavailable even when normal WLAN scanning works. The app does not assume a
+specific chipset or manufacturer.
+
 Live scans work without an active Wi-Fi connection. Raw monitor-mode/EAPOL
 capture is optional and requires Npcap plus an adapter and driver that support
 802.11 monitor mode. The app reports that capability honestly when unavailable.

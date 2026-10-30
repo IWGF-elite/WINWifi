@@ -1871,7 +1871,7 @@ export default function App() {
         {/* TAB 11: Hardware & Diagnostics */}
         {activeTab === 'devices' && (
           <HardwareDiagnostics
-            adapter={adapters[0]}
+            adapter={adapters.find(adapter => adapter.id === selectedAdapterId) ?? adapters[0]}
             uiMode={uiMode}
             dataSourceProfile={dataSourceProfile}
             bridgeState={bridgeState}

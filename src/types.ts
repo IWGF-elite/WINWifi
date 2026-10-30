@@ -58,6 +58,7 @@ export interface WifiAdapter {
   driverVersion: string;
   supportedBands: FrequencyBand[];
   monitorModeSupported: boolean;
+  monitorModeReason?: string;
   packetInjectionSupported: boolean;
   currentChannel: number;
   isChannelHopping: boolean;
